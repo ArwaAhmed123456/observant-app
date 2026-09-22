@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "Observant Guard & Patrol",
+    "slug": "observant-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.observant.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Observant requires camera access to scan security checkpoint QR codes and attach photos to incident reports.",
+        "NSLocationWhenInUseUsageDescription": "Observant uses your location to verify security guard checkpoint patrols.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Observant uses location tracking during active security patrol tours."
+      }
+    },
+    "android": {
+      "package": "com.observant.app",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundColor": "#090d16"
+      },
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "VIBRATE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Observant to access your camera to scan QR codes and capture incident photos."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Observant to use your location for security patrol verification."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "39c51413-0f88-44ea-9c4d-21ce3430dd45"
+      }
+    },
+    "owner": "hayat123a"
+  }
+}
