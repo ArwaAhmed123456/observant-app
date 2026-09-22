@@ -10,6 +10,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.observant.app",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Observant requires camera access to scan security checkpoint QR codes and attach photos to incident reports.",
         "NSLocationWhenInUseUsageDescription": "Observant uses your location to verify security guard checkpoint patrols.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Observant uses location tracking during active security patrol tours."
