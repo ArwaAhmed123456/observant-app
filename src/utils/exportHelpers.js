@@ -84,18 +84,10 @@ export const openPrintablePDF = ({
           align-items: center;
           gap: 12px;
         }
-        .logo-shield {
-          width: 36px;
-          height: 36px;
-          background: #0f172a;
-          color: #10b981;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          border-radius: 6px;
-          font-weight: 800;
-          font-size: 18px;
-          letter-spacing: -0.5px;
+        .logo-img {
+          height: 40px;
+          width: auto;
+          object-fit: contain;
         }
         .logo-title {
           font-size: 18px;
@@ -261,7 +253,7 @@ export const openPrintablePDF = ({
 
       <div class="header">
         <div class="logo-block">
-          <div class="logo-shield">⛨</div>
+          <img src="${window.location.origin}/logo.png" alt="Observant" class="logo-img" />
           <div>
             <div class="logo-title">OBSERVANT SECURITY GROUP</div>
             <div class="logo-sub">${companyAddress}</div>

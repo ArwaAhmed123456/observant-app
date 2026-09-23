@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  Shield,
   Smartphone,
   LayoutDashboard,
   Columns2,
@@ -32,9 +31,11 @@ export const Header = ({ viewMode, setViewMode }) => {
   return (
     <header className="top-bar">
       <div className="brand-section">
-        <div className="brand-badge">
-          <Shield size={22} />
-        </div>
+        <img
+          src="/logo.png"
+          alt="Observant"
+          className="brand-logo"
+        />
         <div className="brand-text">
           <h1>
             OBSERVANT <span className="brand-tag">OPS v2.4</span>

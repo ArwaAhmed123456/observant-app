@@ -89,8 +89,9 @@ export const GuardDashboardScreen = ({
       <View style={styles.topBar}>
         <View style={styles.guardProfile}>
           <Image
-            source={{ uri: currentUser.avatar }}
-            style={styles.avatar}
+            source={require('../../../assets/logo.png')}
+            style={styles.appLogo}
+            resizeMode="contain"
           />
           <View>
             <Text style={styles.guardName}>{currentUser.name}</Text>
@@ -292,6 +293,10 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 2,
     borderColor: '#38bdf8'
+  },
+  appLogo: {
+    width: 110,
+    height: 36
   },
   guardName: {
     fontSize: 16,

@@ -7,8 +7,7 @@ import {
   ScrollView,
   Image,
   Alert
-} from 'react-native';
-import {
+} from 'react-native';import {
   ShieldAlert,
   Building2,
   Users,
@@ -61,10 +60,11 @@ export const ManagerDashboardScreen = () => {
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Top Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Supervisor Command Console</Text>
-          <Text style={styles.headerSubtitle}>Live Multi-Site Operations Center</Text>
-        </View>
+        <Image
+          source={require('../../../assets/logo.png')}
+          style={styles.appLogo}
+          resizeMode="contain"
+        />
         <View style={styles.liveTag}>
           <Radio color="#10b981" size={14} />
           <Text style={styles.liveTagText}>DISPATCH LIVE</Text>
@@ -208,6 +208,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 45,
     paddingBottom: 16
+  },
+  appLogo: {
+    width: 110,
+    height: 36
   },
   headerTitle: {
     fontSize: 16,
