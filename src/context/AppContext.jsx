@@ -31,6 +31,7 @@ export function AppProvider({ children }) {
   const [alerts, setAlerts]               = useState([]);
   const [rosters, setRosters]             = useState([]);
   const [rosterTemplates, setRosterTemplates] = useState([]);
+  const [auditLogs, setAuditLogs]         = useState([]);
 
   // ── Live timers / UI state ─────────────────────────────────────────────────
   const [activeCheckCall, setActiveCheckCall]   = useState(null);  // pending check call awaiting guard response
@@ -48,7 +49,7 @@ export function AppProvider({ children }) {
   // ─── Load all data from AsyncStorage ──────────────────────────────────────
   const loadAll = useCallback(async () => {
     const [
-      u, s, cp, ss, cc, ps, pc, rpl, al, ro, rt, uid
+      u, s, cp, ss, cc, ps, pc, rpl, al, ro, rt, uid, aud
     ] = await Promise.all([
       load(KEYS.USERS),
       load(KEYS.SITES),
@@ -62,6 +63,7 @@ export function AppProvider({ children }) {
       load(KEYS.SHIFT_ROSTERS),
       load(KEYS.ROSTER_TEMPLATES),
       load(KEYS.CURRENT_USER_ID),
+      load(KEYS.AUDIT_LOGS),
     ]);
 
     setUsers(u || []);
@@ -75,6 +77,7 @@ export function AppProvider({ children }) {
     setAlerts(al || []);
     setRosters(ro || []);
     setRosterTemplates(rt || []);
+    setAuditLogs(aud || []);
 
     if (uid && u) {
       const found = (u || []).find(x => x.id === uid);
@@ -96,13 +99,35 @@ export function AppProvider({ children }) {
     return () => sub.remove();
   });
 
+  // ─── Audit Log ────────────────────────────────────────────────────────────
+  const addAuditLog = useCallback(async ({ action, actorName, actorRole, targetName, details, severity = 'info' }) => {
+    const newEntry = {
+      id: `aud_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      action,
+      actorName: actorName || currentUser?.name || 'System',
+      actorRole: actorRole || currentUser?.role || 'system',
+      targetName: targetName || '—',
+      details: details || '',
+      severity,
+      timestamp: new Date().toISOString(),
+    };
+    const current = await load(KEYS.AUDIT_LOGS) || [];
+    const updated = [newEntry, ...current];
+    await save(KEYS.AUDIT_LOGS, updated);
+    setAuditLogs(updated);
+    return newEntry;
+  }, [currentUser]);
+
   // ─── Auth ─────────────────────────────────────────────────────────────────
   const login = useCallback(async (email, password) => {
     const allUsers = await load(KEYS.USERS);
     const user = (allUsers || []).find(
       u => u.email.toLowerCase() === email.toLowerCase().trim() && u.password === password
     );
-    if (!user) return { success: false, error: 'Invalid email or password' };
+    if (!user) return { success: false, error: 'Incorrect email or password.' };
+    if (user.status === 'inactive') {
+      return { success: false, error: 'Your account has been deactivated. Please contact Super Admin.' };
+    }
     setCurrentUser(user);
     await save(KEYS.CURRENT_USER_ID, user.id);
     return { success: true, user };
@@ -117,6 +142,143 @@ export function AppProvider({ children }) {
     setShiftEndWarning(false);
     await save(KEYS.CURRENT_USER_ID, null);
   }, []);
+
+  // ─── Super Admin User Management ──────────────────────────────────────────
+  const createUser = useCallback(async (userData) => {
+    const allUsers = await load(KEYS.USERS) || [];
+    const normalizedEmail = (userData.email || '').trim().toLowerCase();
+    if (allUsers.some(u => u.email.toLowerCase() === normalizedEmail)) {
+      return { success: false, error: 'An account with this email address already exists.' };
+    }
+    const newUser = {
+      id: `u_${Date.now()}`,
+      name: userData.name.trim(),
+      email: normalizedEmail,
+      password: userData.password || 'welcome123',
+      role: userData.role || 'guard',
+      status: userData.status || 'active',
+      badgeNumber: userData.badgeNumber || `SG-${Math.floor(1000 + Math.random() * 9000)}`,
+      phone: userData.phone || '',
+      siteId: userData.role === 'guard' ? userData.siteId : undefined,
+      siteIds: userData.role === 'manager' ? (userData.siteIds || [userData.siteId].filter(Boolean)) : undefined,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [newUser, ...allUsers];
+    await save(KEYS.USERS, updated);
+    setUsers(updated);
+
+    await addAuditLog({
+      action: 'ACCOUNT_CREATED',
+      targetName: `${newUser.name} (${newUser.badgeNumber})`,
+      details: `Created new ${newUser.role.toUpperCase()} account with email ${newUser.email}. Assigned site: ${userData.siteId || (userData.siteIds && userData.siteIds.join(', ')) || 'None'}.`,
+      severity: 'info',
+    });
+
+    return { success: true, user: newUser };
+  }, [addAuditLog]);
+
+  const updateUser = useCallback(async (userId, updates) => {
+    const allUsers = await load(KEYS.USERS) || [];
+    const target = allUsers.find(u => u.id === userId);
+    if (!target) return { success: false, error: 'User not found' };
+
+    const updatedList = allUsers.map(u => (u.id === userId ? { ...u, ...updates } : u));
+    await save(KEYS.USERS, updatedList);
+    setUsers(updatedList);
+    if (currentUser?.id === userId) {
+      setCurrentUser(prev => ({ ...prev, ...updates }));
+    }
+
+    await addAuditLog({
+      action: 'ACCOUNT_UPDATED',
+      targetName: `${target.name} (${target.badgeNumber})`,
+      details: `Account fields modified: ${Object.keys(updates).join(', ')}.`,
+      severity: 'info',
+    });
+
+    return { success: true };
+  }, [currentUser, addAuditLog]);
+
+  const toggleUserStatus = useCallback(async (userId) => {
+    const allUsers = await load(KEYS.USERS) || [];
+    const target = allUsers.find(u => u.id === userId);
+    if (!target) return { success: false, error: 'User not found' };
+    const newStatus = target.status === 'inactive' ? 'active' : 'inactive';
+
+    const updatedList = allUsers.map(u => (u.id === userId ? { ...u, status: newStatus } : u));
+    await save(KEYS.USERS, updatedList);
+    setUsers(updatedList);
+
+    await addAuditLog({
+      action: newStatus === 'inactive' ? 'ACCOUNT_DEACTIVATED' : 'ACCOUNT_ACTIVATED',
+      targetName: `${target.name} (${target.badgeNumber})`,
+      details: `Account status updated to ${newStatus.toUpperCase()}.`,
+      severity: newStatus === 'inactive' ? 'warning' : 'info',
+    });
+
+    return { success: true, status: newStatus };
+  }, [addAuditLog]);
+
+  const deleteUser = useCallback(async (userId) => {
+    const allUsers = await load(KEYS.USERS) || [];
+    const target = allUsers.find(u => u.id === userId);
+    if (!target) return { success: false, error: 'User not found' };
+
+    const updatedList = allUsers.filter(u => u.id !== userId);
+    await save(KEYS.USERS, updatedList);
+    setUsers(updatedList);
+
+    await addAuditLog({
+      action: 'ACCOUNT_DELETED',
+      targetName: `${target.name} (${target.badgeNumber})`,
+      details: `Account permanently removed from system database. Role: ${target.role}.`,
+      severity: 'warning',
+    });
+
+    return { success: true };
+  }, [addAuditLog]);
+
+  const updatePassword = useCallback(async (userId, oldPassword, newPassword) => {
+    const allUsers = await load(KEYS.USERS) || [];
+    const target = allUsers.find(u => u.id === userId);
+    if (!target) return { success: false, error: 'User not found' };
+    if (target.password !== oldPassword) {
+      return { success: false, error: 'Current password does not match.' };
+    }
+    const updatedList = allUsers.map(u => (u.id === userId ? { ...u, password: newPassword } : u));
+    await save(KEYS.USERS, updatedList);
+    setUsers(updatedList);
+
+    await addAuditLog({
+      action: 'PASSWORD_CHANGED',
+      targetName: target.name,
+      details: `User changed password successfully.`,
+      severity: 'info',
+    });
+
+    return { success: true };
+  }, [addAuditLog]);
+
+  const resetPasswordWithCode = useCallback(async (email, code, newPassword) => {
+    const allUsers = await load(KEYS.USERS) || [];
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    const target = allUsers.find(u => u.email.toLowerCase() === normalizedEmail);
+    if (!target) {
+      return { success: false, error: 'No account with this email address exists.' };
+    }
+    const updatedList = allUsers.map(u => (u.id === target.id ? { ...u, password: newPassword } : u));
+    await save(KEYS.USERS, updatedList);
+    setUsers(updatedList);
+
+    await addAuditLog({
+      action: 'PASSWORD_RESET',
+      targetName: target.name,
+      details: `Account password was reset using verification code.`,
+      severity: 'info',
+    });
+
+    return { success: true };
+  }, [addAuditLog]);
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
   const clearAllTimers = () => {
@@ -252,7 +414,7 @@ export function AppProvider({ children }) {
     }, CHECK_CALL_WINDOW_MS);
   }, []);
 
-  const respondToCheckCall = useCallback(async (checkCallId, response, note = null) => {
+  const respondToCheckCall = useCallback(async (checkCallId, response, note = null, extra = {}) => {
     if (checkCallExpireRef.current) {
       clearTimeout(checkCallExpireRef.current);
       checkCallExpireRef.current = null;
@@ -262,9 +424,40 @@ export function AppProvider({ children }) {
     const cc = allCC.find(c => c.id === checkCallId);
     if (!cc) return;
 
+    const guard = users.find(u => u.id === cc.guardId);
+    const site  = sites.find(s => s.id === cc.siteId);
+
+    // Geofence verification
+    let outsideGeofence = false;
+    let distanceMeters = null;
+    if (extra?.location && site?.latitude && site?.longitude) {
+      distanceMeters = getDistanceFromLatLonInMeters(
+        extra.location.latitude,
+        extra.location.longitude,
+        site.latitude,
+        site.longitude
+      );
+      const maxRadius = site.geofenceRadiusMeters || 500;
+      if (distanceMeters != null && distanceMeters > maxRadius) {
+        outsideGeofence = true;
+      }
+    }
+
     const updated = allCC.map(c =>
       c.id === checkCallId
-        ? { ...c, respondedAt: new Date().toISOString(), response, note }
+        ? {
+            ...c,
+            respondedAt: new Date().toISOString(),
+            response,
+            note,
+            category: extra?.category || null,
+            photoUri: extra?.photoUri || null,
+            location: extra?.location || null,
+            outsideGeofence,
+            distanceMeters,
+            manuallyLogged: !!extra?.isManual,
+            loggedBy: extra?.isManual ? 'Manager' : undefined,
+          }
         : c
     );
     await save(KEYS.CHECK_CALLS, updated);
@@ -281,16 +474,38 @@ export function AppProvider({ children }) {
     await save(KEYS.SHIFT_SESSIONS, sessionUpdated);
     setShiftSessions(sessionUpdated);
 
-    if (response === 'no') {
-      // Alert manager
-      const guard = users.find(u => u.id === cc.guardId);
-      const site  = sites.find(s => s.id === cc.siteId);
+    // If outside geofence, send warning alert to manager
+    if (outsideGeofence) {
       await addAlert({
-        type: 'check_call_issue',
+        type: 'geofence_warning',
+        severity: 'issue',
         guardId: cc.guardId,
         siteId: cc.siteId,
-        message: `⚠️ ${guard?.name || 'Guard'} reported an issue at ${site?.name || 'site'} — ${formatTime(new Date())}`,
+        title: `⚠️ Out-of-Bounds Check Call — ${guard?.name || 'Guard'}`,
+        message: `${guard?.name || 'Guard'} responded ${distanceMeters}m outside the perimeter for ${site?.name || 'Site'}. Geofence limit: ${site?.geofenceRadiusMeters || 500}m.`,
+      });
+    }
+
+    if (response === 'no') {
+      // Alert manager for issue
+      const catLabel = extra?.category ? `[${extra.category}] ` : '';
+      await addAlert({
+        type: 'check_call_issue',
+        severity: 'issue',
+        guardId: cc.guardId,
+        siteId: cc.siteId,
+        title: `⚠️ Check Call Issue — ${guard?.name || 'Guard'}`,
+        message: `${catLabel}${guard?.name || 'Guard'} reported an issue at ${site?.name || 'site'}: ${note || 'No notes provided'}.`,
         note,
+        category: extra?.category,
+        photoUri: extra?.photoUri,
+      });
+
+      await addAuditLog({
+        action: 'ISSUE_REPORTED',
+        targetName: `${guard?.name} (${site?.name})`,
+        details: `Issue reported during check call: ${catLabel}${note || 'No details'}.`,
+        severity: 'warning',
       });
     }
 
@@ -299,7 +514,104 @@ export function AppProvider({ children }) {
     if (session && !session.bookedOffAt) {
       startCheckCallTimer(session);
     }
-  }, [users, sites, addAlert, startCheckCallTimer]);
+  }, [users, sites, addAlert, addAuditLog, startCheckCallTimer]);
+
+  // ─── Manual Logs by Manager ───────────────────────────────────────────────
+  const addManualCheckCall = useCallback(async ({ guardId, siteId, response = 'yes', note = '' }) => {
+    const allCC = await load(KEYS.CHECK_CALLS) || [];
+    const guard = users.find(u => u.id === guardId);
+    const site  = sites.find(s => s.id === siteId);
+    const now   = new Date().toISOString();
+
+    const newCC = {
+      id: `cc_manual_${Date.now()}`,
+      guardId,
+      siteId,
+      firedAt: now,
+      respondedAt: now,
+      response,
+      note,
+      manuallyLogged: true,
+      loggedBy: 'Manager',
+      managerId: currentUser?.id,
+      managerName: currentUser?.name,
+    };
+    const updated = [newCC, ...allCC];
+    await save(KEYS.CHECK_CALLS, updated);
+    setCheckCalls(updated);
+
+    await addAuditLog({
+      action: 'MANUAL_LOG_ENTERED',
+      targetName: `${guard?.name || 'Guard'} (${site?.name || 'Site'})`,
+      details: `Manager ${currentUser?.name} manually recorded check call (${response === 'yes' ? 'All Okay' : 'Issue'}). Note: ${note || 'None'}.`,
+      severity: 'warning',
+    });
+
+    return newCC;
+  }, [users, sites, currentUser, addAuditLog]);
+
+  const addManualPatrol = useCallback(async ({ guardId, siteId, note = '', startedAt, finishedAt }) => {
+    const allPS = await load(KEYS.PATROL_SESSIONS) || [];
+    const guard = users.find(u => u.id === guardId);
+    const site  = sites.find(s => s.id === siteId);
+    const now   = new Date().toISOString();
+
+    const newPatrol = {
+      id: `patrol_manual_${Date.now()}`,
+      guardId,
+      siteId,
+      startedAt: startedAt || now,
+      finishedAt: finishedAt || now,
+      type: 'scheduled',
+      note,
+      manuallyLogged: true,
+      loggedBy: 'Manager',
+      managerId: currentUser?.id,
+      managerName: currentUser?.name,
+    };
+    const updated = [newPatrol, ...allPS];
+    await save(KEYS.PATROL_SESSIONS, updated);
+    setPatrolSessions(updated);
+
+    await addAuditLog({
+      action: 'MANUAL_LOG_ENTERED',
+      targetName: `${guard?.name || 'Guard'} (${site?.name || 'Site'})`,
+      details: `Manager ${currentUser?.name} manually recorded completed patrol tour. Note: ${note || 'None'}.`,
+      severity: 'warning',
+    });
+
+    return newPatrol;
+  }, [users, sites, currentUser, addAuditLog]);
+
+  // ─── Emergency SOS ────────────────────────────────────────────────────────
+  const triggerSOS = useCallback(async ({ location, note } = {}) => {
+    const guard = currentUser;
+    const site = sites.find(s => s.id === guard?.siteId);
+    const now = new Date().toISOString();
+    const locText = location ? `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}` : (site?.address || 'Site perimeter');
+
+    const alert = await addAlert({
+      type: 'sos',
+      severity: 'urgent',
+      isUrgent: true,
+      guardId: guard?.id,
+      siteId: guard?.siteId,
+      title: `🚨 SOS EMERGENCY — ${guard?.name}`,
+      message: `URGENT: ${guard?.name} (${guard?.badgeNumber || 'Officer'}) triggered an emergency SOS alert at ${site?.name || 'Site'}. Location: ${locText}.`,
+      location: locText,
+      note: note || '',
+      createdAt: now,
+    });
+
+    await addAuditLog({
+      action: 'SOS_TRIGGERED',
+      targetName: `${guard?.name} (${site?.name || 'Unknown Site'})`,
+      details: `Emergency SOS triggered by ${guard?.name}. Location: ${locText}. Immediate supervisory response required.`,
+      severity: 'urgent',
+    });
+
+    return alert;
+  }, [currentUser, sites, addAlert, addAuditLog]);
 
   const expireCheckCall = useCallback(async (cc, session) => {
     const allCC = await load(KEYS.CHECK_CALLS) || [];
@@ -634,18 +946,23 @@ export function AppProvider({ children }) {
   const value = {
     // Auth
     currentUser, authLoading, login, logout,
+    updatePassword, resetPasswordWithCode,
     // Reference data
     users, sites, checkpoints, refreshUsers,
+    // Super Admin Account Management & Audit
+    auditLogs, addAuditLog, createUser, updateUser, toggleUserStatus, deleteUser,
     // Sessions
     shiftSessions, getGuardActiveSession, bookOn, bookOff,
     // Check calls
     checkCalls, activeCheckCall, respondToCheckCall,
-    getTodayCheckCalls,
+    getTodayCheckCalls, addManualCheckCall,
     // Patrol
     patrolSessions, activePatrol, antiIdlePrompt, dismissAntiIdlePrompt,
     startPatrol, captureCheckpoint, finishPatrol, getTodayPatrols,
     getPatrolCaptures, getSiteCheckpoints,
-    randomPromptLogs,
+    randomPromptLogs, addManualPatrol,
+    // Emergency SOS
+    triggerSOS,
     // Shift end
     shiftEndWarning, setShiftEndWarning,
     // Alerts
@@ -661,6 +978,22 @@ export function AppProvider({ children }) {
 }
 
 // ─── Utility functions ────────────────────────────────────────────────────────
+export function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
+  if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
+  const R = 6371e3; // metres
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return Math.round(R * c);
+}
+
 function todayDateStr() {
   return new Date().toISOString().slice(0, 10);
 }

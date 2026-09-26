@@ -1,0 +1,329 @@
+/**
+ * Patrol routes
+ *
+ * POST /api/patrols/start                   — start patrol session
+ * POST /api/patrols/:id/capture             — upload checkpoint photo
+ * POST /api/patrols/:id/finish              — finish patrol
+ * GET  /api/patrols                         — list patrol sessions
+ * GET  /api/patrols/:id                     — get one with captures
+ *
+ * Checkpoints (site config):
+ * GET  /api/patrols/checkpoints             — list checkpoints for a site
+ * POST /api/patrols/checkpoints             — add checkpoint (manager)
+ * PATCH /api/patrols/checkpoints/:id        — update checkpoint
+ * DELETE /api/patrols/checkpoints/:id       — delete checkpoint
+ *
+ * Random prompt log:
+ * POST /api/patrols/random-prompt           — log a random anti-idle prompt
+ * POST /api/patrols/random-prompt/:id/respond — mark as responded
+ */
+const router = require('express').Router();
+const { body } = require('express-validator');
+const {
+  PatrolSession, PatrolCheckpoint, RandomPromptLog, ShiftSession, User
+} = require('../models');
+const { authenticate, requireRole } = require('../middleware/auth');
+const validate     = require('../middleware/validate');
+const asyncHandler = require('../utils/asyncHandler');
+const { createAlert } = require('../services/alertService');
+const { uploadPatrolPhoto } = require('../services/cloudinary');
+
+// ════════════════════════════════════════════════════════════
+// CHECKPOINT CONFIG
+// ════════════════════════════════════════════════════════════
+
+router.get('/checkpoints', authenticate, asyncHandler(async (req, res) => {
+  const { siteId } = req.query;
+  if (!siteId) return res.status(400).json({ error: 'siteId query param required' });
+  const cps = await PatrolCheckpoint.find({
+    organisationId: req.user.organisationId,
+    siteId,
+    active: true,
+  }).sort({ order: 1 });
+  res.json({ checkpoints: cps });
+}));
+
+router.post('/checkpoints',
+  authenticate, requireRole('manager','admin'),
+  [
+    body('siteId').isMongoId(),
+    body('name').trim().notEmpty(),
+    body('order').optional().isInt({ min: 1 }),
+  ],
+  validate,
+  asyncHandler(async (req, res) => {
+    const { siteId, name, order, required, qrCode } = req.body;
+    const maxOrder = await PatrolCheckpoint.countDocuments({
+      organisationId: req.user.organisationId, siteId
+    });
+    const cp = await PatrolCheckpoint.create({
+      organisationId: req.user.organisationId,
+      siteId,
+      name,
+      order:    order || maxOrder + 1,
+      required: required !== false,
+      qrCode:   qrCode || null,
+    });
+    res.status(201).json({ checkpoint: cp });
+  })
+);
+
+router.patch('/checkpoints/:id',
+  authenticate, requireRole('manager','admin'),
+  asyncHandler(async (req, res) => {
+    const allowed = ['name','order','required','active','qrCode','location'];
+    const updates = {};
+    allowed.forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
+    const cp = await PatrolCheckpoint.findOneAndUpdate(
+      { _id: req.params.id, organisationId: req.user.organisationId },
+      updates, { new: true }
+    );
+    if (!cp) return res.status(404).json({ error: 'Checkpoint not found' });
+    res.json({ checkpoint: cp });
+  })
+);
+
+router.delete('/checkpoints/:id',
+  authenticate, requireRole('manager','admin'),
+  asyncHandler(async (req, res) => {
+    await PatrolCheckpoint.findOneAndUpdate(
+      { _id: req.params.id, organisationId: req.user.organisationId },
+      { active: false }
+    );
+    res.json({ message: 'Checkpoint deactivated' });
+  })
+);
+
+// ════════════════════════════════════════════════════════════
+// PATROL SESSIONS
+// ════════════════════════════════════════════════════════════
+
+// ── Start patrol ──────────────────────────────────────────────────────────────
+router.post('/start',
+  authenticate, requireRole('guard'),
+  [body('triggeredByAntiIdle').optional().isBoolean()],
+  asyncHandler(async (req, res) => {
+    const orgId   = req.user.organisationId;
+    const guardId = req.user._id;
+
+    const session = await ShiftSession.findOne({ organisationId: orgId, guardId, bookedOffAt: null });
+    if (!session) return res.status(400).json({ error: 'No active shift. Book on first.' });
+
+    // If already has an in-progress patrol, return it
+    const existing = await PatrolSession.findOne({
+      organisationId: orgId, guardId, status: 'in_progress'
+    });
+    if (existing) return res.json({ patrol: existing, alreadyActive: true });
+
+    const patrol = await PatrolSession.create({
+      organisationId:      orgId,
+      shiftSessionId:      session._id,
+      guardId,
+      siteId:              session.siteId,
+      startedAt:           new Date(),
+      triggeredByAntiIdle: req.body.triggeredByAntiIdle || false,
+    });
+
+    res.status(201).json({ patrol });
+  })
+);
+
+// ── Capture checkpoint photo ──────────────────────────────────────────────────
+router.post('/:id/capture',
+  authenticate, requireRole('guard'),
+  (req, res, next) => {
+    uploadPatrolPhoto(req, res, err => {
+      if (err) return res.status(400).json({ error: err.message });
+      next();
+    });
+  },
+  asyncHandler(async (req, res) => {
+    const { checkpointId, latitude, longitude } = req.body;
+
+    if (!req.file) return res.status(400).json({ error: 'Photo file required' });
+    if (!checkpointId) return res.status(400).json({ error: 'checkpointId required' });
+
+    const patrol = await PatrolSession.findOne({
+      _id: req.params.id,
+      organisationId: req.user.organisationId,
+      guardId: req.user._id,
+      status: 'in_progress',
+    });
+    if (!patrol) return res.status(404).json({ error: 'Active patrol not found' });
+
+    // Avoid duplicate capture for same checkpoint
+    if (patrol.capturedCheckpointIds.map(String).includes(checkpointId)) {
+      return res.status(409).json({ error: 'Checkpoint already captured' });
+    }
+
+    const capture = {
+      checkpointId,
+      photoUrl:   req.file.path,
+      publicId:   req.file.filename,
+      capturedAt: new Date(),
+      latitude:   latitude  ? parseFloat(latitude)  : null,
+      longitude:  longitude ? parseFloat(longitude) : null,
+    };
+
+    patrol.captures.push(capture);
+    patrol.capturedCheckpointIds.push(checkpointId);
+    await patrol.save();
+
+    res.json({ patrol, capture });
+  })
+);
+
+// ── Finish patrol ─────────────────────────────────────────────────────────────
+router.post('/:id/finish',
+  authenticate, requireRole('guard'),
+  [body('forceFinish').optional().isBoolean()],
+  asyncHandler(async (req, res) => {
+    const orgId   = req.user.organisationId;
+    const guardId = req.user._id;
+    const forceFinish = req.body.forceFinish || false;
+
+    const patrol = await PatrolSession.findOne({
+      _id: req.params.id, organisationId: orgId, guardId, status: 'in_progress'
+    });
+    if (!patrol) return res.status(404).json({ error: 'Active patrol not found' });
+
+    // Find required checkpoints for this site
+    const required = await PatrolCheckpoint.find({
+      organisationId: orgId,
+      siteId: patrol.siteId,
+      active: true,
+      required: true,
+    }).select('_id');
+
+    const requiredIds  = required.map(cp => cp._id.toString());
+    const capturedIds  = patrol.capturedCheckpointIds.map(String);
+    const missingIds   = requiredIds.filter(id => !capturedIds.includes(id));
+
+    if (missingIds.length > 0 && !forceFinish) {
+      return res.status(422).json({
+        incomplete: true,
+        missingCheckpointIds: missingIds,
+        message: `${missingIds.length} required checkpoint(s) not yet photographed.`,
+      });
+    }
+
+    const now    = new Date();
+    const status = missingIds.length > 0 ? 'incomplete' : 'complete';
+
+    patrol.finishedAt           = now;
+    patrol.status               = status;
+    patrol.missingCheckpointIds = missingIds;
+    await patrol.save();
+
+    // Update session patrol counter
+    await ShiftSession.findByIdAndUpdate(patrol.shiftSessionId, { $inc: { patrolCount: 1 } });
+
+    // Alert managers if incomplete
+    if (status === 'incomplete') {
+      const guard = await User.findById(guardId).select('name badgeNumber');
+      await createAlert({
+        organisationId: orgId,
+        siteId:   patrol.siteId,
+        guardId,
+        type:     'patrol_missing_checkpoints',
+        title:    '⚠️ Patrol finished with missing checkpoints',
+        message:  `${guard.name} finished a patrol with ${missingIds.length} checkpoint(s) missing.`,
+        refModel: 'PatrolSession',
+        refId:    patrol._id,
+      });
+      patrol.managerAlerted = true;
+      await patrol.save();
+    }
+
+    res.json({ patrol });
+  })
+);
+
+// ── List patrols ──────────────────────────────────────────────────────────────
+router.get('/',
+  authenticate,
+  asyncHandler(async (req, res) => {
+    const { guardId, siteId, status, sessionId, from, to, limit = 50, page = 1 } = req.query;
+    const orgId = req.user.organisationId;
+    const filter = { organisationId: orgId };
+
+    if (req.user.role === 'guard') filter.guardId = req.user._id;
+    else if (guardId) filter.guardId = guardId;
+
+    if (siteId)    filter.siteId    = siteId;
+    if (status)    filter.status    = status;
+    if (sessionId) filter.shiftSessionId = sessionId;
+    if (from || to) {
+      filter.startedAt = {};
+      if (from) filter.startedAt.$gte = new Date(from);
+      if (to)   filter.startedAt.$lte = new Date(to);
+    }
+
+    const [patrols, total] = await Promise.all([
+      PatrolSession.find(filter)
+        .sort({ startedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(Number(limit))
+        .populate('guardId', 'name badgeNumber')
+        .populate('siteId',  'name')
+        .select('-captures'),           // omit heavy captures array in list
+      PatrolSession.countDocuments(filter),
+    ]);
+
+    res.json({ patrols, total, page: Number(page), limit: Number(limit) });
+  })
+);
+
+// ── Get one patrol (with captures) ───────────────────────────────────────────
+router.get('/:id', authenticate, asyncHandler(async (req, res) => {
+  const patrol = await PatrolSession.findOne({
+    _id: req.params.id, organisationId: req.user.organisationId
+  })
+    .populate('guardId', 'name badgeNumber avatarUrl')
+    .populate('siteId',  'name address')
+    .populate('captures.checkpointId', 'name order');
+  if (!patrol) return res.status(404).json({ error: 'Patrol not found' });
+  res.json({ patrol });
+}));
+
+// ════════════════════════════════════════════════════════════
+// RANDOM PROMPT LOGS
+// ════════════════════════════════════════════════════════════
+
+router.post('/random-prompt',
+  authenticate, requireRole('guard'),
+  asyncHandler(async (req, res) => {
+    const orgId   = req.user.organisationId;
+    const guardId = req.user._id;
+    const session = await ShiftSession.findOne({ organisationId: orgId, guardId, bookedOffAt: null });
+    if (!session) return res.status(400).json({ error: 'No active session' });
+
+    const log = await RandomPromptLog.create({
+      organisationId: orgId,
+      shiftSessionId: session._id,
+      guardId,
+      siteId:         session.siteId,
+    });
+    res.status(201).json({ log });
+  })
+);
+
+router.post('/random-prompt/:id/respond',
+  authenticate, requireRole('guard'),
+  [body('patrolSessionId').optional().isMongoId()],
+  asyncHandler(async (req, res) => {
+    const log = await RandomPromptLog.findOneAndUpdate(
+      { _id: req.params.id, guardId: req.user._id, responded: false },
+      {
+        responded:       true,
+        respondedAt:     new Date(),
+        patrolSessionId: req.body.patrolSessionId || null,
+      },
+      { new: true }
+    );
+    if (!log) return res.status(404).json({ error: 'Prompt log not found or already responded' });
+    res.json({ log });
+  })
+);
+
+module.exports = router;

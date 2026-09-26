@@ -1,128 +1,336 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   Image, KeyboardAvoidingView, Platform, ScrollView,
-  ActivityIndicator, Alert
+  ActivityIndicator, Alert, Animated
 } from 'react-native';
 import { useApp } from '../../context/AppContext';
-import { T, LOGO } from '../../theme';
+import { COLORS, R, S, TYPE, shadows, inputStyle } from '../../theme';
+import { LOGO } from '../../theme';
+import { Eye, EyeOff, Mail, Lock, CheckCircle2 } from 'lucide-react-native';
+
+const STEPS = { LOGIN: 'login', FORGOT_SEND: 'forgot_send', FORGOT_VERIFY: 'forgot_verify' };
 
 export function LoginScreen() {
-  const { login } = useApp();
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [showPass, setShowPass] = useState(false);
+  const { login, resetPasswordWithCode } = useApp();
 
+  const [step, setStep]       = useState(STEPS.LOGIN);
+  const [email, setEmail]     = useState('');
+  const [password, setPass]   = useState('');
+  const [showPass, setShowPass] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState('');
+  const [loginSuccess, setLoginSuccess] = useState(false);
+
+  // Forgot password state
+  const [resetEmail, setResetEmail]   = useState('');
+  const [resetCode, setResetCode]     = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
+
+  // Shake animation for error
+  const shakeAnim = useRef(new Animated.Value(0)).current;
+  // Fade-in animation for card
+  const fadeAnim  = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const successScaleAnim = useRef(new Animated.Value(0.8)).current;
+  const successFadeAnim = useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim,  { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const shake = () => {
+    shakeAnim.setValue(0);
+    Animated.sequence([
+      Animated.timing(shakeAnim, { toValue: 10,  duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 8,   duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: -8,  duration: 50, useNativeDriver: true }),
+      Animated.timing(shakeAnim, { toValue: 0,   duration: 50, useNativeDriver: true }),
+    ]).start();
+  };
+
+  // ── Login ──────────────────────────────────────────────────────────────────
   const handleLogin = async () => {
+    setError('');
     if (!email.trim() || !password) {
-      Alert.alert('Missing fields', 'Please enter your email and password.');
+      setError('Please enter your work email and password.');
+      shake();
       return;
     }
     setLoading(true);
-    const result = await login(email, password);
-    setLoading(false);
+    const result = await login(email.trim(), password);
     if (!result.success) {
-      Alert.alert('Login Failed', result.error);
+      setLoading(false);
+      // Security standard: generic error without revealing whether username or password was wrong
+      setError(result.error && result.error.includes('deactivated')
+        ? result.error
+        : 'Incorrect email or password. Please verify your credentials and try again.');
+      shake();
+      return;
     }
-    // Navigation is handled in App.js via currentUser state
+
+    // Success transition
+    setLoginSuccess(true);
+    Animated.parallel([
+      Animated.spring(successScaleAnim, { toValue: 1, friction: 6, useNativeDriver: true }),
+      Animated.timing(successFadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }),
+    ]).start();
+    // On success: AppContext sets currentUser → App.js routes automatically
   };
 
+  // ── Forgot password — send code ────────────────────────────────────────────
+  const handleSendCode = async () => {
+    if (!resetEmail.trim()) { Alert.alert('Missing Email', 'Please enter your work email address.'); return; }
+    setResetLoading(true);
+    await new Promise(r => setTimeout(r, 600));
+    setResetLoading(false);
+    const demoCode = '492810';
+    setResetCode(demoCode);
+    setStep(STEPS.FORGOT_VERIFY);
+    Alert.alert(
+      'Verification Code Sent',
+      `A 6-digit password reset code was dispatched to ${resetEmail}.\n\nDemo Verification Code: ${demoCode}`
+    );
+  };
+
+  // ── Forgot password — verify + reset ──────────────────────────────────────
+  const handleResetPassword = async () => {
+    if (!resetCode || !newPassword) { Alert.alert('Missing Fields', 'Please enter the verification code and your new password.'); return; }
+    if (newPassword.length < 8) { Alert.alert('Password Too Short', 'Password must be at least 8 characters.'); return; }
+    setResetLoading(true);
+    const res = await resetPasswordWithCode(resetEmail, resetCode, newPassword);
+    setResetLoading(false);
+    if (!res.success) {
+      Alert.alert('Reset Failed', res.error || 'Unable to reset password.');
+      return;
+    }
+    setStep(STEPS.LOGIN);
+    Alert.alert('Password Updated', 'Your password has been reset successfully. Please sign in with your new credentials.');
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <KeyboardAvoidingView
       style={styles.root}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         {/* Logo */}
-        <View style={styles.logoWrap}>
+        <Animated.View style={[styles.logoWrap, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
           <Image source={LOGO} style={styles.logo} resizeMode="contain" />
-          {/* Brand accent bar below logo */}
           <View style={styles.logoBrand} />
-          <Text style={styles.tagline}>Security Guard Management</Text>
-        </View>
+          <Text style={styles.tagline}>Security & Patrol Intelligence</Text>
+        </Animated.View>
+
+        {/* Success Overlay Banner */}
+        {loginSuccess && (
+          <Animated.View style={[styles.successBanner, { opacity: successFadeAnim, transform: [{ scale: successScaleAnim }] }]}>
+            <CheckCircle2 color={COLORS.ok} size={28} />
+            <View>
+              <Text style={styles.successTitle}>Authenticated Successfully</Text>
+              <Text style={styles.successSub}>Routing to your operational terminal…</Text>
+            </View>
+          </Animated.View>
+        )}
 
         {/* Card */}
-        <View style={styles.card}>
-          <Text style={styles.heading}>Sign In</Text>
-          <Text style={styles.sub}>Use your work credentials to continue</Text>
+        <Animated.View style={[styles.card, { opacity: fadeAnim, transform: [{ translateX: shakeAnim }, { translateY: slideAnim }] }]}>
 
-          <Text style={styles.label}>Email Address</Text>
-          <TextInput
-            style={styles.input}
-            value={email}
-            onChangeText={setEmail}
-            placeholder="your@email.com"
-            placeholderTextColor="#475569"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+          {/* ── LOGIN ── */}
+          {step === STEPS.LOGIN && (
+            <>
+              <Text style={styles.heading}>Sign In</Text>
+              <Text style={styles.sub}>Enter your enterprise credentials</Text>
 
-          <Text style={styles.label}>Password</Text>
-          <View style={styles.passRow}>
-            <TextInput
-              style={[styles.input, { flex: 1, marginBottom: 0 }]}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="••••••••"
-              placeholderTextColor="#475569"
-              secureTextEntry={!showPass}
-              autoCapitalize="none"
-            />
-            <TouchableOpacity style={styles.showBtn} onPress={() => setShowPass(!showPass)}>
-              <Text style={styles.showTxt}>{showPass ? 'Hide' : 'Show'}</Text>
-            </TouchableOpacity>
-          </View>
+              {!!error && (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              )}
 
-          <TouchableOpacity
-            style={[styles.btn, loading && styles.btnDisabled]}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            {loading
-              ? <ActivityIndicator color="#fff" />
-              : <Text style={styles.btnTxt}>Sign In</Text>
-            }
-          </TouchableOpacity>
-        </View>
+              <Text style={styles.label}>Email Address / Username</Text>
+              <View style={styles.fieldRow}>
+                <Mail size={16} color={COLORS.textMuted} style={styles.fieldIcon} />
+                <TextInput
+                  style={[styles.fieldInput]}
+                  value={email} onChangeText={v => { setEmail(v); setError(''); }}
+                  placeholder="name@observant.com"
+                  placeholderTextColor={COLORS.textDisabled}
+                  keyboardType="email-address"
+                  autoCapitalize="none" autoCorrect={false}
+                />
+              </View>
 
-        {/* Demo credentials hint */}
-        <View style={styles.hintBox}>
-          <Text style={styles.hintTitle}>Demo Credentials</Text>
-          <Text style={styles.hint}>Manager: elena@observant.com / manager123</Text>
-          <Text style={styles.hint}>Guard:   ahmad@observant.com / guard123</Text>
-          <Text style={styles.hint}>Guard:   marcus@observant.com / guard123</Text>
-          <Text style={styles.hint}>Guard:   sofia@observant.com / guard123</Text>
-        </View>
+              <Text style={styles.label}>Password</Text>
+              <View style={styles.fieldRow}>
+                <Lock size={16} color={COLORS.textMuted} style={styles.fieldIcon} />
+                <TextInput
+                  style={[styles.fieldInput, { flex: 1 }]}
+                  value={password} onChangeText={v => { setPass(v); setError(''); }}
+                  placeholder="••••••••"
+                  placeholderTextColor={COLORS.textDisabled}
+                  secureTextEntry={!showPass}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity onPress={() => setShowPass(v => !v)} style={styles.eyeBtn}>
+                  {showPass
+                    ? <EyeOff size={18} color={COLORS.textMuted} />
+                    : <Eye    size={18} color={COLORS.textMuted} />
+                  }
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                onPress={() => { setStep(STEPS.FORGOT_SEND); setError(''); setResetEmail(email); }}
+                style={styles.forgotLink}
+              >
+                <Text style={styles.forgotLinkTxt}>Forgot password?</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.btn, (loading || loginSuccess) && styles.btnDisabled]}
+                onPress={handleLogin} disabled={loading || loginSuccess}
+              >
+                {loading
+                  ? <ActivityIndicator color={COLORS.white} />
+                  : <Text style={styles.btnTxt}>{loginSuccess ? 'Signing In…' : 'Sign In'}</Text>
+                }
+              </TouchableOpacity>
+            </>
+          )}
+
+          {/* ── FORGOT — send code ── */}
+          {step === STEPS.FORGOT_SEND && (
+            <>
+              <TouchableOpacity onPress={() => setStep(STEPS.LOGIN)} style={styles.backBtn}>
+                <Text style={styles.backBtnTxt}>← Back to sign in</Text>
+              </TouchableOpacity>
+              <Text style={styles.heading}>Reset Password</Text>
+              <Text style={styles.sub}>Enter your email to receive a 6-digit verification code.</Text>
+
+              <Text style={styles.label}>Email Address</Text>
+              <View style={styles.fieldRow}>
+                <Mail size={16} color={COLORS.textMuted} style={styles.fieldIcon} />
+                <TextInput
+                  style={styles.fieldInput}
+                  value={resetEmail} onChangeText={setResetEmail}
+                  placeholder="your@observant.com"
+                  placeholderTextColor={COLORS.textDisabled}
+                  keyboardType="email-address" autoCapitalize="none"
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.btn, resetLoading && styles.btnDisabled]}
+                onPress={handleSendCode} disabled={resetLoading}
+              >
+                {resetLoading
+                  ? <ActivityIndicator color={COLORS.white} />
+                  : <Text style={styles.btnTxt}>Send Reset Code</Text>
+                }
+              </TouchableOpacity>
+            </>
+          )}
+
+          {/* ── FORGOT — verify + new password ── */}
+          {step === STEPS.FORGOT_VERIFY && (
+            <>
+              <TouchableOpacity onPress={() => setStep(STEPS.FORGOT_SEND)} style={styles.backBtn}>
+                <Text style={styles.backBtnTxt}>← Back</Text>
+              </TouchableOpacity>
+              <Text style={styles.heading}>Enter Verification Code</Text>
+              <Text style={styles.sub}>Enter the 6-digit code sent to your email.</Text>
+
+              <Text style={styles.label}>6-Digit Code</Text>
+              <TextInput
+                style={[inputStyle, styles.codeInput]}
+                value={resetCode} onChangeText={setResetCode}
+                placeholder="000000" placeholderTextColor={COLORS.textDisabled}
+                keyboardType="number-pad" maxLength={6}
+              />
+
+              <Text style={styles.label}>New Password</Text>
+              <TextInput
+                style={[inputStyle, { marginBottom: S.xl }]}
+                value={newPassword} onChangeText={setNewPassword}
+                placeholder="Min 8 characters" placeholderTextColor={COLORS.textDisabled}
+                secureTextEntry autoCapitalize="none"
+              />
+
+              <TouchableOpacity
+                style={[styles.btn, resetLoading && styles.btnDisabled]}
+                onPress={handleResetPassword} disabled={resetLoading}
+              >
+                {resetLoading
+                  ? <ActivityIndicator color={COLORS.white} />
+                  : <Text style={styles.btnTxt}>Set New Password</Text>
+                }
+              </TouchableOpacity>
+            </>
+          )}
+        </Animated.View>
+
+        {/* Demo hint */}
+        <Animated.View style={[styles.hintBox, { opacity: fadeAnim }]}>
+          <Text style={styles.hintTitle}>Demo Credentials (Auto-Role Routing)</Text>
+          <Text style={styles.hint}>Super Admin: admin@observant.com / admin123</Text>
+          <Text style={styles.hint}>Manager:     elena@observant.com / manager123</Text>
+          <Text style={styles.hint}>Guard:       ahmad@observant.com / guard123</Text>
+        </Animated.View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  root:   { flex: 1, backgroundColor: T.bgRoot },
-  scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-  logoWrap: { alignItems: 'center', marginBottom: 32 },
-  logo:   { width: 200, height: 66 },
-  logoBrand: { width: 60, height: 3, backgroundColor: T.brand, borderRadius: 2, marginTop: 10, marginBottom: 4 },
-  tagline:{ color: T.textMuted, fontSize: 13, marginTop: 4, letterSpacing: 0.5 },
-  card:   { backgroundColor: T.bgCard, borderRadius: T.radiusLg, padding: 24, borderWidth: 1, borderColor: T.borderSubtle },
-  heading:{ color: T.textPrimary, fontSize: 22, fontWeight: '800', marginBottom: 4 },
-  sub:    { color: T.textMuted, fontSize: 13, marginBottom: 24 },
-  label:  { color: T.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
-  input:  {
-    backgroundColor: T.bgInput, borderWidth: 1, borderColor: T.borderMid,
-    borderRadius: T.radiusSm + 2, paddingHorizontal: 14, paddingVertical: 12,
-    color: T.textPrimary, fontSize: 15, marginBottom: 16,
+  root:       { flex: 1, backgroundColor: COLORS.bgRoot },
+  scroll:     { flexGrow: 1, justifyContent: 'center', padding: S.xl },
+  logoWrap:   { alignItems: 'center', marginBottom: S.xxxl },
+  logo:       { width: 200, height: 66 },
+  logoBrand:  { width: 60, height: 3, backgroundColor: COLORS.brand, borderRadius: 2, marginTop: S.md, marginBottom: S.sm },
+  tagline:    { color: COLORS.textMuted, fontSize: 13, letterSpacing: 0.5 },
+  successBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: S.md,
+    backgroundColor: COLORS.okBg,
+    borderWidth: 1,
+    borderColor: COLORS.okBorder,
+    borderRadius: R.lg,
+    padding: S.lg,
+    marginBottom: S.lg,
+    ...shadows.md,
   },
-  passRow:  { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 8 },
-  showBtn:  { paddingHorizontal: 12, paddingVertical: 12 },
-  showTxt:  { color: T.accentBlue, fontSize: 13, fontWeight: '600' },
-  btn:      { backgroundColor: T.brand, borderRadius: T.radiusSm + 2, paddingVertical: 14, alignItems: 'center' },
-  btnDisabled: { opacity: 0.6 },
-  btnTxt:   { color: '#fff', fontSize: 16, fontWeight: '800' },
-  hintBox:  { marginTop: 24, backgroundColor: T.bgCard, borderRadius: T.radiusMd, padding: 16, borderWidth: 1, borderColor: T.borderSubtle },
-  hintTitle:{ color: T.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 8 },
-  hint:     { color: T.textDisabled, fontSize: 12, marginBottom: 3, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+  successTitle: { color: COLORS.white, fontSize: 15, fontWeight: '800' },
+  successSub:   { color: COLORS.ok, fontSize: 12, fontWeight: '600', marginTop: 2 },
+  card:       { backgroundColor: COLORS.bgCard, borderRadius: R.xl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.borderSubtle, ...shadows.md, marginBottom: S.xl },
+  heading:    { ...TYPE.title, marginBottom: S.xs },
+  sub:        { color: COLORS.textMuted, fontSize: 13, marginBottom: S.xl },
+  errorBox:   { backgroundColor: COLORS.missedBg, borderWidth: 1, borderColor: COLORS.missedBorder, borderRadius: R.sm, padding: S.md, marginBottom: S.md },
+  errorText:  { color: COLORS.missed, fontSize: 13, fontWeight: '600' },
+  label:      { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: S.sm, textTransform: 'uppercase', letterSpacing: 0.5 },
+  fieldRow:   { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.borderMid, borderRadius: R.md, paddingHorizontal: S.md, marginBottom: S.lg },
+  fieldIcon:  { marginRight: S.sm },
+  fieldInput: { flex: 1, color: COLORS.textPrimary, fontSize: 15, paddingVertical: S.md },
+  eyeBtn:     { padding: S.sm },
+  forgotLink: { alignSelf: 'flex-end', marginTop: -S.sm, marginBottom: S.xl },
+  forgotLinkTxt: { color: COLORS.info, fontSize: 13, fontWeight: '600' },
+  btn:        { backgroundColor: COLORS.brand, borderRadius: R.md, paddingVertical: 14, alignItems: 'center', ...shadows.brand },
+  btnDisabled:{ opacity: 0.6 },
+  btnTxt:     { color: COLORS.white, fontSize: 16, fontWeight: '800' },
+  backBtn:    { marginBottom: S.lg },
+  backBtnTxt: { color: COLORS.info, fontSize: 13, fontWeight: '600' },
+  codeInput:  { fontSize: 24, letterSpacing: 8, textAlign: 'center', marginBottom: S.lg },
+  hintBox:    { backgroundColor: COLORS.bgCard, borderRadius: R.md, padding: S.lg, borderWidth: 1, borderColor: COLORS.borderSubtle },
+  hintTitle:  { color: COLORS.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: S.sm },
+  hint:       { color: COLORS.textDisabled, fontSize: 12, marginBottom: 3, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
 });

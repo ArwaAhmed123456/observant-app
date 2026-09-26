@@ -95,6 +95,8 @@ export function ManagerReportsScreen() {
             checkCallResult: cc.response === 'yes' ? '✓ Yes' : cc.response === 'missed' ? '✗ Missed' : cc.response === 'no' ? '⚠ Issue' : '—',
             note: cc.note || '',
             date: formatDate(cc.firedAt),
+            manuallyLogged: !!cc.manuallyLogged,
+            loggedBy: cc.loggedBy,
           });
         });
     }
@@ -126,6 +128,8 @@ export function ManagerReportsScreen() {
             missingCheckpoints: (ps.missingCheckpoints || []).map(id => checkpoints.find(cp => cp.id === id)?.name || id).join(', '),
             photos: captures,
             date: formatDate(ps.startedAt),
+            manuallyLogged: !!ps.manuallyLogged,
+            loggedBy: ps.loggedBy,
           });
         });
     }
@@ -201,6 +205,12 @@ export function ManagerReportsScreen() {
               </View>
               <Text style={styles.rowDate}>{row.date}</Text>
             </View>
+
+            {row.manuallyLogged && (
+              <View style={styles.manualLogBadge}>
+                <Text style={styles.manualLogBadgeTxt}>📝 Manually logged by Manager</Text>
+              </View>
+            )}
 
             {cols.guardName && <Text style={styles.rowGuard}>{row.guardName} <Text style={styles.rowBadge}>· {row.badgeNumber}</Text></Text>}
             {cols.site && <Text style={styles.rowSite}>{row.site}</Text>}
@@ -388,6 +398,8 @@ const styles = StyleSheet.create({
   rowDetail:    { color: '#94a3b8', fontSize: 12, marginTop: 3 },
   rowResult:    { fontSize: 13, fontWeight: '700', marginTop: 4 },
   rowNote:      { color: '#64748b', fontSize: 11, marginTop: 4, fontStyle: 'italic' },
+  manualLogBadge: { backgroundColor: 'rgba(56,189,248,0.12)', borderWidth: 1, borderColor: '#38bdf8', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start', marginVertical: 4 },
+  manualLogBadgeTxt: { color: '#38bdf8', fontSize: 11, fontWeight: '700' },
   emptyState:   { alignItems: 'center', marginTop: 60, gap: 14 },
   emptyTxt:     { color: '#475569', fontSize: 14 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
