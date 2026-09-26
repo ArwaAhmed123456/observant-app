@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Image, Alert, Modal
+  Alert, Modal
 } from 'react-native';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { MapPin, Clock, CheckCircle, AlertTriangle, LogIn, LogOut, Bell } from 'lucide-react-native';
+import { AppHeader } from '../components/AppHeader';
+import { T } from '../../theme';
 
 export function GuardHomeScreen({ navigation }) {
   const {
@@ -74,15 +76,14 @@ export function GuardHomeScreen({ navigation }) {
   return (
     <View style={styles.root}>
       {/* Header */}
-      <View style={styles.header}>
-        <Image source={require('../../../assets/logo.png')} style={styles.logo} resizeMode="contain" />
+      <AppHeader right={
         <TouchableOpacity onPress={() => Alert.alert('Sign Out', 'Are you sure?', [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Sign Out', style: 'destructive', onPress: logout },
         ])}>
-          <LogOut color="#64748b" size={20} />
+          <LogOut color={T.textMuted} size={20} />
         </TouchableOpacity>
-      </View>
+      } />
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Greeting */}
@@ -260,16 +261,14 @@ function getShiftDuration(bookedOnAt) {
 }
 
 const styles = StyleSheet.create({
-  root:    { flex: 1, backgroundColor: '#090d16' },
-  header:  { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12 },
-  logo:    { width: 120, height: 38 },
+  root:    { flex: 1, backgroundColor: T.bgRoot },
   scroll:  { flex: 1 },
   scrollContent: { padding: 20, paddingTop: 8 },
-  greeting:{ color: '#94a3b8', fontSize: 14, marginTop: 4 },
-  name:    { color: '#fff', fontSize: 24, fontWeight: '800', marginTop: 2 },
-  badge:   { color: '#64748b', fontSize: 13, marginTop: 4 },
-  clock:   { color: '#10b981', fontSize: 36, fontWeight: '800', marginTop: 16, letterSpacing: 1 },
-  date:    { color: '#64748b', fontSize: 13, marginBottom: 16 },
+  greeting:{ color: T.textSecondary, fontSize: 14, marginTop: 4 },
+  name:    { color: T.textPrimary, fontSize: 24, fontWeight: '800', marginTop: 2 },
+  badge:   { color: T.textMuted, fontSize: 13, marginTop: 4 },
+  clock:   { color: T.brand, fontSize: 36, fontWeight: '800', marginTop: 16, letterSpacing: 1 },
+  date:    { color: T.textMuted, fontSize: 13, marginBottom: 16 },
   warnBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(245,158,11,0.15)', borderWidth: 1, borderColor: '#f59e0b', borderRadius: 10, padding: 12, marginBottom: 12 },
   warnText:{ color: '#f59e0b', fontSize: 13, fontWeight: '600', flex: 1 },
   antiIdleCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(245,158,11,0.1)', borderWidth: 1, borderColor: '#f59e0b', borderRadius: 12, padding: 14, marginBottom: 12 },

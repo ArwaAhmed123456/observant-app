@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert
 } from 'react-native';
 import { useApp, formatTime } from '../../context/AppContext';
 import { LogOut, Bell, MapPin, CheckCircle, AlertTriangle, Clock, Users } from 'lucide-react-native';
+import { AppHeader } from '../components/AppHeader';
+import { T } from '../../theme';
 
 export function ManagerDashboardScreen({ navigation }) {
   const {
@@ -35,25 +37,24 @@ export function ManagerDashboardScreen({ navigation }) {
   return (
     <View style={styles.root}>
       {/* Header */}
-      <View style={styles.header}>
-        <Image source={require('../../../assets/logo.png')} style={styles.logo} resizeMode="contain" />
-        <View style={styles.headerRight}>
+      <AppHeader right={
+        <>
           <TouchableOpacity style={styles.alertBtn} onPress={() => setTab('alerts')}>
-            <Bell color={unread.length > 0 ? '#ef4444' : '#64748b'} size={22} />
+            <Bell color={unread.length > 0 ? T.missed : T.textMuted} size={22} />
             {unread.length > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{unread.length > 9 ? '9+' : unread.length}</Text>
               </View>
             )}
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => require('react-native').Alert.alert('Sign Out', 'Are you sure?', [
+          <TouchableOpacity onPress={() => Alert.alert('Sign Out', 'Are you sure?', [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Sign Out', style: 'destructive', onPress: logout },
           ])}>
-            <LogOut color="#64748b" size={20} />
+            <LogOut color={T.textMuted} size={20} />
           </TouchableOpacity>
-        </View>
-      </View>
+        </>
+      } />
 
       {/* Tabs */}
       <View style={styles.tabs}>
@@ -113,7 +114,12 @@ export function ManagerDashboardScreen({ navigation }) {
             const lastPatrol   = [...todayPatrols].sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))[0];
 
             return (
-              <View key={guard.id} style={[styles.guardCard, active && styles.guardCardActive]}>
+              <TouchableOpacity
+                key={guard.id}
+                style={[styles.guardCard, active && styles.guardCardActive]}
+                onPress={() => navigation?.navigate('GuardCheckCallPath', { guardId: guard.id })}
+                activeOpacity={0.8}
+              >
                 {/* Guard name & status */}
                 <View style={styles.guardTop}>
                   <View style={styles.guardInfo}>
@@ -175,7 +181,8 @@ export function ManagerDashboardScreen({ navigation }) {
                     </Text>
                   </Text>
                 )}
-              </View>
+                <Text style={styles.tapHint}>Tap to view check call path →</Text>
+              </TouchableOpacity>
             );
           })}
         </ScrollView>
@@ -243,10 +250,7 @@ function getGreeting() {
 }
 
 const styles = StyleSheet.create({
-  root:       { flex: 1, backgroundColor: '#090d16' },
-  header:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 56, paddingBottom: 12 },
-  logo:       { width: 120, height: 38 },
-  headerRight:{ flexDirection: 'row', alignItems: 'center', gap: 16 },
+  root:       { flex: 1, backgroundColor: T.bgRoot },
   alertBtn:   { position: 'relative', padding: 4 },
   badge:      { position: 'absolute', top: 0, right: 0, backgroundColor: '#ef4444', borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center' },
   badgeText:  { color: '#fff', fontSize: 9, fontWeight: '800' },
@@ -286,7 +290,7 @@ const styles = StyleSheet.create({
   statRow:    { flexDirection: 'row', gap: 16, marginBottom: 4 },
   statItem:   { flexDirection: 'row', alignItems: 'center', gap: 5 },
   statTxt:    { color: '#94a3b8', fontSize: 12 },
-  lastCC:     { color: '#475569', fontSize: 11, marginTop: 4 },
+  tapHint:    { color: T.brand, fontSize: 11, marginTop: 6, fontWeight: '600' },
   alertsHeader:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, marginBottom: 12 },
   markAll:    { color: '#38bdf8', fontSize: 13 },
   emptyAlerts:{ alignItems: 'center', marginTop: 60, gap: 12 },

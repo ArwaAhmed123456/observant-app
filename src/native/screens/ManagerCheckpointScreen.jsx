@@ -4,7 +4,9 @@ import {
   Modal, TextInput, Alert, Switch
 } from 'react-native';
 import { useApp } from '../../context/AppContext';
-import { Plus, Trash2, GripVertical, X, MapPin } from 'lucide-react-native';
+import { Plus, Trash2, X, MapPin } from 'lucide-react-native';
+import { AppHeader } from '../components/AppHeader';
+import { T } from '../../theme';
 
 export function ManagerCheckpointScreen() {
   const { currentUser, sites, checkpoints, saveCheckpoints } = useApp();
@@ -61,6 +63,8 @@ export function ManagerCheckpointScreen() {
 
   return (
     <View style={styles.root}>
+      <AppHeader />
+      <View style={styles.content}>
       <Text style={styles.screenTitle}>Checkpoint Config</Text>
 
       {/* Site selector */}
@@ -166,13 +170,15 @@ export function ManagerCheckpointScreen() {
           </View>
         </View>
       </Modal>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root:         { flex: 1, backgroundColor: '#090d16', padding: 20, paddingTop: 60 },
-  screenTitle:  { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 16 },
+  root:         { flex: 1, backgroundColor: T.bgRoot },
+  content:      { flex: 1, padding: 20 },
+  screenTitle:  { color: T.textPrimary, fontSize: 22, fontWeight: '800', marginBottom: 16 },
   siteScroll:   { maxHeight: 50, marginBottom: 16 },
   siteScrollContent:{ gap: 8, paddingRight: 8 },
   siteTab:      { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#0f172a', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8, borderWidth: 1, borderColor: '#1e293b' },

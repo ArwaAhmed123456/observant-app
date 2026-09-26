@@ -6,6 +6,8 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { useApp, formatTime } from '../../context/AppContext';
 import { Camera, CheckCircle, AlertTriangle, Play, Square, ChevronRight } from 'lucide-react-native';
+import { AppHeader } from '../components/AppHeader';
+import { T } from '../../theme';
 
 export function PatrolScreen() {
   const {
@@ -75,6 +77,8 @@ export function PatrolScreen() {
 
   return (
     <View style={styles.root}>
+      <AppHeader />
+      <View style={styles.content}>
       <Text style={styles.screenTitle}>Patrol</Text>
 
       {/* Site info */}
@@ -205,8 +209,7 @@ export function PatrolScreen() {
       )}
 
       {/* Incomplete patrol modal */}
-      <Modal visible={!!incompleteModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+      <Modal visible={!!incompleteModal} transparent animationType="slide">        <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <AlertTriangle color="#f59e0b" size={28} style={{ marginBottom: 12 }} />
             <Text style={styles.modalTitle}>Missing Checkpoints</Text>
@@ -224,13 +227,15 @@ export function PatrolScreen() {
           </View>
         </View>
       </Modal>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root:        { flex: 1, backgroundColor: '#090d16', padding: 20, paddingTop: 60 },
-  screenTitle: { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 8 },
+  root:        { flex: 1, backgroundColor: T.bgRoot },
+  content:     { flex: 1, padding: 20 },
+  screenTitle: { color: T.textPrimary, fontSize: 22, fontWeight: '800', marginBottom: 8 },
   siteRow:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   siteName:    { color: '#94a3b8', fontSize: 14 },
   checkpointCount:{ color: '#64748b', fontSize: 12 },

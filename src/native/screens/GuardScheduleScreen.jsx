@@ -4,6 +4,8 @@ import {
 } from 'react-native';
 import { useApp, formatDate } from '../../context/AppContext';
 import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react-native';
+import { AppHeader } from '../components/AppHeader';
+import { T } from '../../theme';
 
 const DAY_KEYS   = ['mon','tue','wed','thu','fri','sat','sun'];
 const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -42,6 +44,8 @@ export function GuardScheduleScreen() {
 
   return (
     <View style={styles.root}>
+      <AppHeader />
+      <View style={styles.content}>
       <Text style={styles.screenTitle}>My Schedule</Text>
 
       {/* Week navigator */}
@@ -131,13 +135,15 @@ export function GuardScheduleScreen() {
           </Text>
         </View>
       )}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root:         { flex: 1, backgroundColor: '#090d16', padding: 20, paddingTop: 60 },
-  screenTitle:  { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 20 },
+  root:         { flex: 1, backgroundColor: T.bgRoot },
+  content:      { flex: 1, padding: 20 },
+  screenTitle:  { color: T.textPrimary, fontSize: 22, fontWeight: '800', marginBottom: 20 },
   weekNav:      { flexDirection: 'row', alignItems: 'center', marginBottom: 16, gap: 8 },
   navBtn:       { padding: 8 },
   weekLabel:    { flex: 1, alignItems: 'center' },

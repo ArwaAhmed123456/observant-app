@@ -5,6 +5,8 @@ import {
 } from 'react-native';
 import { useApp, formatTime } from '../../context/AppContext';
 import { Bell, CheckCircle, AlertTriangle, Clock } from 'lucide-react-native';
+import { AppHeader } from '../components/AppHeader';
+import { T } from '../../theme';
 
 export function CheckCallScreen() {
   const {
@@ -56,6 +58,8 @@ export function CheckCallScreen() {
 
   return (
     <View style={styles.root}>
+      <AppHeader />
+      <View style={styles.content}>
       <Text style={styles.screenTitle}>Check Calls</Text>
 
       {/* Active Check Call */}
@@ -160,13 +164,15 @@ export function CheckCallScreen() {
           </View>
         ))}
       </ScrollView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root:         { flex: 1, backgroundColor: '#090d16', padding: 20, paddingTop: 60 },
-  screenTitle:  { color: '#fff', fontSize: 22, fontWeight: '800', marginBottom: 20 },
+  root:         { flex: 1, backgroundColor: T.bgRoot },
+  content:      { flex: 1, padding: 20 },
+  screenTitle:  { color: T.textPrimary, fontSize: 22, fontWeight: '800', marginBottom: 20 },
   activeCard:   { backgroundColor: '#1e3a5f', borderRadius: 16, padding: 20, borderWidth: 1, borderColor: '#3b82f6', marginBottom: 20 },
   activeHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
   activeTitle:  { color: '#fff', fontSize: 17, fontWeight: '800', flex: 1 },

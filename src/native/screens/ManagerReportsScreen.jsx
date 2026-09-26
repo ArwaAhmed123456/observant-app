@@ -5,6 +5,8 @@ import {
 } from 'react-native';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { FileText, Download, Filter, X, ChevronDown } from 'lucide-react-native';
+import { AppHeader } from '../components/AppHeader';
+import { T } from '../../theme';
 
 const REPORT_TYPES = ['combined', 'check_calls', 'patrols'];
 const DATE_RANGES  = ['today', 'this_week', 'this_month', 'custom'];
@@ -156,6 +158,7 @@ export function ManagerReportsScreen() {
 
   return (
     <View style={styles.root}>
+      <AppHeader />
       <View style={styles.topRow}>
         <Text style={styles.screenTitle}>Reports</Text>
         <View style={styles.topBtns}>
@@ -360,15 +363,16 @@ export function ManagerReportsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root:         { flex: 1, backgroundColor: '#090d16', padding: 20, paddingTop: 60 },
-  topRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  screenTitle:  { color: '#fff', fontSize: 22, fontWeight: '800' },
+  root:         { flex: 1, backgroundColor: T.bgRoot },
+  content:      { flex: 1, padding: 20 },
+  topRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingHorizontal: 20 },
+  screenTitle:  { color: T.textPrimary, fontSize: 22, fontWeight: '800' },
   topBtns:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   iconBtn:      { padding: 8 },
   exportBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10b981', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   exportBtnTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  filterSummary:{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 },
-  filterTag:    { backgroundColor: '#1e293b', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 },
+  filterSummary:{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8, paddingHorizontal: 20 },
+  filterTag:    { backgroundColor: T.bgInput, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 },
   rowCount:     { color: '#64748b', fontSize: 12, marginBottom: 12 },
   row:          { backgroundColor: '#0f172a', borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#1e293b' },
   rowPatrol:    { borderColor: '#1e3a5f' },
