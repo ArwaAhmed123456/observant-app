@@ -1,84 +1,157 @@
 /**
- * Observant Design System — single source of truth for all visual tokens.
- * Import: import { T, LOGO, S, shadows } from '../../theme';
+ * Observant Security — Tactical Command Center Design System
+ * Single source of truth for all visual tokens.
+ *
+ * Brand colors extracted from logo:
+ *   Deep Royal Blue:  #1B4FBE  (logo ring background)
+ *   Crimson Red:      #C0272D  (logo hexagon)
+ *   Champagne Gold:   #C9A84C  (laurel wreath)
+ *
+ * Usage:
+ *   import { T, COLORS, S, R, TYPE, shadows, BRAND } from '../../theme';
  */
 
 export const LOGO = require('../assets/logo.png');
 
-// ─── Palette ─────────────────────────────────────────────────────────────────
-export const COLORS = {
-  // Brand
-  brand:        '#10b981',
-  brandDark:    '#059669',
-  brandLight:   '#34d399',
-  brandGlow:    'rgba(16,185,129,0.18)',
-  brandBorder:  'rgba(16,185,129,0.35)',
-  brandSubtle:  'rgba(16,185,129,0.08)',
+// ─── Brand Palette (logo-derived) ────────────────────────────────────────────
+export const BRAND = {
+  // Royal Blue — primary brand identity
+  blue:          '#1B4FBE',
+  blueDark:      '#143A92',
+  blueLight:     '#2D65D4',
+  blueSubtle:    'rgba(27, 79, 190, 0.15)',
+  blueBorder:    'rgba(27, 79, 190, 0.40)',
+  blueGlow:      'rgba(27, 79, 190, 0.30)',
 
-  // Backgrounds
-  bgRoot:     '#090d16',
-  bgCard:     '#0f172a',
-  bgElevated: '#111827',
-  bgInput:    '#1e293b',
-  bgOverlay:  'rgba(0,0,0,0.72)',
-  bgSheet:    '#13203a',
+  // Crimson — authority / critical moments
+  crimson:       '#C0272D',
+  crimsonDark:   '#991F24',
+  crimsonLight:  '#E03038',
+  crimsonSubtle: 'rgba(192, 39, 45, 0.15)',
+  crimsonBorder: 'rgba(192, 39, 45, 0.40)',
+  crimsonGlow:   'rgba(192, 39, 45, 0.35)',
 
-  // Status
-  ok:         '#10b981',
-  okBg:       'rgba(16,185,129,0.12)',
-  okBorder:   'rgba(16,185,129,0.30)',
-
-  missed:     '#ef4444',
-  missedBg:   'rgba(239,68,68,0.12)',
-  missedBorder:'rgba(239,68,68,0.30)',
-
-  issue:      '#f59e0b',
-  issueBg:    'rgba(245,158,11,0.12)',
-  issueBorder:'rgba(245,158,11,0.30)',
-
-  sos:        '#ff2d55',
-  sosBg:      'rgba(255,45,85,0.15)',
-  sosBorder:  'rgba(255,45,85,0.40)',
-
-  upcoming:   '#334155',
-  upcomingBg: 'rgba(51,65,85,0.20)',
-
-  info:       '#38bdf8',
-  infoBg:     'rgba(56,189,248,0.12)',
-
-  purple:     '#a855f7',
-  purpleBg:   'rgba(168,85,247,0.12)',
-
-  amber:      '#f59e0b',
-
-  // Text
-  textPrimary:   '#ffffff',
-  textSecondary: '#94a3b8',
-  textMuted:     '#64748b',
-  textDisabled:  '#475569',
-  textInverse:   '#090d16',
-
-  // Borders
-  borderSubtle: '#1e293b',
-  borderMid:    '#334155',
-  borderStrong: '#475569',
-
-  // Utility
-  white:  '#ffffff',
-  black:  '#000000',
-  transparent: 'transparent',
+  // Champagne Gold — premium / achievements
+  gold:          '#C9A84C',
+  goldDark:      '#A88A38',
+  goldLight:     '#E2C36A',
+  goldSubtle:    'rgba(201, 168, 76, 0.15)',
+  goldBorder:    'rgba(201, 168, 76, 0.35)',
+  goldGlow:      'rgba(201, 168, 76, 0.25)',
 };
 
-// ─── Spacing scale ────────────────────────────────────────────────────────────
+// ─── Full Color System ────────────────────────────────────────────────────────
+export const COLORS = {
+  // Brand primaries (compat)
+  brand:        '#1B4FBE',
+  brandDark:    '#143A92',
+  brandLight:   '#2D65D4',
+  brandGlow:    'rgba(27,79,190,0.18)',
+  brandBorder:  'rgba(27,79,190,0.35)',
+  brandSubtle:  'rgba(27,79,190,0.08)',
+
+  // Backgrounds (deep charcoal navy — not pure black)
+  bgRoot:       '#0B0E14',
+  bgCard:       '#131C2E',
+  bgCardHover:  '#1A2540',
+  bgElevated:   '#1A2540',
+  bgInput:      '#1E2540',
+  bgSheet:      '#131828',
+  bgOverlay:    'rgba(5, 7, 14, 0.88)',
+  bgSurface:    'rgba(255, 255, 255, 0.03)',
+
+  // Glass morphism
+  glass:        'rgba(255, 255, 255, 0.04)',
+  glassBorder:  'rgba(255, 255, 255, 0.08)',
+  glassStrong:  'rgba(255, 255, 255, 0.07)',
+
+  // Status semantic — Green = safe/completed/okay
+  ok:           '#22C55E',
+  okDark:       '#16A34A',
+  okBg:         'rgba(34, 197, 94, 0.12)',
+  okBorder:     'rgba(34, 197, 94, 0.30)',
+  okGlow:       'rgba(34, 197, 94, 0.25)',
+
+  // Amber = warning/issue
+  warn:         '#F59E0B',
+  warnDark:     '#D97706',
+  warnBg:       'rgba(245, 158, 11, 0.12)',
+  warnBorder:   'rgba(245, 158, 11, 0.35)',
+  warnGlow:     'rgba(245, 158, 11, 0.20)',
+
+  // Red = critical/missed
+  danger:       '#EF4444',
+  dangerDark:   '#DC2626',
+  dangerBg:     'rgba(239, 68, 68, 0.12)',
+  dangerBorder: 'rgba(239, 68, 68, 0.35)',
+  dangerGlow:   'rgba(239, 68, 68, 0.30)',
+
+  // SOS — maximum urgency
+  sos:          '#FF2D55',
+  sosBg:        'rgba(255, 45, 85, 0.15)',
+  sosBorder:    'rgba(255, 45, 85, 0.45)',
+  sosGlow:      'rgba(255, 45, 85, 0.40)',
+
+  // Blue = informational/neutral action
+  info:         '#3B82F6',
+  infoBg:       'rgba(59, 130, 246, 0.12)',
+  infoBorder:   'rgba(59, 130, 246, 0.30)',
+
+  // Cyan = patrol/technical
+  cyan:         '#06B6D4',
+  cyanBg:       'rgba(6, 182, 212, 0.12)',
+  cyanBorder:   'rgba(6, 182, 212, 0.30)',
+  cyanGlow:     'rgba(6, 182, 212, 0.20)',
+
+  // Text hierarchy
+  textPrimary:   '#F0F4FF',
+  textSecondary: '#8FA3C8',
+  textMuted:     '#56617A',
+  textDisabled:  '#3A4260',
+  textInverse:   '#0B0E14',
+
+  // Borders
+  borderSubtle:  'rgba(255, 255, 255, 0.07)',
+  borderMid:     'rgba(255, 255, 255, 0.12)',
+  borderStrong:  'rgba(255, 255, 255, 0.20)',
+
+  // compat aliases
+  missed:        '#EF4444',
+  missedBg:      'rgba(239, 68, 68, 0.12)',
+  missedBorder:  'rgba(239, 68, 68, 0.30)',
+  issue:         '#F59E0B',
+  issueBg:       'rgba(245, 158, 11, 0.12)',
+  issueBorder:   'rgba(245, 158, 11, 0.30)',
+  upcoming:      '#334155',
+  upcomingBg:    'rgba(51, 65, 85, 0.20)',
+  purple:        '#A855F7',
+  purpleBg:      'rgba(168, 85, 247, 0.12)',
+  amber:         '#F59E0B',
+
+  white:         '#FFFFFF',
+  black:         '#000000',
+  transparent:   'transparent',
+};
+
+// ─── Spacing scale (8px grid) ────────────────────────────────────────────────
 export const S = {
-  xs:   4,
-  sm:   8,
+  xs:    4,
+  sm:    8,
   md:   12,
   lg:   16,
   xl:   20,
   xxl:  24,
   xxxl: 32,
   huge: 48,
+  giant: 64,
+};
+
+// ─── Animation durations ──────────────────────────────────────────────────────
+export const ANIM = {
+  instant: 100,
+  fast:    200,
+  normal:  300,
+  slow:    500,
 };
 
 // ─── Border radius ────────────────────────────────────────────────────────────
@@ -92,16 +165,19 @@ export const R = {
   full: 9999,
 };
 
-// ─── Typography ───────────────────────────────────────────────────────────────
+// ─── Typography scale ─────────────────────────────────────────────────────────
 export const TYPE = {
-  hero:     { fontSize: 32, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.5 },
-  title:    { fontSize: 22, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.3 },
+  // Large numerals for stats / timers
+  display:  { fontSize: 40, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -1.5, lineHeight: 48 },
+  stat:     { fontSize: 28, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.5, fontFamily: 'monospace' },
+  hero:     { fontSize: 32, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.8 },
+  title:    { fontSize: 22, fontWeight: '800', color: COLORS.textPrimary, letterSpacing: -0.4 },
   subtitle: { fontSize: 17, fontWeight: '700', color: COLORS.textPrimary },
   heading:  { fontSize: 15, fontWeight: '700', color: COLORS.textPrimary },
-  body:     { fontSize: 14, fontWeight: '400', color: COLORS.textSecondary, lineHeight: 20 },
-  small:    { fontSize: 12, fontWeight: '400', color: COLORS.textMuted },
-  caption:  { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, letterSpacing: 0.4 },
-  label:    { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
+  body:     { fontSize: 14, fontWeight: '400', color: COLORS.textSecondary, lineHeight: 21 },
+  small:    { fontSize: 12, fontWeight: '400', color: COLORS.textMuted, lineHeight: 18 },
+  caption:  { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, letterSpacing: 0.3 },
+  label:    { fontSize: 11, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: 0.7 },
   mono:     { fontSize: 13, fontFamily: 'monospace', color: COLORS.textSecondary },
   badge:    { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
 };
@@ -111,62 +187,60 @@ export const shadows = {
   none: {},
   sm: {
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
     elevation: 2,
   },
   md: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
     elevation: 5,
   },
   lg: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
+    shadowOpacity: 0.45,
+    shadowRadius: 18,
     elevation: 10,
   },
   brand: {
-    shadowColor: COLORS.brand,
+    shadowColor: '#1B4FBE',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 7,
+  },
+  blue: {
+    shadowColor: '#1B4FBE',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    elevation: 7,
+  },
+  gold: {
+    shadowColor: '#C9A84C',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.30,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  ok: {
+    shadowColor: '#22C55E',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.30,
     shadowRadius: 12,
     elevation: 6,
   },
   sos: {
-    shadowColor: COLORS.sos,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    elevation: 12,
+    shadowColor: '#FF2D55',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.55,
+    shadowRadius: 20,
+    elevation: 14,
   },
-};
-
-// ─── Shared component tokens (backward compat with old T.*) ──────────────────
-export const T = {
-  ...COLORS,
-  // Logo
-  logoHeader: { width: 130, height: 40 },
-  logoLogin:  { width: 200, height: 66 },
-  logoSmall:  { width: 80,  height: 26 },
-  // Radius aliases
-  radiusSm: R.sm,
-  radiusMd: R.md,
-  radiusLg: R.lg,
-  radiusXl: R.xl,
-  radiusFull: R.full,
-  // Font aliases
-  fontHero:    TYPE.hero,
-  fontTitle:   TYPE.title,
-  fontSubtitle:TYPE.subtitle,
-  fontBody:    TYPE.body,
-  fontCaption: TYPE.caption,
-  fontLabel:   TYPE.label,
-  fontMono:    TYPE.mono,
 };
 
 // ─── Common reusable style helpers ───────────────────────────────────────────
@@ -176,7 +250,7 @@ export const cardStyle = {
   borderWidth: 1,
   borderColor: COLORS.borderSubtle,
   padding: S.lg,
-  ...shadows.sm,
+  ...shadows.md,
 };
 
 export const inputStyle = {
@@ -191,14 +265,14 @@ export const inputStyle = {
 };
 
 export const primaryBtn = {
-  backgroundColor: COLORS.brand,
+  backgroundColor: '#1B4FBE',
   borderRadius: R.md,
   paddingVertical: 14,
   alignItems: 'center',
   flexDirection: 'row',
   justifyContent: 'center',
   gap: 8,
-  ...shadows.brand,
+  ...shadows.blue,
 };
 
 export const primaryBtnText = {
@@ -212,14 +286,41 @@ export const headerStyle = {
   paddingTop: 52,
 };
 
+// ─── T — backward-compat flat namespace ──────────────────────────────────────
+export const T = {
+  ...COLORS,
+  ...BRAND,
+  // Logo
+  logoHeader: { width: 130, height: 40 },
+  logoLogin:  { width: 200, height: 66 },
+  logoSmall:  { width: 80,  height: 26 },
+  // Radius aliases
+  radiusSm:    R.sm,
+  radiusMd:    R.md,
+  radiusLg:    R.lg,
+  radiusXl:    R.xl,
+  radiusFull:  R.full,
+  // Font aliases
+  fontDisplay:  TYPE.display,
+  fontStat:     TYPE.stat,
+  fontHero:     TYPE.hero,
+  fontTitle:    TYPE.title,
+  fontSubtitle: TYPE.subtitle,
+  fontBody:     TYPE.body,
+  fontCaption:  TYPE.caption,
+  fontLabel:    TYPE.label,
+  fontMono:     TYPE.mono,
+};
+
 // ─── Status helpers ───────────────────────────────────────────────────────────
 export function statusColor(status) {
   switch (status) {
     case 'yes':      return COLORS.ok;
-    case 'no':       return COLORS.issue;
-    case 'missed':   return COLORS.missed;
+    case 'no':       return COLORS.warn;
+    case 'missed':   return COLORS.danger;
     case 'sos':      return COLORS.sos;
     case 'upcoming': return COLORS.upcoming;
+    case 'info':     return COLORS.info;
     default:         return COLORS.textMuted;
   }
 }
@@ -227,9 +328,20 @@ export function statusColor(status) {
 export function statusBg(status) {
   switch (status) {
     case 'yes':      return COLORS.okBg;
-    case 'no':       return COLORS.issueBg;
-    case 'missed':   return COLORS.missedBg;
+    case 'no':       return COLORS.warnBg;
+    case 'missed':   return COLORS.dangerBg;
     case 'sos':      return COLORS.sosBg;
+    case 'info':     return COLORS.infoBg;
     default:         return COLORS.upcomingBg;
+  }
+}
+
+export function statusBorder(status) {
+  switch (status) {
+    case 'yes':      return COLORS.okBorder;
+    case 'no':       return COLORS.warnBorder;
+    case 'missed':   return COLORS.dangerBorder;
+    case 'sos':      return COLORS.sosBorder;
+    default:         return COLORS.borderSubtle;
   }
 }

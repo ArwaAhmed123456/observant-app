@@ -1,89 +1,102 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  Modal,
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet
+  Modal, View, Text, TouchableOpacity, StyleSheet, Animated,
 } from 'react-native';
-import { ShieldCheck, Clock, MapPin, AlertCircle } from 'lucide-react-native';
+import { ShieldCheck, Clock, MapPin, AlertCircle, Zap } from 'lucide-react-native';
 import { useSecurity } from '../../context/SecurityContext';
+import { P, SP, BR, FONT, SH_TOKENS } from '../../ds';
 
 export const CheckCallModal = () => {
   const { pendingCheckCall, respondCheckCall, activeShiftSession } = useSecurity();
   const [secondsRemaining, setSecondsRemaining] = useState(600);
+
+  // Pulse animation for urgent state
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     if (!pendingCheckCall) {
       setSecondsRemaining(600);
       return;
     }
-
     const interval = setInterval(() => {
-      setSecondsRemaining((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
+      setSecondsRemaining(prev => {
+        if (prev <= 1) { clearInterval(interval); return 0; }
         return prev - 1;
       });
     }, 1000);
-
     return () => clearInterval(interval);
   }, [pendingCheckCall]);
+
+  useEffect(() => {
+    const isUrgent = secondsRemaining < 120 && secondsRemaining > 0;
+    if (isUrgent) {
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 1.12, duration: 500, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+        ])
+      ).start();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [secondsRemaining < 120]);
 
   if (!pendingCheckCall) return null;
 
   const mins = Math.floor(secondsRemaining / 60);
   const secs = secondsRemaining % 60;
-  const timeFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  const timeFormatted = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
   const isUrgent = secondsRemaining < 120;
 
-  const handleConfirm = () => {
-    respondCheckCall(pendingCheckCall.id, 'safe');
-  };
+  const handleConfirm = () => respondCheckCall(pendingCheckCall.id, 'safe');
 
   return (
     <Modal visible={!!pendingCheckCall} animationType="fade" transparent>
       <View style={styles.overlay}>
         <View style={[styles.card, isUrgent && styles.cardUrgent]}>
-          {/* Header Icon */}
-          <View style={[styles.iconCircle, isUrgent && styles.iconCircleUrgent]}>
-            <ShieldCheck color={isUrgent ? '#ef4444' : '#10b981'} size={38} />
-          </View>
 
-          <Text style={styles.title}>Safety Check-Call Prompt</Text>
+          {/* Icon */}
+          <Animated.View style={[
+            styles.iconCircle,
+            isUrgent && styles.iconCircleUrgent,
+            { transform: [{ scale: pulseAnim }] }
+          ]}>
+            <ShieldCheck color={isUrgent ? P.danger : P.ok} size={36} />
+          </Animated.View>
+
+          <Text style={styles.title}>Safety Check-Call</Text>
           <Text style={styles.subtitle}>
-            Scheduled welfare verification. Please confirm your status and on-site presence.
+            Confirm your status and on-site presence.
           </Text>
 
-          {/* Countdown Timer */}
+          {/* Countdown timer */}
           <View style={[styles.timerBox, isUrgent && styles.timerBoxUrgent]}>
-            <Clock color={isUrgent ? '#ef4444' : '#38bdf8'} size={20} />
+            <Clock color={isUrgent ? P.danger : P.info} size={18} />
             <Text style={[styles.timerText, isUrgent && styles.timerTextUrgent]}>
               {timeFormatted}
             </Text>
             <Text style={styles.timerLabel}>Response Window</Text>
           </View>
 
-          {/* GPS Info */}
+          {/* GPS row */}
           <View style={styles.gpsRow}>
-            <MapPin color="#94a3b8" size={14} />
+            <MapPin color={P.t3} size={13} />
             <Text style={styles.gpsText}>
               {activeShiftSession?.gpsLocation || 'GPS Geofence: Active Site Verified'}
             </Text>
           </View>
 
-          {/* Warning */}
+          {/* Warning banner */}
           <View style={styles.warningBox}>
-            <AlertCircle color="#f59e0b" size={16} />
+            <Zap color={P.warn} size={14} />
             <Text style={styles.warningText}>
-              Unacknowledged check-calls will trigger an automated dispatcher escalation alarm.
+              Unacknowledged calls trigger an automated dispatcher escalation.
             </Text>
           </View>
 
-          {/* Confirm Button */}
-          <TouchableOpacity onPress={handleConfirm} style={styles.confirmButton}>
+          {/* Confirm */}
+          <TouchableOpacity onPress={handleConfirm} style={[styles.confirmButton, isUrgent && styles.confirmButtonUrgent]}>
+            <ShieldCheck color={P.white} size={18} />
             <Text style={styles.confirmButtonText}>I AM SAFE & ON PATROL</Text>
           </TouchableOpacity>
         </View>
@@ -95,120 +108,133 @@ export const CheckCallModal = () => {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    backgroundColor: P.overlay,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20
+    padding: SP.px20,
   },
   card: {
-    backgroundColor: '#0f172a',
-    borderRadius: 24,
+    backgroundColor: P.bg2,
+    borderRadius: BR.xl,
     borderWidth: 1.5,
-    borderColor: '#334155',
-    padding: 24,
+    borderColor: P.b3,
+    padding: SP.px24,
     width: '100%',
     maxWidth: 380,
-    alignItems: 'center'
+    alignItems: 'center',
+    ...SH_TOKENS.lg,
   },
   cardUrgent: {
-    borderColor: '#ef4444'
+    borderColor: P.dangerBorder,
+    backgroundColor: P.bg2,
   },
   iconCircle: {
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    backgroundColor: P.okSubtle,
+    borderWidth: 1.5,
+    borderColor: P.okBorder,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 16
+    marginBottom: SP.px16,
   },
   iconCircleUrgent: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)'
+    backgroundColor: P.dangerSubtle,
+    borderColor: P.dangerBorder,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#f8fafc',
-    marginBottom: 8,
-    textAlign: 'center'
+    ...FONT.h3,
+    textAlign: 'center',
+    marginBottom: SP.px8,
   },
   subtitle: {
+    color: P.t2,
     fontSize: 13,
-    color: '#94a3b8',
     textAlign: 'center',
     lineHeight: 18,
-    marginBottom: 18
+    marginBottom: SP.px16,
   },
   timerBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#1e293b',
+    backgroundColor: P.bg3,
     borderWidth: 1,
-    borderColor: '#38bdf8',
-    paddingHorizontal: 16,
+    borderColor: P.infoBorder,
+    paddingHorizontal: SP.px16,
     paddingVertical: 10,
-    borderRadius: 14,
-    marginBottom: 16
+    borderRadius: BR.md,
+    marginBottom: SP.px16,
   },
   timerBoxUrgent: {
-    borderColor: '#ef4444',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)'
+    borderColor: P.dangerBorder,
+    backgroundColor: P.dangerSubtle,
   },
   timerText: {
     fontSize: 22,
     fontWeight: '800',
-    color: '#38bdf8',
-    letterSpacing: 1
+    color: P.info,
+    letterSpacing: 1,
+    fontVariant: ['tabular-nums'],
   },
   timerTextUrgent: {
-    color: '#ef4444'
+    color: P.danger,
   },
   timerLabel: {
-    fontSize: 11,
-    color: '#64748b',
+    fontSize: 10,
+    color: P.t3,
     textTransform: 'uppercase',
     fontWeight: '700',
-    marginLeft: 4
+    marginLeft: 4,
   },
   gpsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 16
+    gap: 5,
+    marginBottom: SP.px16,
   },
   gpsText: {
     fontSize: 11,
-    color: '#64748b'
+    color: P.t3,
   },
   warningBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-    borderRadius: 10,
+    backgroundColor: P.warnSubtle,
+    borderRadius: BR.sm,
     borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.25)',
-    padding: 10,
-    marginBottom: 20
+    borderColor: P.warnBorder,
+    padding: SP.px12,
+    marginBottom: SP.px20,
+    width: '100%',
   },
   warningText: {
     fontSize: 11,
-    color: '#f59e0b',
+    color: P.warn,
     flex: 1,
-    lineHeight: 15
+    lineHeight: 15,
   },
   confirmButton: {
-    backgroundColor: '#10b981',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: P.ok,
     width: '100%',
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center'
+    paddingVertical: 15,
+    borderRadius: BR.md,
+    ...SH_TOKENS.ok,
+  },
+  confirmButtonUrgent: {
+    backgroundColor: P.danger,
+    ...SH_TOKENS.danger,
   },
   confirmButtonText: {
-    color: '#ffffff',
+    color: P.white,
     fontSize: 14,
     fontWeight: '800',
-    letterSpacing: 0.5
-  }
+    letterSpacing: 0.5,
+  },
 });

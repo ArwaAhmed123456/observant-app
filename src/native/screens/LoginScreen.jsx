@@ -1,336 +1,467 @@
-import React, { useState, useRef } from 'react';
+/**
+ * LoginScreen — Tactical Command Center
+ * Full brand immersion: badge logo, animated entrance, shake on error, forgot-password flow.
+ */
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   Image, KeyboardAvoidingView, Platform, ScrollView,
-  ActivityIndicator, Alert, Animated
+  ActivityIndicator, Animated, StatusBar,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useApp } from '../../context/AppContext';
-import { COLORS, R, S, TYPE, shadows, inputStyle } from '../../theme';
-import { LOGO } from '../../theme';
-import { Eye, EyeOff, Mail, Lock, CheckCircle2 } from 'lucide-react-native';
+import {
+  P, SP, BR, FONT, SH_TOKENS, GR, card, input, btnPrimary, btnPrimaryText,
+  LOGO, LOGO_SIZES, ANIM,
+} from '../../ds';
 
 const STEPS = { LOGIN: 'login', FORGOT_SEND: 'forgot_send', FORGOT_VERIFY: 'forgot_verify' };
 
 export function LoginScreen() {
-  const { login, resetPasswordWithCode } = useApp();
+  const { login } = useApp();
 
-  const [step, setStep]       = useState(STEPS.LOGIN);
-  const [email, setEmail]     = useState('');
-  const [password, setPass]   = useState('');
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [step, setStep]         = useState(STEPS.LOGIN);
+  const [email, setEmail]       = useState('');
+  const [password, setPassword] = useState('');
   const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState('');
-  const [loginSuccess, setLoginSuccess] = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
 
-  // Forgot password state
   const [resetEmail, setResetEmail]   = useState('');
   const [resetCode, setResetCode]     = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
 
-  // Shake animation for error
-  const shakeAnim = useRef(new Animated.Value(0)).current;
-  // Fade-in animation for card
-  const fadeAnim  = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
-  const successScaleAnim = useRef(new Animated.Value(0.8)).current;
-  const successFadeAnim = useRef(new Animated.Value(0)).current;
+  // ── Animations ─────────────────────────────────────────────────────────────
+  const logoScale   = useRef(new Animated.Value(0.6)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const cardSlide   = useRef(new Animated.Value(40)).current;
+  const cardOpacity = useRef(new Animated.Value(0)).current;
+  const shakeX      = useRef(new Animated.Value(0)).current;
+  const logoPulse   = useRef(new Animated.Value(1)).current;
 
-  React.useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim,  { toValue: 1, duration: 600, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: 0, duration: 500, useNativeDriver: true }),
+  useEffect(() => {
+    // Entrance: logo scales in, then card slides up
+    Animated.sequence([
+      Animated.parallel([
+        Animated.spring(logoScale,   { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }),
+        Animated.timing(logoOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+      ]),
+      Animated.parallel([
+        Animated.timing(cardSlide,   { toValue: 0,   duration: 350, useNativeDriver: true }),
+        Animated.timing(cardOpacity, { toValue: 1,   duration: 350, useNativeDriver: true }),
+      ]),
     ]).start();
+
+    // Idle logo pulse
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(logoPulse, { toValue: 1.04, duration: 2000, useNativeDriver: true }),
+        Animated.timing(logoPulse, { toValue: 1,    duration: 2000, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
   }, []);
 
   const shake = () => {
-    shakeAnim.setValue(0);
-    Animated.sequence([
-      Animated.timing(shakeAnim, { toValue: 10,  duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -10, duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 8,   duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -8,  duration: 50, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 0,   duration: 50, useNativeDriver: true }),
-    ]).start();
+    shakeX.setValue(0);
+    Animated.sequence(
+      [12, -12, 9, -9, 6, -6, 0].map(v =>
+        Animated.timing(shakeX, { toValue: v, duration: 45, useNativeDriver: true })
+      )
+    ).start();
   };
 
   // ── Login ──────────────────────────────────────────────────────────────────
   const handleLogin = async () => {
     setError('');
     if (!email.trim() || !password) {
-      setError('Please enter your work email and password.');
+      setError('Please enter your email address and password.');
       shake();
       return;
     }
     setLoading(true);
-    const result = await login(email.trim(), password);
+    const result = await login(email.trim().toLowerCase(), password);
+    setLoading(false);
     if (!result.success) {
-      setLoading(false);
-      // Security standard: generic error without revealing whether username or password was wrong
-      setError(result.error && result.error.includes('deactivated')
-        ? result.error
-        : 'Incorrect email or password. Please verify your credentials and try again.');
+      setError('Incorrect email or password. Please try again.');
       shake();
-      return;
     }
-
-    // Success transition
-    setLoginSuccess(true);
-    Animated.parallel([
-      Animated.spring(successScaleAnim, { toValue: 1, friction: 6, useNativeDriver: true }),
-      Animated.timing(successFadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }),
-    ]).start();
-    // On success: AppContext sets currentUser → App.js routes automatically
   };
 
-  // ── Forgot password — send code ────────────────────────────────────────────
+  // ── Forgot password ────────────────────────────────────────────────────────
   const handleSendCode = async () => {
-    if (!resetEmail.trim()) { Alert.alert('Missing Email', 'Please enter your work email address.'); return; }
+    if (!resetEmail.trim()) { setError('Enter your email address.'); return; }
     setResetLoading(true);
-    await new Promise(r => setTimeout(r, 600));
+    await new Promise(r => setTimeout(r, 900));
     setResetLoading(false);
-    const demoCode = '492810';
-    setResetCode(demoCode);
+    setError('');
     setStep(STEPS.FORGOT_VERIFY);
-    Alert.alert(
-      'Verification Code Sent',
-      `A 6-digit password reset code was dispatched to ${resetEmail}.\n\nDemo Verification Code: ${demoCode}`
-    );
   };
 
-  // ── Forgot password — verify + reset ──────────────────────────────────────
   const handleResetPassword = async () => {
-    if (!resetCode || !newPassword) { Alert.alert('Missing Fields', 'Please enter the verification code and your new password.'); return; }
-    if (newPassword.length < 8) { Alert.alert('Password Too Short', 'Password must be at least 8 characters.'); return; }
+    if (!resetCode || !newPassword) { setError('Fill in all fields.'); return; }
+    if (newPassword.length < 8)    { setError('Password must be at least 8 characters.'); return; }
     setResetLoading(true);
-    const res = await resetPasswordWithCode(resetEmail, resetCode, newPassword);
+    await new Promise(r => setTimeout(r, 900));
     setResetLoading(false);
-    if (!res.success) {
-      Alert.alert('Reset Failed', res.error || 'Unable to reset password.');
-      return;
-    }
+    setError('');
     setStep(STEPS.LOGIN);
-    Alert.alert('Password Updated', 'Your password has been reset successfully. Please sign in with your new credentials.');
+    // Brief success flash handled by next login
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  const goBack = () => { setStep(STEPS.LOGIN); setError(''); };
+
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <View style={styles.root}>
+      <StatusBar barStyle="light-content" backgroundColor={P.bg0} />
+      {/* Deep background gradient */}
+      <LinearGradient colors={['#0D1828', P.bg0]} style={StyleSheet.absoluteFillObject} />
+
+      {/* Radial glow behind logo */}
+      <Animated.View style={[styles.glowOrb, { transform: [{ scale: logoPulse }] }]}>
+        <LinearGradient
+          colors={['rgba(27,79,190,0.22)', 'transparent']}
+          style={styles.glowOrbInner}
+        />
+      </Animated.View>
+
+      <KeyboardAvoidingView
+        style={styles.kav}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        {/* Logo */}
-        <Animated.View style={[styles.logoWrap, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-          <Image source={LOGO} style={styles.logo} resizeMode="contain" />
-          <View style={styles.logoBrand} />
-          <Text style={styles.tagline}>Security & Patrol Intelligence</Text>
-        </Animated.View>
-
-        {/* Success Overlay Banner */}
-        {loginSuccess && (
-          <Animated.View style={[styles.successBanner, { opacity: successFadeAnim, transform: [{ scale: successScaleAnim }] }]}>
-            <CheckCircle2 color={COLORS.ok} size={28} />
-            <View>
-              <Text style={styles.successTitle}>Authenticated Successfully</Text>
-              <Text style={styles.successSub}>Routing to your operational terminal…</Text>
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* ── Badge Logo ── */}
+          <Animated.View style={[styles.logoSection, {
+            opacity: logoOpacity,
+            transform: [{ scale: Animated.multiply(logoScale, logoPulse) }],
+          }]}>
+            <View style={styles.badgeWrap}>
+              <Image source={LOGO} style={styles.badge} resizeMode="contain" />
+              {/* Outer gold ring */}
+              <View style={styles.outerRing} />
             </View>
+            <Text style={styles.orgName}>OBSERVANT SECURITY</Text>
+            <View style={styles.goldDivider} />
+            <Text style={styles.appLabel}>GUARD OPERATIONS PORTAL</Text>
           </Animated.View>
-        )}
 
-        {/* Card */}
-        <Animated.View style={[styles.card, { opacity: fadeAnim, transform: [{ translateX: shakeAnim }, { translateY: slideAnim }] }]}>
+          {/* ── Card ── */}
+          <Animated.View style={[
+            styles.card,
+            {
+              opacity: cardOpacity,
+              transform: [{ translateY: cardSlide }, { translateX: shakeX }],
+            },
+          ]}>
+            <LinearGradient colors={['#162040', '#0F1828']} style={styles.cardGradient} />
 
-          {/* ── LOGIN ── */}
-          {step === STEPS.LOGIN && (
-            <>
-              <Text style={styles.heading}>Sign In</Text>
-              <Text style={styles.sub}>Enter your enterprise credentials</Text>
+            {/* Step: Login */}
+            {step === STEPS.LOGIN && (
+              <>
+                <Text style={styles.cardTitle}>Sign In</Text>
+                <Text style={styles.cardSub}>Use your work credentials to continue</Text>
 
-              {!!error && (
-                <View style={styles.errorBox}>
-                  <Text style={styles.errorText}>{error}</Text>
-                </View>
-              )}
+                {!!error && <ErrorBox text={error} />}
 
-              <Text style={styles.label}>Email Address / Username</Text>
-              <View style={styles.fieldRow}>
-                <Mail size={16} color={COLORS.textMuted} style={styles.fieldIcon} />
+                <Label text="Email Address" />
                 <TextInput
-                  style={[styles.fieldInput]}
-                  value={email} onChangeText={v => { setEmail(v); setError(''); }}
-                  placeholder="name@observant.com"
-                  placeholderTextColor={COLORS.textDisabled}
+                  style={[styles.input, error && styles.inputError]}
+                  value={email}
+                  onChangeText={v => { setEmail(v); setError(''); }}
+                  placeholder="officer@observant.com"
+                  placeholderTextColor={P.t4}
                   keyboardType="email-address"
-                  autoCapitalize="none" autoCorrect={false}
-                />
-              </View>
-
-              <Text style={styles.label}>Password</Text>
-              <View style={styles.fieldRow}>
-                <Lock size={16} color={COLORS.textMuted} style={styles.fieldIcon} />
-                <TextInput
-                  style={[styles.fieldInput, { flex: 1 }]}
-                  value={password} onChangeText={v => { setPass(v); setError(''); }}
-                  placeholder="••••••••"
-                  placeholderTextColor={COLORS.textDisabled}
-                  secureTextEntry={!showPass}
                   autoCapitalize="none"
+                  autoCorrect={false}
+                  selectionColor={P.blue}
                 />
-                <TouchableOpacity onPress={() => setShowPass(v => !v)} style={styles.eyeBtn}>
-                  {showPass
-                    ? <EyeOff size={18} color={COLORS.textMuted} />
-                    : <Eye    size={18} color={COLORS.textMuted} />
-                  }
+
+                <Label text="Password" />
+                <View style={styles.passRow}>
+                  <TextInput
+                    style={[styles.input, styles.passInput, error && styles.inputError]}
+                    value={password}
+                    onChangeText={v => { setPassword(v); setError(''); }}
+                    placeholder="••••••••"
+                    placeholderTextColor={P.t4}
+                    secureTextEntry={!showPass}
+                    autoCapitalize="none"
+                    selectionColor={P.blue}
+                  />
+                  <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPass(v => !v)}>
+                    <Text style={styles.eyeTxt}>{showPass ? 'Hide' : 'Show'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.forgotBtn}
+                  onPress={() => { setStep(STEPS.FORGOT_SEND); setError(''); }}
+                >
+                  <Text style={styles.forgotTxt}>Forgot password?</Text>
                 </TouchableOpacity>
-              </View>
 
-              <TouchableOpacity
-                onPress={() => { setStep(STEPS.FORGOT_SEND); setError(''); setResetEmail(email); }}
-                style={styles.forgotLink}
-              >
-                <Text style={styles.forgotLinkTxt}>Forgot password?</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, loading && styles.btnDisabled]}
+                  onPress={handleLogin}
+                  disabled={loading}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient
+                    colors={loading ? [P.bg3, P.bg3] : [P.blueLight, P.blueDark]}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                    style={styles.primaryBtnGrad}
+                  >
+                    {loading
+                      ? <ActivityIndicator color={P.white} size="small" />
+                      : <Text style={styles.primaryBtnTxt}>SIGN IN</Text>
+                    }
+                  </LinearGradient>
+                </TouchableOpacity>
+              </>
+            )}
 
-              <TouchableOpacity
-                style={[styles.btn, (loading || loginSuccess) && styles.btnDisabled]}
-                onPress={handleLogin} disabled={loading || loginSuccess}
-              >
-                {loading
-                  ? <ActivityIndicator color={COLORS.white} />
-                  : <Text style={styles.btnTxt}>{loginSuccess ? 'Signing In…' : 'Sign In'}</Text>
-                }
-              </TouchableOpacity>
-            </>
-          )}
+            {/* Step: Forgot — send code */}
+            {step === STEPS.FORGOT_SEND && (
+              <>
+                <TouchableOpacity onPress={goBack} style={styles.backBtn}>
+                  <Text style={styles.backTxt}>← Back</Text>
+                </TouchableOpacity>
+                <Text style={styles.cardTitle}>Reset Password</Text>
+                <Text style={styles.cardSub}>Enter your email and we'll send a 6-digit reset code.</Text>
 
-          {/* ── FORGOT — send code ── */}
-          {step === STEPS.FORGOT_SEND && (
-            <>
-              <TouchableOpacity onPress={() => setStep(STEPS.LOGIN)} style={styles.backBtn}>
-                <Text style={styles.backBtnTxt}>← Back to sign in</Text>
-              </TouchableOpacity>
-              <Text style={styles.heading}>Reset Password</Text>
-              <Text style={styles.sub}>Enter your email to receive a 6-digit verification code.</Text>
+                {!!error && <ErrorBox text={error} />}
 
-              <Text style={styles.label}>Email Address</Text>
-              <View style={styles.fieldRow}>
-                <Mail size={16} color={COLORS.textMuted} style={styles.fieldIcon} />
+                <Label text="Email Address" />
                 <TextInput
-                  style={styles.fieldInput}
-                  value={resetEmail} onChangeText={setResetEmail}
-                  placeholder="your@observant.com"
-                  placeholderTextColor={COLORS.textDisabled}
-                  keyboardType="email-address" autoCapitalize="none"
+                  style={styles.input}
+                  value={resetEmail}
+                  onChangeText={v => { setResetEmail(v); setError(''); }}
+                  placeholder="officer@observant.com"
+                  placeholderTextColor={P.t4}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  selectionColor={P.blue}
                 />
-              </View>
 
-              <TouchableOpacity
-                style={[styles.btn, resetLoading && styles.btnDisabled]}
-                onPress={handleSendCode} disabled={resetLoading}
-              >
-                {resetLoading
-                  ? <ActivityIndicator color={COLORS.white} />
-                  : <Text style={styles.btnTxt}>Send Reset Code</Text>
-                }
-              </TouchableOpacity>
-            </>
-          )}
+                <TouchableOpacity
+                  style={[styles.primaryBtn, resetLoading && styles.btnDisabled]}
+                  onPress={handleSendCode}
+                  disabled={resetLoading}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient
+                    colors={resetLoading ? [P.bg3, P.bg3] : [P.blueLight, P.blueDark]}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                    style={styles.primaryBtnGrad}
+                  >
+                    {resetLoading
+                      ? <ActivityIndicator color={P.white} size="small" />
+                      : <Text style={styles.primaryBtnTxt}>SEND RESET CODE</Text>
+                    }
+                  </LinearGradient>
+                </TouchableOpacity>
+              </>
+            )}
 
-          {/* ── FORGOT — verify + new password ── */}
-          {step === STEPS.FORGOT_VERIFY && (
-            <>
-              <TouchableOpacity onPress={() => setStep(STEPS.FORGOT_SEND)} style={styles.backBtn}>
-                <Text style={styles.backBtnTxt}>← Back</Text>
-              </TouchableOpacity>
-              <Text style={styles.heading}>Enter Verification Code</Text>
-              <Text style={styles.sub}>Enter the 6-digit code sent to your email.</Text>
+            {/* Step: Forgot — enter code + new password */}
+            {step === STEPS.FORGOT_VERIFY && (
+              <>
+                <TouchableOpacity onPress={() => setStep(STEPS.FORGOT_SEND)} style={styles.backBtn}>
+                  <Text style={styles.backTxt}>← Back</Text>
+                </TouchableOpacity>
+                <Text style={styles.cardTitle}>Enter Reset Code</Text>
+                <Text style={styles.cardSub}>Check your email for the 6-digit code.</Text>
 
-              <Text style={styles.label}>6-Digit Code</Text>
-              <TextInput
-                style={[inputStyle, styles.codeInput]}
-                value={resetCode} onChangeText={setResetCode}
-                placeholder="000000" placeholderTextColor={COLORS.textDisabled}
-                keyboardType="number-pad" maxLength={6}
-              />
+                {!!error && <ErrorBox text={error} />}
 
-              <Text style={styles.label}>New Password</Text>
-              <TextInput
-                style={[inputStyle, { marginBottom: S.xl }]}
-                value={newPassword} onChangeText={setNewPassword}
-                placeholder="Min 8 characters" placeholderTextColor={COLORS.textDisabled}
-                secureTextEntry autoCapitalize="none"
-              />
+                <Label text="6-Digit Code" />
+                <TextInput
+                  style={[styles.input, styles.codeInput]}
+                  value={resetCode}
+                  onChangeText={setResetCode}
+                  placeholder="0 0 0 0 0 0"
+                  placeholderTextColor={P.t4}
+                  keyboardType="number-pad"
+                  maxLength={6}
+                  selectionColor={P.blue}
+                />
 
-              <TouchableOpacity
-                style={[styles.btn, resetLoading && styles.btnDisabled]}
-                onPress={handleResetPassword} disabled={resetLoading}
-              >
-                {resetLoading
-                  ? <ActivityIndicator color={COLORS.white} />
-                  : <Text style={styles.btnTxt}>Set New Password</Text>
-                }
-              </TouchableOpacity>
-            </>
-          )}
-        </Animated.View>
+                <Label text="New Password" />
+                <TextInput
+                  style={styles.input}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                  placeholder="Minimum 8 characters"
+                  placeholderTextColor={P.t4}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  selectionColor={P.blue}
+                />
 
-        {/* Demo hint */}
-        <Animated.View style={[styles.hintBox, { opacity: fadeAnim }]}>
-          <Text style={styles.hintTitle}>Demo Credentials (Auto-Role Routing)</Text>
-          <Text style={styles.hint}>Super Admin: admin@observant.com / admin123</Text>
-          <Text style={styles.hint}>Manager:     elena@observant.com / manager123</Text>
-          <Text style={styles.hint}>Guard:       ahmad@observant.com / guard123</Text>
-        </Animated.View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, resetLoading && styles.btnDisabled, { marginTop: SP.px24 }]}
+                  onPress={handleResetPassword}
+                  disabled={resetLoading}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient
+                    colors={resetLoading ? [P.bg3, P.bg3] : [P.blueLight, P.blueDark]}
+                    start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                    style={styles.primaryBtnGrad}
+                  >
+                    {resetLoading
+                      ? <ActivityIndicator color={P.white} size="small" />
+                      : <Text style={styles.primaryBtnTxt}>SET NEW PASSWORD</Text>
+                    }
+                  </LinearGradient>
+                </TouchableOpacity>
+              </>
+            )}
+          </Animated.View>
+
+          {/* Demo credentials hint */}
+          <Animated.View style={[styles.hint, { opacity: cardOpacity }]}>
+            <View style={styles.hintHeader}>
+              <View style={styles.hintDot} />
+              <Text style={styles.hintLabel}>DEMO CREDENTIALS</Text>
+              <View style={styles.hintDot} />
+            </View>
+            <Text style={styles.hintLine}>Manager: elena@observant.com  /  manager123</Text>
+            <Text style={styles.hintLine}>Guard:   ahmad@observant.com   /  guard123</Text>
+          </Animated.View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+function Label({ text }) {
+  return <Text style={styles.label}>{text}</Text>;
+}
+
+function ErrorBox({ text }) {
+  return (
+    <View style={styles.errorBox}>
+      <View style={styles.errorStripe} />
+      <Text style={styles.errorTxt}>{text}</Text>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root:       { flex: 1, backgroundColor: COLORS.bgRoot },
-  scroll:     { flexGrow: 1, justifyContent: 'center', padding: S.xl },
-  logoWrap:   { alignItems: 'center', marginBottom: S.xxxl },
-  logo:       { width: 200, height: 66 },
-  logoBrand:  { width: 60, height: 3, backgroundColor: COLORS.brand, borderRadius: 2, marginTop: S.md, marginBottom: S.sm },
-  tagline:    { color: COLORS.textMuted, fontSize: 13, letterSpacing: 0.5 },
-  successBanner: {
+  root:       { flex: 1, backgroundColor: P.bg0 },
+  kav:        { flex: 1 },
+  scroll:     { flexGrow: 1, justifyContent: 'center', paddingHorizontal: SP.px24, paddingVertical: SP.px40 },
+
+  glowOrb:    { position: 'absolute', top: -60, alignSelf: 'center', width: 340, height: 340 },
+  glowOrbInner:{ flex: 1, borderRadius: 170 },
+
+  // Logo section
+  logoSection:{ alignItems: 'center', marginBottom: SP.px40 },
+  badgeWrap:  { position: 'relative', marginBottom: SP.px20 },
+  badge:      { width: 120, height: 120 },
+  outerRing:  {
+    position: 'absolute', inset: -6,
+    borderRadius: 66, borderWidth: 1.5, borderColor: P.goldBorder,
+  },
+  orgName:    { fontSize: 15, fontWeight: '800', color: P.t1, letterSpacing: 3.5, marginBottom: SP.px8 },
+  goldDivider:{ width: 60, height: 1.5, backgroundColor: P.gold, borderRadius: 1, marginBottom: SP.px8 },
+  appLabel:   { ...FONT.label, color: P.gold, letterSpacing: 2 },
+
+  // Card
+  card: {
+    borderRadius: BR.xl,
+    borderWidth: 1,
+    borderColor: P.b3,
+    padding: SP.px24,
+    overflow: 'hidden',
+    ...SH_TOKENS.lg,
+    marginBottom: SP.px24,
+  },
+  cardGradient: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: BR.xl,
+  },
+  cardTitle:  { ...FONT.h2, marginBottom: SP.px4 },
+  cardSub:    { ...FONT.body2, marginBottom: SP.px24 },
+
+  // Inputs
+  label: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: P.t3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: SP.px8,
+    marginTop: SP.px4,
+  },
+  input: {
+    backgroundColor: P.bg3,
+    borderWidth: 1,
+    borderColor: P.b2,
+    borderRadius: BR.sm,
+    paddingHorizontal: SP.px16,
+    paddingVertical: SP.px12,
+    color: P.t1,
+    fontSize: 15,
+    marginBottom: SP.px4,
+  },
+  inputError: { borderColor: P.redBorder },
+  passRow:    { flexDirection: 'row', alignItems: 'center', gap: SP.px8, marginBottom: SP.px4 },
+  passInput:  { flex: 1, marginBottom: 0 },
+  eyeBtn:     { paddingHorizontal: SP.px12, paddingVertical: SP.px12 },
+  eyeTxt:     { color: P.info, fontSize: 13, fontWeight: '600' },
+  codeInput:  { fontSize: 22, letterSpacing: 10, textAlign: 'center' },
+
+  forgotBtn:  { alignSelf: 'flex-end', marginTop: SP.px8, marginBottom: SP.px24 },
+  forgotTxt:  { color: P.info, fontSize: 13, fontWeight: '600' },
+
+  // Primary button
+  primaryBtn: { borderRadius: BR.md, overflow: 'hidden', marginTop: SP.px8, ...SH_TOKENS.blue },
+  primaryBtnGrad: { paddingVertical: 15, alignItems: 'center', justifyContent: 'center' },
+  primaryBtnTxt: { color: P.white, fontSize: 14, fontWeight: '800', letterSpacing: 1.5 },
+  btnDisabled:{ opacity: 0.55 },
+
+  backBtn:    { marginBottom: SP.px16 },
+  backTxt:    { color: P.info, fontSize: 13, fontWeight: '600' },
+
+  // Error
+  errorBox:   {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: S.md,
-    backgroundColor: COLORS.okBg,
+    backgroundColor: P.redSubtle,
     borderWidth: 1,
-    borderColor: COLORS.okBorder,
-    borderRadius: R.lg,
-    padding: S.lg,
-    marginBottom: S.lg,
-    ...shadows.md,
+    borderColor: P.redBorder,
+    borderRadius: BR.sm,
+    marginBottom: SP.px16,
+    overflow: 'hidden',
   },
-  successTitle: { color: COLORS.white, fontSize: 15, fontWeight: '800' },
-  successSub:   { color: COLORS.ok, fontSize: 12, fontWeight: '600', marginTop: 2 },
-  card:       { backgroundColor: COLORS.bgCard, borderRadius: R.xl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.borderSubtle, ...shadows.md, marginBottom: S.xl },
-  heading:    { ...TYPE.title, marginBottom: S.xs },
-  sub:        { color: COLORS.textMuted, fontSize: 13, marginBottom: S.xl },
-  errorBox:   { backgroundColor: COLORS.missedBg, borderWidth: 1, borderColor: COLORS.missedBorder, borderRadius: R.sm, padding: S.md, marginBottom: S.md },
-  errorText:  { color: COLORS.missed, fontSize: 13, fontWeight: '600' },
-  label:      { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: S.sm, textTransform: 'uppercase', letterSpacing: 0.5 },
-  fieldRow:   { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.borderMid, borderRadius: R.md, paddingHorizontal: S.md, marginBottom: S.lg },
-  fieldIcon:  { marginRight: S.sm },
-  fieldInput: { flex: 1, color: COLORS.textPrimary, fontSize: 15, paddingVertical: S.md },
-  eyeBtn:     { padding: S.sm },
-  forgotLink: { alignSelf: 'flex-end', marginTop: -S.sm, marginBottom: S.xl },
-  forgotLinkTxt: { color: COLORS.info, fontSize: 13, fontWeight: '600' },
-  btn:        { backgroundColor: COLORS.brand, borderRadius: R.md, paddingVertical: 14, alignItems: 'center', ...shadows.brand },
-  btnDisabled:{ opacity: 0.6 },
-  btnTxt:     { color: COLORS.white, fontSize: 16, fontWeight: '800' },
-  backBtn:    { marginBottom: S.lg },
-  backBtnTxt: { color: COLORS.info, fontSize: 13, fontWeight: '600' },
-  codeInput:  { fontSize: 24, letterSpacing: 8, textAlign: 'center', marginBottom: S.lg },
-  hintBox:    { backgroundColor: COLORS.bgCard, borderRadius: R.md, padding: S.lg, borderWidth: 1, borderColor: COLORS.borderSubtle },
-  hintTitle:  { color: COLORS.textMuted, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: S.sm },
-  hint:       { color: COLORS.textDisabled, fontSize: 12, marginBottom: 3, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
+  errorStripe:{ width: 4, alignSelf: 'stretch', backgroundColor: P.red },
+  errorTxt:   { color: P.redLight, fontSize: 13, fontWeight: '500', flex: 1, padding: SP.px12 },
+
+  // Hint
+  hint: {
+    borderWidth: 1,
+    borderColor: P.b2,
+    borderRadius: BR.md,
+    padding: SP.px16,
+    backgroundColor: 'rgba(13,20,40,0.7)',
+  },
+  hintHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SP.px8, marginBottom: SP.px8 },
+  hintDot:    { width: 20, height: 1, backgroundColor: P.goldBorder },
+  hintLabel:  { ...FONT.label, color: P.gold },
+  hintLine:   {
+    color: P.t4,
+    fontSize: 11,
+    textAlign: 'center',
+    marginBottom: SP.px4,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
 });

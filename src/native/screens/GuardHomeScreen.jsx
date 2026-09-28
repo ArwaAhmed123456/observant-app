@@ -1,14 +1,25 @@
+/**
+ * GuardHomeScreen — Tactical Command Center
+ * Live clock as visual centrepiece with blue glow pulse while on shift.
+ * Next-Up card, SOS pulsing FAB, offline indicator.
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Alert, Modal, Animated, Vibration
+  Alert, Modal, Animated, Vibration, Platform,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import NetInfo from '@react-native-community/netinfo';
-import * as Location from 'expo-location';
+import {
+  AlertOctagon, PhoneCall, ShieldCheck, MapPin, Clock,
+  Calendar, CheckCircle2, ChevronRight, AlertTriangle, Radio
+} from 'lucide-react-native';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
-import { MapPin, Clock, CheckCircle, AlertTriangle, LogIn, LogOut, Bell, Zap, User } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
-import { COLORS, S, R, TYPE, shadows, cardStyle } from '../../theme';
+import { EmptyState } from '../components/EmptyState';
+import {
+  P, SP, BR, FONT, SH_TOKENS, GR, card, SCREEN, TAB_H, statusToken,
+} from '../../ds';
 import { enqueue } from '../../services/offlineQueue';
 
 export function GuardHomeScreen({ navigation }) {
@@ -18,72 +29,104 @@ export function GuardHomeScreen({ navigation }) {
     getTodayCheckCalls, getTodayPatrols,
     activeCheckCall, shiftEndWarning, setShiftEndWarning,
     antiIdlePrompt, dismissAntiIdlePrompt,
-    rosters, addAlert, triggerSOS,
+    rosters, addAlert, checkCalls,
   } = useApp();
 
-  const [bookingLoading, setBookingLoading] = useState(false);
-  const [showBookOff, setShowBookOff]       = useState(false);
   const [now, setNow]                       = useState(new Date());
   const [isOnline, setIsOnline]             = useState(true);
-  const [showSOSConfirm, setShowSOSConfirm] = useState(false);
+  const [bookingLoading, setBookingLoading] = useState(false);
+  const [showBookOff, setShowBookOff]       = useState(false);
+  const [showSosConfirm, setShowSosConfirm] = useState(false);
   const [sosLoading, setSosLoading]         = useState(false);
+  const [sosSent, setSosSent]               = useState(false);
 
-  // SOS pulse animation
-  const sosPulse = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(sosPulse, { toValue: 1.12, duration: 700, useNativeDriver: true }),
-        Animated.timing(sosPulse, { toValue: 1,    duration: 700, useNativeDriver: true }),
-      ])
-    );
-    pulse.start();
-    return () => pulse.stop();
-  }, []);
+  // Animations
+  const clockGlow   = useRef(new Animated.Value(0)).current;
+  const sosPulse    = useRef(new Animated.Value(1)).current;
+  const sosShake    = useRef(new Animated.Value(0)).current;
+  const checkBanner = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
+  const gId = currentUser?.id || currentUser?._id;
+  const activeSession = getGuardActiveSession(gId);
+  const site          = sites.find(s => s.id === currentUser?.siteId || s._id === currentUser?.siteId);
+  const todayCC       = getTodayCheckCalls(gId);
+  const todayPatrols  = getTodayPatrols(gId);
+  const completedCC   = todayCC.filter(c => c.response === 'yes').length;
+  const missedCC      = todayCC.filter(c => c.response === 'missed').length;
+  const donePatrols   = todayPatrols.filter(p => p.finishedAt).length;
 
-  useEffect(() => {
-    const unsub = NetInfo.addEventListener(state => {
-      setIsOnline(!!(state.isConnected && state.isInternetReachable));
-    });
-    return unsub;
-  }, []);
-
-  const activeSession  = getGuardActiveSession(currentUser?.id || currentUser?._id);
-  const site           = sites.find(s => s.id === currentUser?.siteId || s._id === currentUser?.siteId);
-  const todayCC        = getTodayCheckCalls(currentUser?.id || currentUser?._id);
-  const todayPatrols   = getTodayPatrols(currentUser?.id || currentUser?._id);
-  const completedCC    = todayCC.filter(cc => cc.response === 'yes').length;
-  const missedCC       = todayCC.filter(cc => cc.response === 'missed').length;
-  const completedPatrols = todayPatrols.filter(p => p.finishedAt).length;
-
-  // Today's roster
-  const dayKeys = ['sun','mon','tue','wed','thu','fri','sat'];
-  const todayKey = dayKeys[new Date().getDay()];
-  const todayRoster = (rosters || []).find(r => {
-    if (r.guardId !== (currentUser?.id || currentUser?._id)) return false;
-    if (!r.weekStartDate) return false;
+  // Today's roster shift
+  const dayKeys     = ['sun','mon','tue','wed','thu','fri','sat'];
+  const todayKey    = dayKeys[new Date().getDay()];
+  const todayRoster = (rosters||[]).find(r => {
+    if ((r.guardId !== gId)) return false;
     const diff = (new Date() - new Date(r.weekStartDate)) / 86400000;
     return diff >= 0 && diff < 7 && r.days?.[todayKey];
   });
   const shiftToday = todayRoster?.days?.[todayKey];
 
-  const greeting = () => {
-    const h = now.getHours();
-    return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
-  };
+  // Next check call time
+  const nextCheckCallTime = (() => {
+    if (!activeSession) return null;
+    const bookedOn = new Date(activeSession.bookedOnAt);
+    const msElapsed = Date.now() - bookedOn.getTime();
+    const nextMs = Math.ceil(msElapsed / 3600000) * 3600000;
+    return new Date(bookedOn.getTime() + nextMs);
+  })();
+
+  // ── Clock tick ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  // ── Clock glow pulse while on shift ──────────────────────────────────────
+  useEffect(() => {
+    if (!activeSession) { clockGlow.setValue(0); return; }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(clockGlow, { toValue: 1, duration: 1800, useNativeDriver: false }),
+        Animated.timing(clockGlow, { toValue: 0.3, duration: 1800, useNativeDriver: false }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [!!activeSession]);
+
+  // ── SOS FAB pulse ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(sosPulse, { toValue: 1.10, duration: 800, useNativeDriver: true }),
+        Animated.timing(sosPulse, { toValue: 1,    duration: 800, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  // ── Check call banner slide-in ────────────────────────────────────────────
+  useEffect(() => {
+    if (activeCheckCall) {
+      Animated.spring(checkBanner, { toValue: 1, friction: 7, tension: 50, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(checkBanner, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+    }
+  }, [!!activeCheckCall]);
+
+  // ── Connectivity ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    const unsub = NetInfo.addEventListener(s => setIsOnline(!!(s.isConnected && s.isInternetReachable)));
+    return unsub;
+  }, []);
 
   const handleBookOn = async () => {
-    if (!currentUser?.siteId && !currentUser?.siteId) {
+    if (!currentUser?.siteId) {
       Alert.alert('No Site Assigned', 'Contact your manager to be assigned to a site.');
       return;
     }
     setBookingLoading(true);
-    await bookOn(currentUser.id || currentUser._id, currentUser.siteId);
+    await bookOn(gId, currentUser.siteId);
     setBookingLoading(false);
   };
 
@@ -95,242 +138,472 @@ export function GuardHomeScreen({ navigation }) {
     setBookingLoading(false);
   };
 
-  // ── SOS ────────────────────────────────────────────────────────────────────
-  const handleSOS = async () => {
-    setShowSOSConfirm(false);
-    setSosLoading(true);
-    Vibration.vibrate([0, 400, 200, 400]);
-
-    let coords = null;
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-      }
-    } catch {}
-
-    if (!coords && site?.latitude) {
-      coords = { latitude: site.latitude, longitude: site.longitude };
-    }
-
-    if (!isOnline) {
-      await enqueue({
-        action: 'SOS_TRIGGER',
-        guardId: currentUser?.id || currentUser?._id,
-        siteId: currentUser?.siteId,
-        location: coords,
-        label: 'Emergency SOS Alert',
-      });
-      setSosLoading(false);
-      Alert.alert('SOS Queued Offline', 'Your SOS emergency flag and location coordinates have been stored locally. It will transmit immediately when connection is restored.');
-      return;
-    }
-
-    await triggerSOS({ location: coords, note: 'Urgent assistance requested by officer' });
-    setSosLoading(false);
-    Alert.alert('🚨 Emergency SOS Sent', 'Your operations manager has been immediately alerted with your live location. Help is on the way. Stay safe.');
+  const triggerSosShake = () => {
+    sosShake.setValue(0);
+    Animated.sequence([
+      Animated.timing(sosShake, { toValue: 14, duration: 50, useNativeDriver: true }),
+      Animated.timing(sosShake, { toValue: -14, duration: 50, useNativeDriver: true }),
+      Animated.timing(sosShake, { toValue: 10, duration: 50, useNativeDriver: true }),
+      Animated.timing(sosShake, { toValue: -10, duration: 50, useNativeDriver: true }),
+      Animated.timing(sosShake, { toValue: 0, duration: 50, useNativeDriver: true }),
+    ]).start();
   };
 
+  const handleSos = async () => {
+    setShowSosConfirm(false);
+    setSosLoading(true);
+    Vibration.vibrate([0, 500, 200, 500, 200, 500]);
+    triggerSosShake();
+
+    if (!isOnline) {
+      await enqueue({ url: '/api/sos/trigger', method: 'POST', body: { note: 'SOS offline' }, label: 'SOS' });
+      setSosLoading(false);
+      setSosSent(true);
+      return;
+    }
+    await addAlert?.({
+      type: 'sos', siteId: currentUser?.siteId, guardId: gId,
+      title: `🚨 SOS — ${currentUser?.name}`,
+      message: `URGENT: ${currentUser?.name} (${currentUser?.badgeNumber}) triggered emergency alert.`,
+    });
+    setSosLoading(false);
+    setSosSent(true);
+  };
+
+  const greeting = () => {
+    const h = now.getHours();
+    return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+  };
+
+  const glowOpacity = clockGlow.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
+
   return (
-    <View style={styles.root}>
-      <AppHeader right={
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: S.sm }}>
-          {!isOnline && (
-            <View style={styles.offlinePill}>
-              <Text style={styles.offlinePillTxt}>Offline</Text>
+    <View style={s.root}>
+      <AppHeader
+        right={
+          !isOnline ? (
+            <View style={s.offlinePill}>
+              <View style={s.offlineDot} />
+              <Text style={s.offlineTxt}>OFFLINE</Text>
+            </View>
+          ) : null
+        }
+      />
+
+      <ScrollView
+        style={s.scroll}
+        contentContainerStyle={[s.scrollContent, { paddingBottom: TAB_H + SP.px64 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Greeting ── */}
+        <Text style={s.greeting}>{greeting()}</Text>
+        <Text style={s.name}>{currentUser?.name}</Text>
+        <Text style={s.badge}>{currentUser?.badgeNumber}  ·  {site?.name || 'No site assigned'}</Text>
+
+        {/* ── LIVE CLOCK (centrepiece) ── */}
+        <View style={s.clockWrap}>
+          {/* Radial glow — only visible when on shift */}
+          <Animated.View style={[s.clockGlowRing, { opacity: glowOpacity }]}>
+            <LinearGradient
+              colors={['rgba(27,79,190,0.0)', 'rgba(27,79,190,0.30)', 'rgba(27,79,190,0.0)']}
+              style={s.clockGlowInner}
+            />
+          </Animated.View>
+
+          <Text style={[s.clock, activeSession && s.clockActive]}>
+            {now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </Text>
+          <Text style={s.clockDate}>{formatDate(now)}</Text>
+
+          {activeSession && (
+            <View style={s.onShiftBadge}>
+              <View style={s.onShiftDot} />
+              <Text style={s.onShiftTxt}>ON SHIFT</Text>
             </View>
           )}
-          <TouchableOpacity
-            style={styles.profileHeaderBtn}
-            onPress={() => navigation.navigate('Profile')}
-            title="Profile & Settings"
-          >
-            <User color={COLORS.brand} size={20} />
-          </TouchableOpacity>
         </View>
-      } />
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Greeting */}
-        <Text style={styles.greeting}>{greeting()},</Text>
-        <Text style={styles.name}>{currentUser?.name}</Text>
-        <Text style={styles.badge}>{currentUser?.badgeNumber} · {site?.name || 'No site assigned'}</Text>
-
-        {/* Clock */}
-        <Text style={styles.clock}>{now.toLocaleTimeString('en-GB')}</Text>
-        <Text style={styles.date}>{formatDate(now)}</Text>
-
-        {/* Shift end warning */}
+        {/* ── Shift end warning ── */}
         {shiftEndWarning && (
-          <TouchableOpacity style={styles.warnBanner} onPress={() => setShiftEndWarning(false)}>
-            <Bell color={COLORS.issue} size={16} />
-            <Text style={styles.warnText}>Your shift is ending soon — don't forget to Book Off.</Text>
+          <TouchableOpacity style={s.warnBanner} onPress={() => setShiftEndWarning(false)}>
+            <LinearGradient colors={[P.warnSubtle, 'transparent']} style={StyleSheet.absoluteFillObject} />
+            <View style={s.warnStripe} />
+            <Text style={s.warnTxt}>⏰  Shift ending soon — remember to Book Off.</Text>
           </TouchableOpacity>
         )}
 
-        {/* Anti-idle prompt */}
+        {/* ── Anti-idle prompt ── */}
         {antiIdlePrompt && activeSession && (
-          <View style={styles.antiIdleCard}>
-            <AlertTriangle color={COLORS.issue} size={18} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.antiIdleTitle}>Surprise Patrol Check!</Text>
-              <Text style={styles.antiIdleSub}>Start patrolling now to stay ahead of schedule.</Text>
+          <View style={s.antiIdleCard}>
+            <LinearGradient colors={[P.warnSubtle, 'transparent']} style={StyleSheet.absoluteFillObject} />
+            <View style={s.antiIdleLeft}>
+              <Text style={s.antiIdleTitle}>Surprise Patrol Check</Text>
+              <Text style={s.antiIdleSub}>Start patrolling now to stay ahead of schedule.</Text>
             </View>
-            <TouchableOpacity style={styles.antiIdleGoBtn} onPress={() => { dismissAntiIdlePrompt(); navigation.navigate('Patrol'); }}>
-              <Text style={styles.antiIdleGoBtnTxt}>Go</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={dismissAntiIdlePrompt} style={{ paddingLeft: S.sm }}>
-              <Text style={{ color: COLORS.textMuted, fontSize: 12 }}>Later</Text>
+            <TouchableOpacity style={s.antiIdleGoBtn} onPress={() => { dismissAntiIdlePrompt(); navigation.navigate('Patrol'); }}>
+              <Text style={s.antiIdleGoBtnTxt}>GO →</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Active check call banner */}
+        {/* ── Active check call banner ── */}
         {activeCheckCall && (
-          <TouchableOpacity style={styles.checkCallBanner} onPress={() => navigation.navigate('Check Call')}>
-            <Bell color={COLORS.white} size={18} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.checkCallTitle}>Check Call — is everything okay?</Text>
-              <Text style={styles.checkCallSub}>Tap to respond within 10 minutes</Text>
+          <Animated.View style={[s.checkCallBanner, {
+            transform: [{ scale: checkBanner.interpolate({ inputRange: [0,1], outputRange: [0.95,1] }) }],
+            opacity: checkBanner,
+          }]}>
+            <LinearGradient colors={['#1B3A8C', '#122870']} style={StyleSheet.absoluteFillObject} />
+            <View style={s.checkCallPulse} />
+            <View style={s.checkCallContent}>
+              <Text style={s.checkCallTitle}>CHECK CALL</Text>
+              <Text style={s.checkCallSub}>Is everything okay on site? Tap to respond.</Text>
             </View>
-            <Text style={styles.checkCallArrow}>→</Text>
-          </TouchableOpacity>
+            <TouchableOpacity style={s.checkCallArrow} onPress={() => navigation.navigate('Check Call')}>
+              <Text style={s.checkCallArrowTxt}>→</Text>
+            </TouchableOpacity>
+          </Animated.View>
         )}
 
-        {/* Shift status card */}
+        {/* ── Shift status card ── */}
         {activeSession ? (
-          <View style={[cardStyle, styles.shiftCard]}>
-            <View style={styles.shiftActive}>
-              <CheckCircle color={COLORS.ok} size={18} />
-              <Text style={styles.shiftActiveText}>Booked on since {formatTime(activeSession.bookedOnAt)}</Text>
-            </View>
-            <View style={styles.shiftRow}>
-              <MapPin color={COLORS.info} size={14} />
-              <Text style={styles.shiftSite}>{site?.name}</Text>
-            </View>
-            {shiftToday && (
-              <Text style={styles.shiftTime}>Scheduled: {shiftToday.start} – {shiftToday.end}</Text>
-            )}
-            {activeSession.punctuality && !['on_time','unscheduled'].includes(activeSession.punctuality) && (
-              <View style={styles.punctualityBadge}>
-                <Text style={styles.punctualityText}>⚠ Booked on {activeSession.punctuality.replace('_',' ')}</Text>
+          <View style={s.shiftCard}>
+            <LinearGradient colors={['#14213A', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <View style={s.shiftCardInner}>
+              <View style={s.shiftRow}>
+                <View style={[s.shiftAccent, { backgroundColor: P.ok }]} />
+                <View>
+                  <Text style={s.shiftLabel}>BOOKED ON</Text>
+                  <Text style={s.shiftTime}>{formatTime(activeSession.bookedOnAt)}</Text>
+                </View>
               </View>
-            )}
+              {shiftToday && (
+                <View style={s.shiftRow}>
+                  <View style={[s.shiftAccent, { backgroundColor: P.blue }]} />
+                  <View>
+                    <Text style={s.shiftLabel}>SCHEDULED</Text>
+                    <Text style={s.shiftTime}>{shiftToday.start} – {shiftToday.end}</Text>
+                  </View>
+                </View>
+              )}
+              {activeSession.punctuality && !['on_time','unscheduled'].includes(activeSession.punctuality) && (
+                <View style={s.punctualityPill}>
+                  <Text style={s.punctualityTxt}>⚠  {activeSession.punctuality.replace(/_/g,' ').toUpperCase()}</Text>
+                </View>
+              )}
+            </View>
           </View>
         ) : (
-          <View style={[cardStyle, styles.offDutyCard]}>
-            <Clock color={COLORS.textMuted} size={18} />
-            <View>
-              <Text style={styles.offDutyText}>Currently off duty</Text>
-              {shiftToday && <Text style={styles.shiftTime}>Scheduled: {shiftToday.start} – {shiftToday.end}</Text>}
-            </View>
+          <View style={s.offDutyCard}>
+            <LinearGradient colors={['#141E32', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <Text style={s.offDutyLabel}>CURRENTLY OFF DUTY</Text>
+            {shiftToday
+              ? <Text style={s.offDutyTime}>Next shift: {shiftToday.start} – {shiftToday.end}</Text>
+              : <Text style={s.offDutyTime}>No shift scheduled today</Text>
+            }
           </View>
         )}
 
-        {/* Stats */}
-        <View style={styles.statsRow}>
-          <View style={[cardStyle, styles.statCard]}>
-            <Text style={styles.statValue}>{completedCC}/{todayCC.length}</Text>
-            <Text style={styles.statLabel}>Check Calls</Text>
-            {missedCC > 0 && <Text style={styles.statMissed}>{missedCC} missed</Text>}
-          </View>
-          <View style={[cardStyle, styles.statCard]}>
-            <Text style={styles.statValue}>{completedPatrols}</Text>
-            <Text style={styles.statLabel}>Patrols Done</Text>
-          </View>
+        {/* ── Stats row ── */}
+        <View style={s.statsRow}>
+          <StatTile
+            value={`${completedCC}/${todayCC.length}`}
+            label="Check Calls"
+            accent={missedCC > 0 ? P.danger : P.ok}
+            sub={missedCC > 0 ? `${missedCC} missed` : 'All clear'}
+          />
+          <StatTile value={donePatrols} label="Patrols Done" accent={P.blue} />
+          <StatTile
+            value={todayCC.filter(c => c.response === 'no').length}
+            label="Issues"
+            accent={todayCC.filter(c => c.response === 'no').length > 0 ? P.warn : P.t3}
+          />
         </View>
 
-        {/* Book on/off */}
-        {!activeSession ? (
-          <TouchableOpacity
-            style={[styles.bookBtn, styles.bookOnBtn, bookingLoading && styles.btnDisabled]}
-            onPress={handleBookOn} disabled={bookingLoading}
+        {/* ── Book On / Book Off CTA ── */}
+        <TouchableOpacity
+          style={[s.bookBtn, activeSession ? s.bookOffBtn : s.bookOnBtn, bookingLoading && s.btnDisabled]}
+          onPress={activeSession ? () => setShowBookOff(true) : handleBookOn}
+          disabled={bookingLoading}
+          activeOpacity={0.85}
+        >
+          <LinearGradient
+            colors={activeSession ? [P.red, P.redDark] : [P.ok, P.okDark]}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+            style={s.bookBtnGrad}
           >
-            <LogIn color={COLORS.white} size={20} />
-            <Text style={styles.bookBtnTxt}>Book On</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={[styles.bookBtn, styles.bookOffBtn, bookingLoading && styles.btnDisabled]}
-            onPress={() => setShowBookOff(true)} disabled={bookingLoading}
-          >
-            <LogOut color={COLORS.white} size={20} />
-            <Text style={styles.bookBtnTxt}>Book Off</Text>
-          </TouchableOpacity>
-        )}
+            <Text style={s.bookBtnTxt}>{activeSession ? 'BOOK OFF DUTY' : 'BOOK ON DUTY'}</Text>
+          </LinearGradient>
+        </TouchableOpacity>
 
-        {/* Recent check calls */}
-        {todayCC.length > 0 && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Today's Check Calls</Text>
-            {todayCC.slice(-5).reverse().map(cc => (
-              <View key={cc.id || cc._id} style={styles.ccRow}>
-                <View style={[styles.ccDot, { backgroundColor:
-                  cc.response === 'yes' ? COLORS.ok :
-                  cc.response === 'missed' ? COLORS.missed :
-                  cc.response === 'no' ? COLORS.issue : COLORS.borderMid
-                }]} />
-                <Text style={styles.ccTime}>{formatTime(cc.firedAt)}</Text>
-                <Text style={styles.ccStatus}>
-                  {cc.response === 'yes' ? '✓ All okay' : cc.response === 'missed' ? '✗ Missed' : cc.response === 'no' ? '⚠ Issue' : '⏳ Pending'}
+        {/* ── NEXT UP OPERATIONS CARD (always populated) ── */}
+        <View style={s.nextUpCard}>
+          <LinearGradient colors={['#101C34', '#0B1324']} style={StyleSheet.absoluteFillObject} />
+          <View style={s.nextUpAccentLine} />
+          {activeSession ? (
+            <View style={s.nextUpContent}>
+              <View style={s.nextUpHeader}>
+                <View style={s.nextUpBadge}>
+                  <Radio size={12} color={P.blueLight} />
+                  <Text style={s.nextUpBadgeTxt}>NEXT OPERATIONAL EVENT</Text>
+                </View>
+                <Text style={s.nextUpCountdown}>
+                  {nextCheckCallTime ? `Due ${formatTime(nextCheckCallTime)}` : 'On schedule'}
                 </Text>
               </View>
-            ))}
+
+              <View style={s.nextUpGrid}>
+                <View style={s.nextUpCol}>
+                  <View style={s.nextUpIconTitle}>
+                    <Clock size={13} color={P.blueLight} />
+                    <Text style={s.nextUpLabel}>CHECK CALL</Text>
+                  </View>
+                  <Text style={s.nextUpValue}>{nextCheckCallTime ? formatTime(nextCheckCallTime) : 'Pending'}</Text>
+                  <Text style={s.nextUpSub}>10m response SLA</Text>
+                </View>
+
+                <View style={s.nextUpDivider} />
+
+                <View style={s.nextUpCol}>
+                  <View style={s.nextUpIconTitle}>
+                    <ShieldCheck size={13} color={P.gold} />
+                    <Text style={s.nextUpLabel}>PATROL TOUR</Text>
+                  </View>
+                  <Text style={s.nextUpValue}>
+                    {donePatrols === 0 ? 'Now Due' : `~${Math.max(5, 60 - Math.floor((Date.now() - new Date(todayPatrols[todayPatrols.length-1]?.startedAt||Date.now()).getTime()) / 60000))}m`}
+                  </Text>
+                  <Text style={s.nextUpSub}>{site?.name ? `${site.name.slice(0, 14)}…` : 'Active site'}</Text>
+                </View>
+              </View>
+            </View>
+          ) : (
+            <View style={s.nextUpContent}>
+              <View style={s.nextUpHeader}>
+                <View style={[s.nextUpBadge, { backgroundColor: P.goldSubtle, borderColor: P.goldBorder }]}>
+                  <Calendar size={12} color={P.gold} />
+                  <Text style={[s.nextUpBadgeTxt, { color: P.gold }]}>NEXT SCHEDULED SHIFT</Text>
+                </View>
+                <Text style={s.nextUpCountdown}>Standby</Text>
+              </View>
+
+              <View style={s.nextUpOffDutyRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.nextUpValue}>{shiftToday ? `${shiftToday.start} – ${shiftToday.end}` : 'No shift today'}</Text>
+                  <Text style={s.nextUpSub}>{site?.name || 'Awaiting site dispatch'}</Text>
+                </View>
+                <TouchableOpacity
+                  style={s.viewRosterBtn}
+                  onPress={() => navigation.navigate('Shifts')}
+                  activeOpacity={0.8}
+                >
+                  <Text style={s.viewRosterBtnTxt}>View Roster →</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* ── Recent check calls ── */}
+        {todayCC.length > 0 ? (
+          <View style={s.section}>
+            <View style={s.sectionHeaderRow}>
+              <Text style={s.sectionTitle}>TODAY'S OPERATIONS LOG</Text>
+              <Text style={s.sectionSubBadge}>{todayCC.length} logged</Text>
+            </View>
+            {todayCC.slice().reverse().slice(0, 5).map(cc => {
+              const tok = statusToken(cc.response || 'upcoming');
+              return (
+                <View key={cc.id||cc._id} style={s.ccRow}>
+                  <View style={[s.ccAccent, { backgroundColor: tok.color }]} />
+                  <Text style={s.ccTime}>{formatTime(cc.firedAt)}</Text>
+                  <View style={s.ccContent}>
+                    <Text style={[s.ccStatus, { color: tok.color }]}>
+                      {cc.response === 'yes' ? '✓  All verified safe'
+                      : cc.response === 'missed' ? '✗  Missed response SLA'
+                      : cc.response === 'no' ? '⚠  Issue reported'
+                      : '·  Response pending'}
+                    </Text>
+                    {cc.note ? <Text style={s.ccNoteText} numberOfLines={1}>{cc.note}</Text> : null}
+                  </View>
+                  <ChevronRight size={14} color={P.t4} />
+                </View>
+              );
+            })}
           </View>
+        ) : (
+          <EmptyState
+            icon="shield"
+            title="Command Operations Standby"
+            message="Check calls and patrol verification logs will appear here automatically throughout your shift."
+            style={{ marginTop: SP.px16 }}
+          />
         )}
       </ScrollView>
 
       {/* ── SOS Floating Button ── */}
-      <Animated.View style={[styles.sosFabWrap, { transform: [{ scale: sosPulse }] }]}>
-        <TouchableOpacity
-          style={styles.sosFab}
-          onPress={() => setShowSOSConfirm(true)}
-          activeOpacity={0.85}
-        >
-          <Zap color={COLORS.white} size={22} fill={COLORS.white} />
-          <Text style={styles.sosFabTxt}>SOS</Text>
+      <Animated.View style={[s.sosFabWrap, { transform: [{ scale: sosPulse }, { translateX: sosShake }] }]}>
+        <TouchableOpacity style={s.sosFab} onPress={() => setShowSosConfirm(true)} activeOpacity={0.9}>
+          <LinearGradient colors={[P.redLight, P.red]} style={s.sosFabGrad}>
+            <AlertOctagon size={24} color={P.white} />
+            <Text style={s.sosFabTxt}>SOS</Text>
+          </LinearGradient>
         </TouchableOpacity>
       </Animated.View>
 
-      {/* SOS Confirm Modal */}
-      <Modal visible={showSOSConfirm} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.sosModal}>
-            <View style={styles.sosIconWrap}>
-              <Zap color={COLORS.sos} size={36} />
-            </View>
-            <Text style={styles.sosModalTitle}>Send Emergency SOS?</Text>
-            <Text style={styles.sosModalSub}>
-              This will immediately alert your manager with your name, badge, and site.
-              Only use in a genuine emergency.
+      {/* ── FULL SCREEN SOS TAKEOVER — CONFIRMATION & TRIGGER ── */}
+      <Modal visible={showSosConfirm} transparent={false} animationType="fade">
+        <View style={s.sosFullscreen}>
+          <LinearGradient
+            colors={['#4A080C', '#240406', '#0B0E14']}
+            style={StyleSheet.absoluteFillObject}
+          />
+
+          <View style={s.sosTakeoverBody}>
+            {/* Pulsing Emergency Beacon */}
+            <Animated.View style={{ transform: [{ scale: sosPulse }] }}>
+              <View style={s.sosHeroBeacon}>
+                <LinearGradient
+                  colors={['rgba(255,45,85,0.4)', 'rgba(200,35,44,0.15)']}
+                  style={StyleSheet.absoluteFillObject}
+                />
+                <AlertOctagon size={64} color={P.white} strokeWidth={2.2} />
+              </View>
+            </Animated.View>
+
+            <Text style={s.sosTakeoverTitle}>EMERGENCY SOS</Text>
+            <Text style={s.sosTakeoverSubtitle}>
+              IMMEDIATE DURESS & THREAT BROADCAST
             </Text>
+
+            <View style={s.sosTelemetryCard}>
+              <View style={s.sosTelemetryRow}>
+                <Text style={s.sosTelemetryKey}>OFFICER:</Text>
+                <Text style={s.sosTelemetryVal}>{currentUser?.name} ({currentUser?.badgeNumber || 'SG-900'})</Text>
+              </View>
+              <View style={s.sosTelemetryRow}>
+                <Text style={s.sosTelemetryKey}>LOCATION:</Text>
+                <Text style={s.sosTelemetryVal}>{site?.name || 'On Site Active Geofence'}</Text>
+              </View>
+              <View style={s.sosTelemetryRow}>
+                <Text style={s.sosTelemetryKey}>ESCALATION:</Text>
+                <Text style={[s.sosTelemetryVal, { color: P.redLight }]}>Priority 1 Tactical Dispatch</Text>
+              </View>
+            </View>
+
+            <Text style={s.sosTakeoverWarning}>
+              Triggering this alert will dispatch an immediate high-priority alarm to your operations manager and security monitoring console.
+            </Text>
+
+            {/* Big Tactical Trigger Button */}
             <TouchableOpacity
-              style={[styles.sosConfirmBtn, sosLoading && styles.btnDisabled]}
-              onPress={handleSOS} disabled={sosLoading}
+              style={[s.sosTakeoverCta, sosLoading && { opacity: 0.6 }]}
+              onPress={handleSos}
+              disabled={sosLoading}
+              activeOpacity={0.88}
             >
-              <Text style={styles.sosConfirmBtnTxt}>{sosLoading ? 'Sending…' : '🚨 Yes, Send SOS'}</Text>
+              <LinearGradient
+                colors={['#FF2D55', '#C8232C']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={s.sosTakeoverCtaGrad}
+              >
+                <AlertOctagon size={24} color={P.white} />
+                <Text style={s.sosTakeoverCtaTxt}>
+                  {sosLoading ? 'DISPATCHING ALERT…' : 'TRANSMIT EMERGENCY SOS'}
+                </Text>
+              </LinearGradient>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.sosCancelBtn} onPress={() => setShowSOSConfirm(false)}>
-              <Text style={styles.sosCancelBtnTxt}>Cancel — I'm okay</Text>
+
+            <TouchableOpacity
+              style={s.sosTakeoverCancelBtn}
+              onPress={() => setShowSosConfirm(false)}
+            >
+              <Text style={s.sosTakeoverCancelTxt}>Cancel — I am Safe & Secure</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* Book Off Modal */}
-      <Modal visible={showBookOff} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Book Off?</Text>
-            <Text style={styles.modalSub}>
-              End your shift?{activeSession ? `\nDuration: ${getShiftDuration(activeSession.bookedOnAt)}` : ''}
+      {/* ── FULL SCREEN SOS TAKEOVER — "HELP IS ON THE WAY" REASSURANCE STATE ── */}
+      <Modal visible={sosSent} transparent={false} animationType="fade">
+        <View style={s.sosFullscreen}>
+          <LinearGradient
+            colors={['#3B070A', '#1C0305', '#0B0E14']}
+            style={StyleSheet.absoluteFillObject}
+          />
+
+          <View style={s.sosTakeoverBody}>
+            {/* Pulsing Beacon */}
+            <Animated.View style={{ transform: [{ scale: sosPulse }] }}>
+              <View style={[s.sosHeroBeacon, { borderColor: P.okBorder }]}>
+                <LinearGradient
+                  colors={['rgba(34,197,94,0.3)', 'rgba(34,197,94,0.1)']}
+                  style={StyleSheet.absoluteFillObject}
+                />
+                <ShieldCheck size={64} color={P.ok} strokeWidth={2.2} />
+              </View>
+            </Animated.View>
+
+            <View style={s.reassuranceBadge}>
+              <View style={s.reassuranceDot} />
+              <Text style={s.reassuranceBadgeTxt}>DISPATCH NOTIFIED & CONFIRMED</Text>
+            </View>
+
+            <Text style={s.sosSentHeroTitle}>HELP IS ON THE WAY</Text>
+            <Text style={s.sosSentReassurance}>
+              Your distress signal has been received at the central operations console. Emergency dispatch protocol has been initiated for your site.
             </Text>
-            <TouchableOpacity style={styles.bookOffConfirm} onPress={handleBookOff}>
-              <Text style={styles.bookOffConfirmTxt}>Yes, Book Off</Text>
+
+            <View style={s.sosGuidanceCard}>
+              <View style={s.sosGuidanceItem}>
+                <Text style={s.sosGuidanceNum}>1</Text>
+                <Text style={s.sosGuidanceTxt}>Remain in the safest possible position.</Text>
+              </View>
+              <View style={s.sosGuidanceItem}>
+                <Text style={s.sosGuidanceNum}>2</Text>
+                <Text style={s.sosGuidanceTxt}>Keep your device powered on and visible.</Text>
+              </View>
+              <View style={s.sosGuidanceItem}>
+                <Text style={s.sosGuidanceNum}>3</Text>
+                <Text style={s.sosGuidanceTxt}>Dispatch supervisor will establish voice contact.</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={s.sosSentResolveBtn}
+              onPress={() => setSosSent(false)}
+              activeOpacity={0.85}
+            >
+              <LinearGradient
+                colors={[P.ok, P.okDark]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={s.sosSentResolveGrad}
+              >
+                <CheckCircle2 size={20} color={P.white} />
+                <Text style={s.sosSentResolveTxt}>ALL CLEAR — I AM SAFE</Text>
+              </LinearGradient>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowBookOff(false)}>
-              <Text style={styles.cancelBtnTxt}>Cancel</Text>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Book Off Confirm ── */}
+      <Modal visible={showBookOff} transparent animationType="slide">
+        <View style={s.sheetOverlay}>
+          <View style={s.sheet}>
+            <LinearGradient colors={['#162040', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <View style={s.sheetHandle} />
+            <Text style={s.sheetTitle}>End Shift?</Text>
+            <Text style={s.sheetSub}>
+              Duration: {activeSession ? getShiftDuration(activeSession.bookedOnAt) : '—'}
+            </Text>
+            <TouchableOpacity style={s.sheetConfirmBtn} onPress={handleBookOff}>
+              <LinearGradient colors={[P.red, P.redDark]} start={{x:0,y:0}} end={{x:1,y:0}} style={s.sheetBtnGrad}>
+                <Text style={s.sheetBtnTxt}>YES, BOOK OFF</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+            <TouchableOpacity style={s.sheetCancelBtn} onPress={() => setShowBookOff(false)}>
+              <Text style={s.sheetCancelTxt}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -339,90 +612,177 @@ export function GuardHomeScreen({ navigation }) {
   );
 }
 
-function getShiftDuration(bookedOnAt) {
-  const diff = Date.now() - new Date(bookedOnAt).getTime();
-  const h = Math.floor(diff / 3600000);
-  const m = Math.floor((diff % 3600000) / 60000);
-  return `${h}h ${m}m`;
+function StatTile({ value, label, accent, sub }) {
+  return (
+    <View style={st.wrap}>
+      <LinearGradient colors={['#131C2E', '#0F1520']} style={StyleSheet.absoluteFillObject} />
+      <View style={[st.accent, { backgroundColor: accent }]} />
+      <Text style={st.value}>{value}</Text>
+      <Text style={st.label}>{label}</Text>
+      {sub && <Text style={[st.sub, { color: accent }]}>{sub}</Text>}
+    </View>
+  );
 }
 
-const styles = StyleSheet.create({
-  root:          { flex: 1, backgroundColor: COLORS.bgRoot },
-  scroll:        { flex: 1 },
-  scrollContent: { padding: S.xl, paddingTop: S.sm, paddingBottom: 120 },
-  greeting:      { color: COLORS.textSecondary, fontSize: 14, marginTop: S.xs },
-  name:          { ...TYPE.title, marginTop: 2 },
-  badge:         { color: COLORS.textMuted, fontSize: 13, marginTop: S.xs },
-  clock:         { color: COLORS.brand, fontSize: 36, fontWeight: '800', marginTop: S.lg, letterSpacing: 1 },
-  date:          { color: COLORS.textMuted, fontSize: 13, marginBottom: S.lg },
-  offlinePill:   { backgroundColor: COLORS.issueBg, borderRadius: R.full, paddingHorizontal: S.md, paddingVertical: S.xs, borderWidth: 1, borderColor: COLORS.issueBorder },
-  offlinePillTxt:{ color: COLORS.issue, fontSize: 11, fontWeight: '700' },
-  warnBanner:    { flexDirection: 'row', alignItems: 'center', gap: S.sm, backgroundColor: COLORS.issueBg, borderWidth: 1, borderColor: COLORS.issueBorder, borderRadius: R.md, padding: S.md, marginBottom: S.md },
-  warnText:      { color: COLORS.issue, fontSize: 13, fontWeight: '600', flex: 1 },
-  antiIdleCard:  { flexDirection: 'row', alignItems: 'center', gap: S.sm, backgroundColor: COLORS.issueBg, borderWidth: 1, borderColor: COLORS.issueBorder, borderRadius: R.md, padding: S.md, marginBottom: S.md },
-  antiIdleTitle: { color: COLORS.white, fontSize: 13, fontWeight: '800' },
-  antiIdleSub:   { color: COLORS.textSecondary, fontSize: 11 },
-  antiIdleGoBtn: { backgroundColor: COLORS.issue, borderRadius: R.sm, paddingHorizontal: S.md, paddingVertical: S.sm },
-  antiIdleGoBtnTxt:{ color: COLORS.black, fontWeight: '800', fontSize: 13 },
-  checkCallBanner:{ flexDirection: 'row', alignItems: 'center', gap: S.md, backgroundColor: '#1d4ed8', borderRadius: R.md, padding: S.lg, marginBottom: S.md, ...shadows.md },
-  checkCallTitle: { color: COLORS.white, fontSize: 14, fontWeight: '800' },
-  checkCallSub:   { color: '#bfdbfe', fontSize: 12 },
-  checkCallArrow: { color: COLORS.white, fontSize: 20, fontWeight: '800' },
-  shiftCard:     { marginBottom: S.lg },
-  shiftActive:   { flexDirection: 'row', alignItems: 'center', gap: S.sm, marginBottom: S.sm },
-  shiftActiveText:{ color: COLORS.ok, fontSize: 15, fontWeight: '700' },
-  shiftRow:      { flexDirection: 'row', alignItems: 'center', gap: S.xs, marginBottom: S.xs },
-  shiftSite:     { color: COLORS.textSecondary, fontSize: 13 },
-  shiftTime:     { color: COLORS.textMuted, fontSize: 12, marginTop: S.xs },
-  punctualityBadge:{ backgroundColor: COLORS.issueBg, borderRadius: R.xs, paddingHorizontal: S.sm, paddingVertical: S.xs, alignSelf: 'flex-start', marginTop: S.sm },
-  punctualityText:{ color: COLORS.issue, fontSize: 11, fontWeight: '700' },
-  offDutyCard:   { flexDirection: 'row', alignItems: 'center', gap: S.md, marginBottom: S.lg },
-  offDutyText:   { color: COLORS.textMuted, fontSize: 14 },
-  statsRow:      { flexDirection: 'row', gap: S.md, marginBottom: S.lg },
-  statCard:      { flex: 1, alignItems: 'center', padding: S.md },
-  statValue:     { color: COLORS.white, fontSize: 22, fontWeight: '800' },
-  statLabel:     { color: COLORS.textMuted, fontSize: 11, marginTop: 2 },
-  statMissed:    { color: COLORS.missed, fontSize: 10, marginTop: 2 },
-  bookBtn:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S.md, borderRadius: R.lg, paddingVertical: 16, marginBottom: S.xl, ...shadows.md },
-  bookOnBtn:     { backgroundColor: COLORS.ok, ...shadows.brand },
-  bookOffBtn:    { backgroundColor: COLORS.missed },
-  btnDisabled:   { opacity: 0.6 },
-  bookBtnTxt:    { color: COLORS.white, fontSize: 18, fontWeight: '800' },
-  section:       { marginBottom: S.xl },
-  sectionTitle:  { ...TYPE.label, marginBottom: S.md },
-  ccRow:         { flexDirection: 'row', alignItems: 'center', gap: S.md, paddingVertical: S.sm, borderBottomWidth: 1, borderBottomColor: COLORS.borderSubtle },
-  ccDot:         { width: 8, height: 8, borderRadius: 4 },
-  ccTime:        { color: COLORS.textSecondary, fontSize: 13, width: 50 },
-  ccStatus:      { color: COLORS.textPrimary, fontSize: 13 },
+const st = StyleSheet.create({
+  wrap:   { flex: 1, borderRadius: BR.lg, borderWidth: 1, borderColor: P.b2, overflow: 'hidden', paddingTop: SP.px8, paddingHorizontal: SP.px12, paddingBottom: SP.px12, ...SH_TOKENS.xs, position: 'relative' },
+  accent: { position: 'absolute', top: 0, left: 0, right: 0, height: 2, borderRadius: 1 },
+  value:  { fontSize: 24, fontWeight: '800', color: P.t1, marginTop: SP.px8, fontVariant: ['tabular-nums'] },
+  label:  { fontSize: 10, fontWeight: '700', color: P.t3, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 2 },
+  sub:    { fontSize: 10, fontWeight: '600', marginTop: 2 },
+});
+
+function getShiftDuration(bookedOnAt) {
+  const diff = Date.now() - new Date(bookedOnAt).getTime();
+  return `${Math.floor(diff/3600000)}h ${Math.floor((diff%3600000)/60000)}m`;
+}
+
+const s = StyleSheet.create({
+  root:            { flex: 1, backgroundColor: P.bg0 },
+  scroll:          { flex: 1 },
+  scrollContent:   { paddingHorizontal: SP.px16, paddingTop: SP.px8 },
+
+  offlinePill:     { flexDirection: 'row', alignItems: 'center', gap: SP.px4, backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: BR.full, paddingHorizontal: SP.px8, paddingVertical: SP.px4, borderWidth: 1, borderColor: P.warnBorder },
+  offlineDot:      { width: 6, height: 6, borderRadius: 3, backgroundColor: P.warn },
+  offlineTxt:      { fontSize: 9, fontWeight: '800', color: P.warn, letterSpacing: 0.8 },
+
+  greeting:        { fontSize: 13, color: P.t3, marginTop: SP.px12 },
+  name:            { fontSize: 24, fontWeight: '800', color: P.t1, marginTop: 2, letterSpacing: -0.3 },
+  badge:           { fontSize: 12, color: P.t3, marginTop: SP.px4, letterSpacing: 0.3 },
+
+  // Live clock
+  clockWrap:       { alignItems: 'center', paddingVertical: SP.px24, position: 'relative' },
+  clockGlowRing:   { position: 'absolute', width: 280, height: 140, top: 10 },
+  clockGlowInner:  { flex: 1, borderRadius: 140 },
+  clock:           { fontSize: 52, fontWeight: '800', color: P.t3, letterSpacing: 2, fontVariant: ['tabular-nums'] },
+  clockActive:     { color: P.t1 },
+  clockDate:       { fontSize: 13, color: P.t3, marginTop: SP.px4, letterSpacing: 0.5 },
+  onShiftBadge:    { flexDirection: 'row', alignItems: 'center', gap: SP.px8, backgroundColor: P.okSubtle, borderRadius: BR.full, paddingHorizontal: SP.px12, paddingVertical: SP.px4, borderWidth: 1, borderColor: P.okBorder, marginTop: SP.px12 },
+  onShiftDot:      { width: 7, height: 7, borderRadius: 4, backgroundColor: P.ok },
+  onShiftTxt:      { fontSize: 10, fontWeight: '800', color: P.ok, letterSpacing: 1 },
+
+  // Banners
+  warnBanner:      { flexDirection: 'row', alignItems: 'center', borderRadius: BR.md, borderWidth: 1, borderColor: P.warnBorder, marginBottom: SP.px12, overflow: 'hidden', paddingVertical: SP.px12 },
+  warnStripe:      { width: 4, alignSelf: 'stretch', backgroundColor: P.warn, marginRight: SP.px12 },
+  warnTxt:         { color: P.warn, fontSize: 13, fontWeight: '600', flex: 1, paddingRight: SP.px12 },
+
+  antiIdleCard:    { flexDirection: 'row', alignItems: 'center', borderRadius: BR.md, borderWidth: 1, borderColor: P.warnBorder, marginBottom: SP.px12, overflow: 'hidden', padding: SP.px16 },
+  antiIdleLeft:    { flex: 1 },
+  antiIdleTitle:   { color: P.t1, fontSize: 14, fontWeight: '800' },
+  antiIdleSub:     { color: P.t3, fontSize: 12, marginTop: 2 },
+  antiIdleGoBtn:   { backgroundColor: P.warn, borderRadius: BR.sm, paddingHorizontal: SP.px16, paddingVertical: SP.px8 },
+  antiIdleGoBtnTxt:{ color: P.bg0, fontSize: 12, fontWeight: '800', letterSpacing: 0.5 },
+
+  checkCallBanner: { borderRadius: BR.lg, overflow: 'hidden', marginBottom: SP.px12, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: P.blueBorder, ...SH_TOKENS.blue },
+  checkCallPulse:  { width: 4, alignSelf: 'stretch', backgroundColor: P.blueLight },
+  checkCallContent:{ flex: 1, padding: SP.px16 },
+  checkCallTitle:  { fontSize: 12, fontWeight: '800', color: P.gold, letterSpacing: 1.5 },
+  checkCallSub:    { fontSize: 13, color: P.t1, marginTop: SP.px4 },
+  checkCallArrow:  { paddingHorizontal: SP.px16 },
+  checkCallArrowTxt:{ fontSize: 22, color: P.blueLight, fontWeight: '300' },
+
+  // Shift status
+  shiftCard:       { borderRadius: BR.lg, borderWidth: 1, borderColor: P.b2, marginBottom: SP.px12, overflow: 'hidden', ...SH_TOKENS.sm },
+  shiftCardInner:  { padding: SP.px16, flexDirection: 'row', gap: SP.px24 },
+  shiftRow:        { flexDirection: 'row', alignItems: 'flex-start', gap: SP.px12 },
+  shiftAccent:     { width: 3, height: '100%', borderRadius: 2, marginTop: 2 },
+  shiftLabel:      { fontSize: 9, fontWeight: '800', color: P.t3, letterSpacing: 1, textTransform: 'uppercase' },
+  shiftTime:       { fontSize: 16, fontWeight: '700', color: P.t1, marginTop: 2, fontVariant: ['tabular-nums'] },
+  punctualityPill: { backgroundColor: P.warnSubtle, borderRadius: BR.xs, paddingHorizontal: SP.px8, paddingVertical: SP.px4, borderWidth: 1, borderColor: P.warnBorder, alignSelf: 'flex-start', marginTop: SP.px8 },
+  punctualityTxt:  { color: P.warn, fontSize: 10, fontWeight: '700', letterSpacing: 0.5 },
+
+  offDutyCard:     { borderRadius: BR.lg, borderWidth: 1, borderColor: P.b1, marginBottom: SP.px12, overflow: 'hidden', padding: SP.px16, alignItems: 'center' },
+  offDutyLabel:    { fontSize: 11, fontWeight: '800', color: P.t3, letterSpacing: 1.5 },
+  offDutyTime:     { fontSize: 14, color: P.t2, marginTop: SP.px4 },
+
+  // Stats
+  statsRow:        { flexDirection: 'row', gap: SP.px8, marginBottom: SP.px12 },
+
+  // Next up operations card
+  nextUpCard:      { borderRadius: BR.lg, borderWidth: 1, borderColor: P.blueBorder, overflow: 'hidden', marginBottom: SP.px16, ...SH_TOKENS.blue, position: 'relative' },
+  nextUpAccentLine:{ height: 2.5, backgroundColor: P.blueLight, width: '100%' },
+  nextUpContent:   { padding: SP.px16 },
+  nextUpHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px12 },
+  nextUpBadge:     { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.blueSubtle, borderRadius: BR.sm, borderWidth: 1, borderColor: P.blueBorder, paddingHorizontal: SP.px8, paddingVertical: 4 },
+  nextUpBadgeTxt:  { fontSize: 10, fontWeight: '800', color: P.blueLight, letterSpacing: 0.8 },
+  nextUpCountdown: { fontSize: 11, fontWeight: '700', color: P.t3, letterSpacing: 0.3 },
+  nextUpGrid:      { flexDirection: 'row', alignItems: 'center' },
+  nextUpCol:       { flex: 1 },
+  nextUpIconTitle: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
+  nextUpLabel:     { fontSize: 10, fontWeight: '700', color: P.t3, letterSpacing: 0.6 },
+  nextUpValue:     { fontSize: 18, fontWeight: '800', color: P.t1, fontVariant: ['tabular-nums'] },
+  nextUpSub:       { fontSize: 11, color: P.t3, marginTop: 2 },
+  nextUpDivider:   { width: 1, height: 36, backgroundColor: P.b2, marginHorizontal: SP.px16 },
+  nextUpOffDutyRow:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: SP.px12 },
+  viewRosterBtn:   { backgroundColor: P.bg3, borderWidth: 1, borderColor: P.b3, borderRadius: BR.md, paddingHorizontal: SP.px12, paddingVertical: SP.px8 },
+  viewRosterBtnTxt:{ color: P.blueLight, fontSize: 12, fontWeight: '700' },
+
+  // Book button
+  bookBtn:         { borderRadius: BR.lg, overflow: 'hidden', marginBottom: SP.px16, ...SH_TOKENS.md },
+  bookOnBtn:       {},
+  bookOffBtn:      {},
+  bookBtnGrad:     { paddingVertical: 17, alignItems: 'center', justifyContent: 'center' },
+  bookBtnTxt:      { color: P.white, fontSize: 15, fontWeight: '800', letterSpacing: 2 },
+  btnDisabled:     { opacity: 0.55 },
+
+  // Recent calls section
+  section:         { marginBottom: SP.px24 },
+  sectionHeaderRow:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px12 },
+  sectionTitle:    { fontSize: 10, fontWeight: '800', color: P.t3, letterSpacing: 1.5, textTransform: 'uppercase' },
+  sectionSubBadge: { fontSize: 11, fontWeight: '600', color: P.t4 },
+  ccRow:           { flexDirection: 'row', alignItems: 'center', paddingVertical: SP.px12, borderBottomWidth: 1, borderBottomColor: P.b1 },
+  ccAccent:        { width: 3, height: 22, borderRadius: 2, marginRight: SP.px12 },
+  ccTime:          { fontSize: 13, color: P.t2, width: 56, fontVariant: ['tabular-nums'], fontWeight: '600' },
+  ccContent:       { flex: 1, paddingRight: SP.px8 },
+  ccStatus:        { fontSize: 13, fontWeight: '600' },
+  ccNoteText:      { fontSize: 11, color: P.t3, marginTop: 2, fontStyle: 'italic' },
+
   // SOS FAB
-  sosFabWrap:    { position: 'absolute', bottom: 80, right: S.xl, ...shadows.sos },
-  sosFab:        { backgroundColor: COLORS.sos, width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)' },
-  sosFabTxt:     { color: COLORS.white, fontSize: 11, fontWeight: '900', letterSpacing: 0.5 },
-  // Modals
-  modalOverlay:  { flex: 1, backgroundColor: COLORS.bgOverlay, justifyContent: 'flex-end' },
-  sosModal:      { backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.sosBorder, alignItems: 'center', ...shadows.sos },
-  sosIconWrap:   { width: 72, height: 72, borderRadius: 36, backgroundColor: COLORS.sosBg, borderWidth: 2, borderColor: COLORS.sosBorder, alignItems: 'center', justifyContent: 'center', marginBottom: S.lg },
-  sosModalTitle: { ...TYPE.subtitle, marginBottom: S.sm, textAlign: 'center' },
-  sosModalSub:   { color: COLORS.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 20, marginBottom: S.xxl },
-  sosConfirmBtn: { width: '100%', backgroundColor: COLORS.sos, borderRadius: R.md, paddingVertical: 16, alignItems: 'center', marginBottom: S.sm },
-  sosConfirmBtnTxt:{ color: COLORS.white, fontSize: 16, fontWeight: '800' },
-  sosCancelBtn:  { width: '100%', backgroundColor: COLORS.bgInput, borderRadius: R.md, paddingVertical: 14, alignItems: 'center' },
-  sosCancelBtnTxt:{ color: COLORS.textSecondary, fontSize: 14 },
-  modalCard:     { backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.borderSubtle },
-  modalTitle:    { ...TYPE.subtitle, marginBottom: S.sm },
-  modalSub:      { color: COLORS.textMuted, fontSize: 14, marginBottom: S.xxl, lineHeight: 22 },
-  bookOffConfirm:{ backgroundColor: COLORS.missed, borderRadius: R.md, paddingVertical: 14, alignItems: 'center', marginBottom: S.sm },
-  bookOffConfirmTxt:{ color: COLORS.white, fontSize: 16, fontWeight: '800' },
-  cancelBtn:     { backgroundColor: COLORS.bgInput, borderRadius: R.md, paddingVertical: 12, alignItems: 'center' },
-  cancelBtnTxt:  { color: COLORS.textSecondary, fontSize: 14 },
-  profileHeaderBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.bgInput,
-    borderWidth: 1,
-    borderColor: COLORS.brandBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  sosFabWrap:      { position: 'absolute', bottom: TAB_H + SP.px16, right: SP.px20, ...SH_TOKENS.danger },
+  sosFab:          { width: 62, height: 62, borderRadius: 31, overflow: 'hidden', borderWidth: 2, borderColor: 'rgba(255,255,255,0.25)' },
+  sosFabGrad:      { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
+  sosFabTxt:       { color: P.white, fontSize: 9, fontWeight: '900', letterSpacing: 1.2 },
+
+  // Fullscreen SOS Takeover
+  sosFullscreen:   { flex: 1, backgroundColor: '#0B0E14' },
+  sosTakeoverBody: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: SP.px24, paddingVertical: SP.px48 },
+  sosHeroBeacon:   { width: 110, height: 110, borderRadius: 55, borderWidth: 2, borderColor: P.dangerBorder, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginBottom: SP.px24, ...SH_TOKENS.danger },
+  sosTakeoverTitle:{ ...FONT.h1, color: P.white, textAlign: 'center', letterSpacing: 2, fontSize: 26 },
+  sosTakeoverSubtitle:{ fontSize: 12, fontWeight: '800', color: P.redLight, letterSpacing: 1.5, marginTop: 4, marginBottom: SP.px20 },
+  sosTelemetryCard:{ width: '100%', backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: BR.lg, borderWidth: 1, borderColor: P.dangerBorder, padding: SP.px16, marginBottom: SP.px20 },
+  sosTelemetryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
+  sosTelemetryKey: { fontSize: 11, fontWeight: '800', color: P.t3, letterSpacing: 1 },
+  sosTelemetryVal: { fontSize: 13, fontWeight: '700', color: P.t1 },
+  sosTakeoverWarning:{ fontSize: 13, color: P.t2, textAlign: 'center', lineHeight: 19, marginBottom: SP.px24, paddingHorizontal: SP.px12 },
+  sosTakeoverCta:  { width: '100%', borderRadius: BR.md, overflow: 'hidden', marginBottom: SP.px12, ...SH_TOKENS.danger },
+  sosTakeoverCtaGrad:{ paddingVertical: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  sosTakeoverCtaTxt:{ color: P.white, fontSize: 15, fontWeight: '800', letterSpacing: 1 },
+  sosTakeoverCancelBtn:{ width: '100%', backgroundColor: P.bg3, borderRadius: BR.md, paddingVertical: 15, alignItems: 'center', borderWidth: 1, borderColor: P.b3 },
+  sosTakeoverCancelTxt:{ color: P.t2, fontSize: 14, fontWeight: '700' },
+
+  // Reassurance State
+  reassuranceBadge:{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.okSubtle, borderRadius: BR.full, borderWidth: 1, borderColor: P.okBorder, paddingHorizontal: SP.px12, paddingVertical: 6, marginBottom: SP.px16 },
+  reassuranceDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: P.ok },
+  reassuranceBadgeTxt:{ fontSize: 11, fontWeight: '800', color: P.ok, letterSpacing: 1 },
+  sosSentHeroTitle:{ ...FONT.h1, color: P.white, textAlign: 'center', letterSpacing: 1, fontSize: 26, marginBottom: SP.px8 },
+  sosSentReassurance:{ fontSize: 14, color: P.t2, textAlign: 'center', lineHeight: 21, marginBottom: SP.px24, paddingHorizontal: SP.px16 },
+  sosGuidanceCard: { width: '100%', backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: BR.lg, borderWidth: 1, borderColor: P.b2, padding: SP.px16, marginBottom: SP.px24, gap: SP.px12 },
+  sosGuidanceItem: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  sosGuidanceNum:  { width: 24, height: 24, borderRadius: 12, backgroundColor: P.bg3, color: P.gold, fontSize: 12, fontWeight: '800', textAlign: 'center', lineHeight: 24, overflow: 'hidden' },
+  sosGuidanceTxt:  { fontSize: 13, color: P.t1, flex: 1 },
+  sosSentResolveBtn:{ width: '100%', borderRadius: BR.md, overflow: 'hidden', ...SH_TOKENS.ok },
+  sosSentResolveGrad:{ paddingVertical: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  sosSentResolveTxt:{ color: P.white, fontSize: 15, fontWeight: '800', letterSpacing: 1 },
+
+  // Sheet (book-off)
+  sheetOverlay:    { flex: 1, backgroundColor: P.overlay, justifyContent: 'flex-end' },
+  sheet:           { borderTopLeftRadius: BR.xxl, borderTopRightRadius: BR.xxl, padding: SP.px32, borderWidth: 1, borderColor: P.b3, overflow: 'hidden' },
+  sheetHandle:     { width: 40, height: 4, backgroundColor: P.b3, borderRadius: 2, alignSelf: 'center', marginBottom: SP.px20 },
+  sheetTitle:      { fontSize: 20, fontWeight: '800', color: P.t1, marginBottom: SP.px8 },
+  sheetSub:        { fontSize: 14, color: P.t3, marginBottom: SP.px24 },
+  sheetConfirmBtn: { borderRadius: BR.md, overflow: 'hidden', marginBottom: SP.px12, ...SH_TOKENS.danger },
+  sheetBtnGrad:    { paddingVertical: 15, alignItems: 'center' },
+  sheetBtnTxt:     { color: P.white, fontSize: 14, fontWeight: '800', letterSpacing: 1.5 },
+  sheetCancelBtn:  { backgroundColor: P.bg3, borderRadius: BR.md, paddingVertical: 13, alignItems: 'center', borderWidth: 1, borderColor: P.b2 },
+  sheetCancelTxt:  { color: P.t2, fontSize: 14 },
 });

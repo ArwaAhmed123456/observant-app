@@ -1,413 +1,384 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * CheckCallScreen — Tactical Command Center
+ * Countdown arc ring, issue category + photo, offline queue banner, history.
+ */
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, TextInput,
-  ScrollView, Alert, Modal, Image, ActivityIndicator
+  ScrollView, Alert, Modal, Image, Animated, Platform,
 } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useApp, formatTime } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
-import { COLORS, S, R, TYPE, shadows, cardStyle } from '../../theme';
-import { Bell, CheckCircle, AlertTriangle, Clock, Camera, ChevronDown, WifiOff, RefreshCw, MapPin } from 'lucide-react-native';
-import { enqueue, flush, getQueue } from '../../services/offlineQueue';
+import { P, SP, BR, FONT, SH_TOKENS, TAB_H, statusToken } from '../../ds';
+import { enqueue } from '../../services/offlineQueue';
 
-// Explicit categories required: Intruder, Equipment fault, Medical, Other
-const ISSUE_CATEGORIES = ['Intruder', 'Equipment fault', 'Medical', 'Other'];
+const WINDOW_SECS  = 600; // 10 min
+const CATEGORIES   = ['Intruder / Suspicious Person', 'Equipment Fault', 'Medical Emergency', 'Fire / Safety Hazard', 'Perimeter Breach', 'Other'];
+const RING_R       = 54;
+const RING_CIRC    = 2 * Math.PI * RING_R;
 
 export function CheckCallScreen() {
-  const { currentUser, sites, activeCheckCall, respondToCheckCall, checkCalls } = useApp();
+  const { currentUser, activeCheckCall, respondToCheckCall, checkCalls } = useApp();
 
-  const [timeLeft, setTimeLeft]         = useState(600);
-  const [responding, setResponding]     = useState(false);
-  const [isOnline, setIsOnline]         = useState(true);
-  const [pendingSync, setPendingSync]   = useState(false);
-  const [syncingNow, setSyncingNow]     = useState(false);
-  const [queuedCount, setQueuedCount]   = useState(0);
-
-  // Issue form
+  const [timeLeft, setTimeLeft]           = useState(WINDOW_SECS);
+  const [responding, setResponding]       = useState(false);
+  const [isOnline, setIsOnline]           = useState(true);
+  const [pendingSync, setPendingSync]     = useState(false);
   const [showIssueForm, setShowIssueForm] = useState(false);
   const [category, setCategory]           = useState('');
-  const [showCategoryPicker, setShowCategoryPicker] = useState(false);
+  const [showCatPicker, setShowCatPicker] = useState(false);
   const [note, setNote]                   = useState('');
   const [issuePhoto, setIssuePhoto]       = useState(null);
+  const [detailCC, setDetailCC]           = useState(null);
+  const [successAnim, setSuccessAnim]     = useState(false);
 
-  // Detail modal
-  const [detailCC, setDetailCC] = useState(null);
-
-  // ── Check queue size ───────────────────────────────────────────────────────
-  const updateQueueStatus = async () => {
-    const q = await getQueue();
-    setQueuedCount(q.length);
-    setPendingSync(q.length > 0);
-  };
-
-  useEffect(() => {
-    updateQueueStatus();
-  }, []);
+  const successScale  = useRef(new Animated.Value(0)).current;
+  const successOpacity= useRef(new Animated.Value(0)).current;
 
   // ── Countdown ──────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!activeCheckCall) { setTimeLeft(600); return; }
+    if (!activeCheckCall) { setTimeLeft(WINDOW_SECS); return; }
     const start = new Date(activeCheckCall.firedAt).getTime();
-    const tick  = () => setTimeLeft(Math.max(0, 600 - Math.floor((Date.now() - start) / 1000)));
+    const tick  = () => setTimeLeft(Math.max(0, WINDOW_SECS - Math.floor((Date.now() - start) / 1000)));
     tick();
     const t = setInterval(tick, 1000);
     return () => clearInterval(t);
   }, [activeCheckCall]);
 
-  // ── Connectivity ───────────────────────────────────────────────────────────
+  // ── Connectivity ──────────────────────────────────────────────────────────
   useEffect(() => {
-    const unsub = NetInfo.addEventListener(state => {
-      const online = !!(state.isConnected && state.isInternetReachable);
-      setIsOnline(online);
-      if (online && pendingSync) {
-        handleManualSync();
-      }
-    });
+    const unsub = NetInfo.addEventListener(s => setIsOnline(!!(s.isConnected && s.isInternetReachable)));
     return unsub;
-  }, [pendingSync]);
+  }, []);
 
-  const handleManualSync = async () => {
-    setSyncingNow(true);
-    await flush();
-    await updateQueueStatus();
-    setSyncingNow(false);
+  // ── Success animation ─────────────────────────────────────────────────────
+  const showSuccess = () => {
+    setSuccessAnim(true);
+    Animated.sequence([
+      Animated.parallel([
+        Animated.spring(successScale,   { toValue: 1, friction: 6, tension: 60, useNativeDriver: true }),
+        Animated.timing(successOpacity, { toValue: 1, duration: 250, useNativeDriver: true }),
+      ]),
+      Animated.delay(1200),
+      Animated.timing(successOpacity,   { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => setSuccessAnim(false));
   };
 
-  const guardCC = [...(checkCalls || [])]
-    .filter(cc => cc.guardId === currentUser?.id || cc.guardId === currentUser?._id)
-    .sort((a, b) => new Date(b.firedAt) - new Date(a.firedAt));
+  const gId    = currentUser?.id || currentUser?._id;
+  const myCCs  = [...(checkCalls||[])].filter(cc => cc.guardId === gId).sort((a,b) => new Date(b.firedAt) - new Date(a.firedAt));
 
-  // ── Location capture ───────────────────────────────────────────────────────
-  const getGuardLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        return { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-      }
-    } catch {}
-    // Simulated coordinate near site for testing/preview if hardware GPS not available
-    const site = sites.find(s => s.id === currentUser?.siteId);
-    if (site?.latitude) {
-      return { latitude: site.latitude + 0.0001, longitude: site.longitude + 0.0001 };
-    }
-    return null;
-  };
+  // Ring arc math
+  const progress   = timeLeft / WINDOW_SECS;
+  const ringColor  = timeLeft < 120 ? P.danger : timeLeft < 300 ? P.warn : P.ok;
+  const strokeDash = RING_CIRC * (1 - progress);
+
+  const mins = Math.floor(timeLeft / 60);
+  const secs = timeLeft % 60;
 
   // ── Respond YES ────────────────────────────────────────────────────────────
   const handleYes = async () => {
     if (!activeCheckCall) return;
     setResponding(true);
-    const location = await getGuardLocation();
+    const ccId = activeCheckCall.id || activeCheckCall._id;
 
     if (!isOnline) {
-      await enqueue({
-        action: 'CHECK_CALL_RESPOND',
-        checkCallId: activeCheckCall.id || activeCheckCall._id,
-        response: 'yes',
-        location,
-        label: 'Check call YES response',
-      });
-      await respondToCheckCall(
-        activeCheckCall.id || activeCheckCall._id,
-        'yes',
-        null,
-        { location, isOfflineQueued: true }
-      );
-      await updateQueueStatus();
+      await enqueue({ url: `/api/check-calls/${ccId}/respond`, method: 'POST', body: { response: 'yes' }, label: 'Check call YES' });
+      setPendingSync(true);
       setResponding(false);
-      Alert.alert('Response Queued', 'You are currently offline. Check call response has been securely saved locally and will sync once connectivity returns.');
+      showSuccess();
       return;
     }
-
-    await respondToCheckCall(activeCheckCall.id || activeCheckCall._id, 'yes', null, { location });
+    await respondToCheckCall(ccId, 'yes');
     setResponding(false);
-    Alert.alert('✓ Check Call Recorded', 'Thank you, your check call has been verified and logged successfully.');
+    showSuccess();
   };
 
-  // ── Respond NO — show issue form ───────────────────────────────────────────
-  const handleNoTap = () => setShowIssueForm(true);
-
+  // ── Submit issue ──────────────────────────────────────────────────────────
   const handleSubmitIssue = async () => {
-    if (!category) { Alert.alert('Select Category', 'Please choose an issue category.'); return; }
+    if (!category) { Alert.alert('Select Category', 'Please choose an issue category before submitting.'); return; }
+    if (!activeCheckCall) return;
     setResponding(true);
-    const location = await getGuardLocation();
-    const payload = {
-      response: 'no',
-      category,
-      note: note || '',
-      photoUri: issuePhoto,
-      location,
-    };
+    const ccId = activeCheckCall.id || activeCheckCall._id;
+    const noteText = `[${category}]${note ? ' ' + note : ''}`;
 
     if (!isOnline) {
-      await enqueue({
-        action: 'CHECK_CALL_RESPOND',
-        checkCallId: activeCheckCall.id || activeCheckCall._id,
-        ...payload,
-        label: `Check call issue: ${category}`,
-      });
-      await respondToCheckCall(
-        activeCheckCall.id || activeCheckCall._id,
-        'no',
-        note,
-        { ...payload, isOfflineQueued: true }
-      );
-      await updateQueueStatus();
+      await enqueue({ url: `/api/check-calls/${ccId}/respond`, method: 'POST', body: { response: 'no', note: noteText }, label: 'Check call issue' });
+      setPendingSync(true);
       setResponding(false);
       setShowIssueForm(false);
-      resetIssueForm();
-      Alert.alert('Issue Report Queued', 'You are offline. Your issue alert has been saved locally and will sync to your manager immediately upon reconnection.');
+      resetForm();
       return;
     }
-
-    await respondToCheckCall(
-      activeCheckCall.id || activeCheckCall._id,
-      'no',
-      note,
-      payload
-    );
+    await respondToCheckCall(ccId, 'no', noteText);
     setResponding(false);
     setShowIssueForm(false);
-    resetIssueForm();
-    Alert.alert('⚠️ Issue Dispatched', `Manager has been alerted regarding ${category}.`);
+    resetForm();
   };
 
-  const resetIssueForm = () => {
-    setCategory(''); setNote(''); setIssuePhoto(null);
-  };
+  const resetForm = () => { setCategory(''); setNote(''); setIssuePhoto(null); };
 
-  const pickIssuePhoto = async () => {
+  const pickPhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') return;
-    const result = await ImagePicker.launchCameraAsync({ quality: 0.6 });
+    if (status !== 'granted') { Alert.alert('Camera required', 'Enable camera access in your device settings.'); return; }
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.6, allowsEditing: false });
     if (!result.canceled && result.assets?.[0]) setIssuePhoto(result.assets[0].uri);
   };
 
-  const timerColor = timeLeft < 120 ? COLORS.missed : timeLeft < 300 ? COLORS.issue : COLORS.ok;
-  const mins = Math.floor(timeLeft / 60);
-  const secs = timeLeft % 60;
-
   return (
-    <View style={styles.root}>
-      <AppHeader />
-      <View style={styles.content}>
+    <View style={s.root}>
+      <AppHeader title="Check Calls" subtitle={`${myCCs.length} logged today`} />
 
-        {/* Offline / Pending Sync banner */}
-        {(!isOnline || pendingSync) && (
-          <View style={styles.offlineBanner}>
-            <WifiOff size={16} color={COLORS.issue} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.offlineTxt}>
-                {!isOnline ? 'Offline Mode Active' : 'Waiting to Sync'}
-              </Text>
-              <Text style={styles.offlineSubTxt}>
-                {!isOnline
-                  ? 'Check calls and reports will queue locally.'
-                  : `${queuedCount} pending report(s) waiting for server handshake.`}
-              </Text>
-            </View>
-            {isOnline && (
-              <TouchableOpacity
-                style={styles.syncBtn}
-                onPress={handleManualSync}
-                disabled={syncingNow}
-              >
-                {syncingNow ? (
-                  <ActivityIndicator size="small" color={COLORS.black} />
-                ) : (
-                  <>
-                    <RefreshCw size={13} color={COLORS.black} />
-                    <Text style={styles.syncBtnTxt}>Sync Now</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
+      {/* Offline / pending sync banner */}
+      {(!isOnline || pendingSync) && (
+        <View style={s.offlineBanner}>
+          <View style={s.offlineStripe} />
+          <Text style={s.offlineTxt}>
+            {!isOnline
+              ? '⚡  No connection — responses queued locally'
+              : '⏳  Syncing queued responses…'}
+          </Text>
+        </View>
+      )}
 
-        <Text style={styles.screenTitle}>Check Calls</Text>
-
-        {/* Active check call card */}
+      <ScrollView
+        style={s.scroll}
+        contentContainerStyle={[s.scrollContent, { paddingBottom: TAB_H + SP.px32 }]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ── Active check call ── */}
         {activeCheckCall ? (
-          <View style={styles.activeCard}>
-            <View style={styles.activeHeader}>
-              <Bell color={COLORS.white} size={20} />
-              <Text style={styles.activeTitle}>Is everything okay on site?</Text>
+          <View style={s.activeCard}>
+            <LinearGradient colors={['#1B3A8C', '#0F2060']} style={StyleSheet.absoluteFillObject} />
+            <View style={s.activeCardBorderTop} />
+
+            {/* Countdown ring */}
+            <View style={s.ringWrap}>
+              <Svg width={130} height={130}>
+                {/* Track */}
+                <Circle cx={65} cy={65} r={RING_R} stroke={P.bg3} strokeWidth={8} fill="none" />
+                {/* Progress */}
+                <Circle
+                  cx={65} cy={65} r={RING_R}
+                  stroke={ringColor}
+                  strokeWidth={8}
+                  fill="none"
+                  strokeDasharray={RING_CIRC}
+                  strokeDashoffset={strokeDash}
+                  strokeLinecap="round"
+                  rotation="-90"
+                  origin="65,65"
+                />
+              </Svg>
+              {/* Time text inside ring */}
+              <View style={s.ringCenter}>
+                <Text style={[s.ringTime, { color: ringColor }]}>
+                  {mins}:{secs.toString().padStart(2,'0')}
+                </Text>
+                <Text style={s.ringLabel}>RESPOND</Text>
+              </View>
             </View>
-            <View style={styles.countdownRow}>
-              <Clock size={14} color={timerColor} />
-              <Text style={[styles.countdown, { color: timerColor }]}>
-                Respond within {mins}:{secs.toString().padStart(2,'0')}
-              </Text>
-            </View>
-            <View style={styles.btnRow}>
-              <TouchableOpacity style={[styles.yesBtn, responding && styles.disabled]} onPress={handleYes} disabled={responding}>
-                <CheckCircle color={COLORS.white} size={18} />
-                <Text style={styles.yesBtnTxt}>Yes, all okay</Text>
+
+            <Text style={s.activeTitle}>Is everything okay on site?</Text>
+            <Text style={s.activeSub}>Respond before the window closes to log this check call.</Text>
+
+            <View style={s.activeButtons}>
+              <TouchableOpacity
+                style={[s.yesBtn, responding && s.btnDisabled]}
+                onPress={handleYes}
+                disabled={responding}
+                activeOpacity={0.85}
+              >
+                <LinearGradient colors={[P.ok, P.okDark]} start={{x:0,y:0}} end={{x:1,y:0}} style={s.btnGrad}>
+                  <Text style={s.yesTxt}>✓  ALL OKAY</Text>
+                </LinearGradient>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.noBtn, responding && styles.disabled]} onPress={handleNoTap} disabled={responding}>
-                <AlertTriangle color={COLORS.white} size={18} />
-                <Text style={styles.noBtnTxt}>No, issue</Text>
+
+              <TouchableOpacity
+                style={[s.noBtn, responding && s.btnDisabled]}
+                onPress={() => setShowIssueForm(true)}
+                disabled={responding}
+                activeOpacity={0.85}
+              >
+                <LinearGradient colors={[P.warn, P.warnDark]} start={{x:0,y:0}} end={{x:1,y:0}} style={s.btnGrad}>
+                  <Text style={s.noTxt}>⚠  REPORT ISSUE</Text>
+                </LinearGradient>
               </TouchableOpacity>
             </View>
           </View>
         ) : (
-          <View style={styles.noActiveCard}>
-            <CheckCircle color={COLORS.ok} size={32} />
-            <Text style={styles.noActiveTitle}>No active check call</Text>
-            <Text style={styles.noActiveSub}>Check calls trigger automatically every hour while booked on.</Text>
+          <View style={s.noActiveCard}>
+            <LinearGradient colors={['#131C2E', '#0F1520']} style={StyleSheet.absoluteFillObject} />
+            <View style={s.noActiveIconWrap}>
+              <Text style={s.noActiveIcon}>✓</Text>
+            </View>
+            <Text style={s.noActiveTitle}>No Active Check Call</Text>
+            <Text style={s.noActiveSub}>Check calls fire automatically every hour while you are booked on. Respond within 10 minutes.</Text>
           </View>
         )}
 
-        {/* History */}
-        <Text style={styles.historyTitle}>History</Text>
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {guardCC.length === 0 && <Text style={styles.emptyHint}>No check calls recorded yet.</Text>}
-          {guardCC.map(cc => (
-            <TouchableOpacity key={cc.id || cc._id} style={styles.historyRow} onPress={() => setDetailCC(cc)}>
-              <View style={[styles.dot, { backgroundColor:
-                cc.response === 'yes'    ? COLORS.ok :
-                cc.response === 'missed' ? COLORS.missed :
-                cc.response === 'no'     ? COLORS.issue : COLORS.borderMid
-              }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.historyTime}>{formatTime(cc.firedAt)}</Text>
-                {cc.note && <Text style={styles.historyNote} numberOfLines={1}>{cc.note}</Text>}
+        {/* ── History ── */}
+        <Text style={s.historyTitle}>CALL HISTORY</Text>
+
+        {myCCs.length === 0 && (
+          <View style={s.emptyHistory}>
+            <Text style={s.emptyHistoryTxt}>No check calls recorded yet this shift.</Text>
+          </View>
+        )}
+
+        {myCCs.map(cc => {
+          const tok = statusToken(cc.response || 'upcoming');
+          return (
+            <TouchableOpacity key={cc.id||cc._id} style={s.histRow} onPress={() => setDetailCC(cc)} activeOpacity={0.8}>
+              <LinearGradient colors={['#131C2E', '#0F1520']} style={StyleSheet.absoluteFillObject} />
+              <View style={[s.histAccent, { backgroundColor: tok.color }]} />
+              <View style={s.histContent}>
+                <View style={s.histTop}>
+                  <Text style={s.histTime}>{formatTime(cc.firedAt)}</Text>
+                  <View style={[s.histPill, { backgroundColor: tok.bg, borderColor: tok.border }]}>
+                    <Text style={[s.histPillTxt, { color: tok.color }]}>
+                      {cc.response === 'yes' ? 'OKAY' : cc.response === 'missed' ? 'MISSED' : cc.response === 'no' ? 'ISSUE' : 'PENDING'}
+                    </Text>
+                  </View>
+                </View>
+                {cc.note && <Text style={s.histNote} numberOfLines={1}>{cc.note}</Text>}
               </View>
-              <Text style={[styles.historyStatus, { color:
-                cc.response === 'yes'    ? COLORS.ok :
-                cc.response === 'missed' ? COLORS.missed :
-                cc.response === 'no'     ? COLORS.issue : COLORS.textMuted
-              }]}>
-                {cc.response === 'yes' ? '✓ Okay' : cc.response === 'missed' ? '✗ Missed' : cc.response === 'no' ? '⚠ Issue' : '⏳'}
-              </Text>
+              <Text style={s.histArrow}>›</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
+          );
+        })}
+      </ScrollView>
 
-      {/* Issue Form Modal */}
+      {/* ── Success overlay ── */}
+      {successAnim && (
+        <Animated.View style={[s.successOverlay, { opacity: successOpacity }]}>
+          <Animated.View style={[s.successBadge, { transform: [{ scale: successScale }] }]}>
+            <LinearGradient colors={[P.ok, P.okDark]} style={s.successGrad}>
+              <Text style={s.successIcon}>✓</Text>
+              <Text style={s.successTxt}>CHECK CALL RECORDED</Text>
+              <Text style={s.successSub}>Thank you — all okay noted.</Text>
+            </LinearGradient>
+          </Animated.View>
+        </Animated.View>
+      )}
+
+      {/* ── Issue Form Modal ── */}
       <Modal visible={showIssueForm} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Report an Issue</Text>
-            <Text style={styles.modalSub}>Select a category and describe what happened.</Text>
+        <View style={s.sheetOverlay}>
+          <View style={s.sheet}>
+            <LinearGradient colors={['#162040', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <View style={s.sheetHandle} />
+            <View style={s.sheetTitleRow}>
+              <View style={s.issueDot} />
+              <Text style={s.sheetTitle}>Report an Issue</Text>
+            </View>
+            <Text style={s.sheetSub}>Describe what you observed. Your manager will be alerted immediately.</Text>
 
-            {/* Category picker */}
-            <Text style={styles.fieldLabel}>Issue Category *</Text>
-            <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowCategoryPicker(true)}>
-              <Text style={category ? styles.pickerTxt : styles.pickerPlaceholder}>
-                {category || 'Select category…'}
+            {/* Category */}
+            <Text style={s.fieldLabel}>ISSUE CATEGORY  *</Text>
+            <TouchableOpacity style={s.catBtn} onPress={() => setShowCatPicker(true)}>
+              <Text style={category ? s.catBtnTxt : s.catBtnPlaceholder}>
+                {category || 'Select a category…'}
               </Text>
-              <ChevronDown size={16} color={COLORS.textMuted} />
+              <Text style={s.catArrow}>▾</Text>
             </TouchableOpacity>
 
-            <Text style={styles.fieldLabel}>Notes (optional)</Text>
+            {/* Note */}
+            <Text style={s.fieldLabel}>NOTES (optional)</Text>
             <TextInput
-              style={styles.noteInput}
-              value={note} onChangeText={setNote}
+              style={s.noteInput}
+              value={note}
+              onChangeText={setNote}
               placeholder="Describe what you observed…"
-              placeholderTextColor={COLORS.textDisabled}
-              multiline numberOfLines={3} textAlignVertical="top"
+              placeholderTextColor={P.t4}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
             />
 
             {/* Photo */}
-            <Text style={styles.fieldLabel}>Photo (optional)</Text>
-            <TouchableOpacity style={styles.photoBtn} onPress={pickIssuePhoto}>
-              <Camera size={18} color={COLORS.info} />
-              <Text style={styles.photoBtnTxt}>{issuePhoto ? 'Retake photo' : 'Take photo'}</Text>
+            <Text style={s.fieldLabel}>PHOTO (optional)</Text>
+            <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
+              <Text style={s.photoBtnTxt}>{issuePhoto ? '📷  Retake photo' : '📷  Take photo'}</Text>
             </TouchableOpacity>
-            {issuePhoto && <Image source={{ uri: issuePhoto }} style={styles.photoPreview} />}
+            {issuePhoto && <Image source={{ uri: issuePhoto }} style={s.photoPreview} />}
 
+            {/* Submit */}
             <TouchableOpacity
-              style={[styles.submitBtn, (responding || !category) && styles.disabled]}
+              style={[s.submitBtn, (!category || responding) && s.btnDisabled]}
               onPress={handleSubmitIssue}
-              disabled={responding || !category}
+              disabled={!category || responding}
             >
-              <Text style={styles.submitBtnTxt}>{responding ? 'Sending…' : 'Submit Issue Report'}</Text>
+              <LinearGradient colors={[P.warn, P.warnDark]} start={{x:0,y:0}} end={{x:1,y:0}} style={s.btnGrad}>
+                <Text style={s.submitTxt}>{responding ? 'SENDING…' : 'SUBMIT ISSUE REPORT'}</Text>
+              </LinearGradient>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => { setShowIssueForm(false); resetIssueForm(); }}>
-              <Text style={styles.cancelBtnTxt}>Cancel</Text>
+            <TouchableOpacity style={s.cancelBtn} onPress={() => { setShowIssueForm(false); resetForm(); }}>
+              <Text style={s.cancelTxt}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* Category picker sheet */}
-      <Modal visible={showCategoryPicker} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.sheetCard}>
-            <Text style={styles.sheetTitle}>Select Category</Text>
-            {ISSUE_CATEGORIES.map(cat => (
-              <TouchableOpacity key={cat} style={styles.catRow} onPress={() => { setCategory(cat); setShowCategoryPicker(false); }}>
-                <Text style={[styles.catTxt, cat === category && { color: COLORS.brand, fontWeight: '700' }]}>{cat}</Text>
-                {cat === category && <CheckCircle size={16} color={COLORS.brand} />}
+      {/* ── Category Picker ── */}
+      <Modal visible={showCatPicker} transparent animationType="slide">
+        <View style={s.sheetOverlay}>
+          <View style={s.sheet}>
+            <LinearGradient colors={['#162040', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <View style={s.sheetHandle} />
+            <Text style={s.sheetTitle}>Select Category</Text>
+            {CATEGORIES.map(cat => (
+              <TouchableOpacity
+                key={cat}
+                style={[s.catOption, cat === category && s.catOptionActive]}
+                onPress={() => { setCategory(cat); setShowCatPicker(false); }}
+              >
+                {cat === category && <View style={s.catOptionCheck}><Text style={{ color: P.blue, fontSize: 14 }}>✓</Text></View>}
+                <Text style={[s.catOptionTxt, cat === category && { color: P.blueLight }]}>{cat}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowCategoryPicker(false)}>
-              <Text style={styles.cancelBtnTxt}>Cancel</Text>
+            <TouchableOpacity style={s.cancelBtn} onPress={() => setShowCatPicker(false)}>
+              <Text style={s.cancelTxt}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </View>
       </Modal>
 
-      {/* Detail Modal */}
+      {/* ── Detail Modal ── */}
       <Modal visible={!!detailCC} transparent animationType="fade" onRequestClose={() => setDetailCC(null)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Check Call Detail</Text>
-            {detailCC && (
-              <>
-                <Text style={styles.detailRow}><Text style={styles.detailLabel}>Time fired: </Text>{formatTime(detailCC.firedAt)}</Text>
-                {detailCC.respondedAt && <Text style={styles.detailRow}><Text style={styles.detailLabel}>Responded: </Text>{formatTime(detailCC.respondedAt)}</Text>}
-                <Text style={styles.detailRow}><Text style={styles.detailLabel}>Response: </Text>
-                  <Text style={{ color: detailCC.response === 'yes' ? COLORS.ok : detailCC.response === 'missed' ? COLORS.missed : COLORS.issue, fontWeight: '700' }}>
-                    {detailCC.response === 'yes' ? 'All okay' : detailCC.response === 'missed' ? 'Missed' : detailCC.response === 'no' ? 'Issue reported' : 'Pending'}
-                  </Text>
-                </Text>
-
-                {detailCC.category && (
-                  <Text style={styles.detailRow}><Text style={styles.detailLabel}>Category: </Text>
-                    <Text style={{ color: COLORS.issue, fontWeight: '700' }}>{detailCC.category}</Text>
-                  </Text>
-                )}
-
-                {/* Geofence Status */}
-                <View style={[styles.geoBadge, detailCC.outsideGeofence ? styles.geoBadgeFail : styles.geoBadgePass]}>
-                  <MapPin size={14} color={detailCC.outsideGeofence ? COLORS.missed : COLORS.ok} />
-                  <Text style={[styles.geoBadgeTxt, { color: detailCC.outsideGeofence ? COLORS.missed : COLORS.ok }]}>
-                    {detailCC.outsideGeofence
-                      ? `Out-of-Bounds Flagged (${detailCC.distanceMeters || '350+'}m outside)`
-                      : 'GPS Verified — Within Site Geofence'}
-                  </Text>
-                </View>
-
-                {detailCC.manuallyLogged && (
-                  <View style={styles.manualBadge}>
-                    <Text style={styles.manualBadgeTxt}>📝 Manually logged by Manager</Text>
+        <View style={s.sheetOverlay}>
+          <View style={s.sheet}>
+            <LinearGradient colors={['#162040', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <View style={s.sheetHandle} />
+            {detailCC && (() => {
+              const tok = statusToken(detailCC.response || 'upcoming');
+              return (
+                <>
+                  <View style={s.detailHeader}>
+                    <View style={[s.detailDot, { backgroundColor: tok.color }]} />
+                    <Text style={s.sheetTitle}>Check Call Detail</Text>
                   </View>
-                )}
-
-                {detailCC.note && (
-                  <View style={styles.noteBox}>
-                    <Text style={styles.noteBoxTxt}>{detailCC.note}</Text>
-                  </View>
-                )}
-
-                {detailCC.photoUri && (
-                  <View style={{ marginTop: S.md }}>
-                    <Text style={styles.detailLabel}>Attached Photo:</Text>
-                    <Image source={{ uri: detailCC.photoUri }} style={styles.detailPhoto} />
-                  </View>
-                )}
-              </>
-            )}
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setDetailCC(null)}>
-              <Text style={styles.cancelBtnTxt}>Close</Text>
-            </TouchableOpacity>
+                  <DetailRow label="Fired at"     value={formatTime(detailCC.firedAt)} />
+                  {detailCC.respondedAt && <DetailRow label="Responded"  value={formatTime(detailCC.respondedAt)} />}
+                  <DetailRow label="Outcome"
+                    value={detailCC.response === 'yes' ? 'All okay' : detailCC.response === 'missed' ? 'Missed — manager notified' : detailCC.response === 'no' ? 'Issue reported' : 'Pending'}
+                    valueColor={tok.color}
+                  />
+                  {detailCC.note && (
+                    <View style={s.detailNoteBox}>
+                      <View style={[s.detailNoteStripe, { backgroundColor: tok.color }]} />
+                      <Text style={s.detailNoteTxt}>{detailCC.note}</Text>
+                    </View>
+                  )}
+                  <TouchableOpacity style={s.cancelBtn} onPress={() => setDetailCC(null)}>
+                    <Text style={s.cancelTxt}>Close</Text>
+                  </TouchableOpacity>
+                </>
+              );
+            })()}
           </View>
         </View>
       </Modal>
@@ -415,65 +386,111 @@ export function CheckCallScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  root:          { flex: 1, backgroundColor: COLORS.bgRoot },
-  content:       { flex: 1, padding: S.xl },
-  screenTitle:   { ...TYPE.title, marginBottom: S.lg },
-  offlineBanner: { flexDirection: 'row', alignItems: 'center', gap: S.md, backgroundColor: COLORS.issueBg, borderWidth: 1, borderColor: COLORS.issueBorder, borderRadius: R.md, padding: S.md, marginBottom: S.md },
-  offlineTxt:    { color: COLORS.white, fontSize: 13, fontWeight: '800' },
-  offlineSubTxt: { color: COLORS.issue, fontSize: 11, marginTop: 2 },
-  syncBtn:       { backgroundColor: COLORS.issue, paddingHorizontal: S.md, paddingVertical: S.xs, borderRadius: R.sm, flexDirection: 'row', alignItems: 'center', gap: 4 },
-  syncBtnTxt:    { color: COLORS.black, fontSize: 11, fontWeight: '800' },
-  activeCard:    { backgroundColor: '#1e3a5f', borderRadius: R.lg, padding: S.xl, borderWidth: 1, borderColor: '#3b82f6', marginBottom: S.xl, ...shadows.md },
-  activeHeader:  { flexDirection: 'row', alignItems: 'center', gap: S.md, marginBottom: S.md },
-  activeTitle:   { color: COLORS.white, fontSize: 16, fontWeight: '800', flex: 1 },
-  countdownRow:  { flexDirection: 'row', alignItems: 'center', gap: S.sm, marginBottom: S.lg },
-  countdown:     { fontSize: 14, fontWeight: '700' },
-  btnRow:        { flexDirection: 'row', gap: S.md },
-  yesBtn:        { flex: 1, backgroundColor: COLORS.ok, borderRadius: R.md, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S.sm, ...shadows.brand },
-  yesBtnTxt:     { color: COLORS.white, fontSize: 14, fontWeight: '800' },
-  noBtn:         { flex: 1, backgroundColor: COLORS.missed, borderRadius: R.md, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: S.sm },
-  noBtnTxt:      { color: COLORS.white, fontSize: 14, fontWeight: '800' },
-  disabled:      { opacity: 0.6 },
-  noActiveCard:  { ...cardStyle, alignItems: 'center', gap: S.md, marginBottom: S.xl, paddingVertical: S.xxl },
-  noActiveTitle: { ...TYPE.heading },
-  noActiveSub:   { color: COLORS.textMuted, fontSize: 13, textAlign: 'center', lineHeight: 20 },
-  historyTitle:  { ...TYPE.label, marginBottom: S.md },
-  emptyHint:     { color: COLORS.textDisabled, fontSize: 13, textAlign: 'center', marginTop: S.xl },
-  historyRow:    { flexDirection: 'row', alignItems: 'center', gap: S.md, paddingVertical: S.md, borderBottomWidth: 1, borderBottomColor: COLORS.borderSubtle },
-  dot:           { width: 10, height: 10, borderRadius: 5 },
-  historyTime:   { color: COLORS.textPrimary, fontSize: 14, fontWeight: '600' },
-  historyNote:   { color: COLORS.textMuted, fontSize: 11, marginTop: 2 },
-  historyStatus: { fontSize: 12, fontWeight: '700' },
-  modalOverlay:  { flex: 1, backgroundColor: COLORS.bgOverlay, justifyContent: 'flex-end' },
-  modalCard:     { backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.borderSubtle, ...shadows.lg },
-  modalTitle:    { ...TYPE.subtitle, marginBottom: S.xs },
-  modalSub:      { color: COLORS.textMuted, fontSize: 13, marginBottom: S.lg },
-  fieldLabel:    { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: S.xs, marginTop: S.md, textTransform: 'uppercase', letterSpacing: 0.5 },
-  pickerBtn:     { backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.borderMid, borderRadius: R.md, padding: S.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  pickerTxt:     { color: COLORS.textPrimary, fontSize: 15 },
-  pickerPlaceholder: { color: COLORS.textDisabled, fontSize: 15 },
-  noteInput:     { backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.borderMid, borderRadius: R.md, padding: S.md, color: COLORS.textPrimary, fontSize: 14, minHeight: 80, marginTop: S.xs },
-  photoBtn:      { flexDirection: 'row', alignItems: 'center', gap: S.sm, backgroundColor: COLORS.infoBg, borderRadius: R.sm, padding: S.md, marginTop: S.xs },
-  photoBtnTxt:   { color: COLORS.info, fontSize: 13, fontWeight: '600' },
-  photoPreview:  { width: '100%', height: 120, borderRadius: R.md, marginTop: S.sm, resizeMode: 'cover' },
-  submitBtn:     { backgroundColor: COLORS.issue, borderRadius: R.md, paddingVertical: 14, alignItems: 'center', marginTop: S.lg },
-  submitBtnTxt:  { color: COLORS.white, fontSize: 15, fontWeight: '800' },
-  cancelBtn:     { backgroundColor: COLORS.bgInput, borderRadius: R.md, paddingVertical: 12, alignItems: 'center', marginTop: S.sm },
-  cancelBtnTxt:  { color: COLORS.textSecondary, fontSize: 14 },
-  sheetCard:     { backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.borderSubtle },
-  sheetTitle:    { ...TYPE.subtitle, marginBottom: S.lg },
-  catRow:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: S.lg, borderBottomWidth: 1, borderBottomColor: COLORS.borderSubtle },
-  catTxt:        { color: COLORS.textPrimary, fontSize: 15 },
-  noteBox:       { backgroundColor: COLORS.issueBg, borderRadius: R.sm, padding: S.md, marginTop: S.sm },
-  noteBoxTxt:    { color: COLORS.issue, fontSize: 13 },
-  detailRow:     { color: COLORS.textSecondary, fontSize: 14, marginBottom: S.sm },
-  detailLabel:   { color: COLORS.textMuted, fontWeight: '600' },
-  geoBadge:      { flexDirection: 'row', alignItems: 'center', gap: S.xs, paddingHorizontal: S.sm, paddingVertical: 6, borderRadius: R.sm, marginVertical: S.xs },
-  geoBadgePass:  { backgroundColor: COLORS.okBg, borderWidth: 1, borderColor: COLORS.okBorder },
-  geoBadgeFail:  { backgroundColor: COLORS.missedBg, borderWidth: 1, borderColor: COLORS.missedBorder },
-  geoBadgeTxt:   { fontSize: 12, fontWeight: '700' },
-  manualBadge:   { backgroundColor: 'rgba(56,189,248,0.12)', borderWidth: 1, borderColor: COLORS.info, paddingHorizontal: S.sm, paddingVertical: 4, borderRadius: R.sm, marginVertical: S.xs },
-  manualBadgeTxt:{ color: COLORS.info, fontSize: 12, fontWeight: '700' },
-  detailPhoto:   { width: '100%', height: 140, borderRadius: R.md, marginTop: S.xs, resizeMode: 'cover' },
+function DetailRow({ label, value, valueColor }) {
+  return (
+    <View style={s.detailRow}>
+      <Text style={s.detailLabel}>{label}</Text>
+      <Text style={[s.detailValue, valueColor && { color: valueColor }]}>{value}</Text>
+    </View>
+  );
+}
+
+const s = StyleSheet.create({
+  root:            { flex: 1, backgroundColor: P.bg0 },
+  scroll:          { flex: 1 },
+  scrollContent:   { paddingHorizontal: SP.px16, paddingTop: SP.px16 },
+
+  offlineBanner:   { flexDirection: 'row', alignItems: 'center', overflow: 'hidden' },
+  offlineStripe:   { width: 4, alignSelf: 'stretch', backgroundColor: P.warn },
+  offlineTxt:      { flex: 1, color: P.warn, fontSize: 12, fontWeight: '600', paddingVertical: SP.px12, paddingHorizontal: SP.px12, backgroundColor: P.warnSubtle },
+
+  // Active card
+  activeCard:      { borderRadius: BR.xl, borderWidth: 1, borderColor: P.blueBorder, overflow: 'hidden', marginBottom: SP.px20, padding: SP.px24, alignItems: 'center', ...SH_TOKENS.blue },
+  activeCardBorderTop: { height: 3, backgroundColor: P.blue, width: 60, borderRadius: 2, marginBottom: SP.px20 },
+
+  ringWrap:        { position: 'relative', width: 130, height: 130, marginBottom: SP.px16 },
+  ringCenter:      { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
+  ringTime:        { fontSize: 26, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  ringLabel:       { fontSize: 9, fontWeight: '800', color: P.t3, letterSpacing: 1.5, marginTop: 2 },
+
+  activeTitle:     { fontSize: 17, fontWeight: '700', color: P.t1, textAlign: 'center', marginBottom: SP.px8 },
+  activeSub:       { fontSize: 13, color: P.t2, textAlign: 'center', lineHeight: 20, marginBottom: SP.px24 },
+
+  activeButtons:   { flexDirection: 'row', gap: SP.px12, width: '100%' },
+  yesBtn:          { flex: 1, borderRadius: BR.md, overflow: 'hidden', ...SH_TOKENS.ok },
+  noBtn:           { flex: 1, borderRadius: BR.md, overflow: 'hidden', ...SH_TOKENS.warn },
+  btnGrad:         { paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  yesTxt:          { color: P.white, fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
+  noTxt:           { color: P.bg0, fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
+  btnDisabled:     { opacity: 0.55 },
+
+  // No active
+  noActiveCard:    { borderRadius: BR.xl, borderWidth: 1, borderColor: P.b2, overflow: 'hidden', padding: SP.px32, alignItems: 'center', marginBottom: SP.px20 },
+  noActiveIconWrap:{ width: 64, height: 64, borderRadius: 32, backgroundColor: P.okSubtle, borderWidth: 1, borderColor: P.okBorder, alignItems: 'center', justifyContent: 'center', marginBottom: SP.px16 },
+  noActiveIcon:    { fontSize: 28, color: P.ok },
+  noActiveTitle:   { fontSize: 17, fontWeight: '700', color: P.t1, marginBottom: SP.px8 },
+  noActiveSub:     { fontSize: 13, color: P.t3, textAlign: 'center', lineHeight: 20 },
+
+  // History
+  historyTitle:    { fontSize: 9, fontWeight: '800', color: P.t4, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: SP.px12 },
+  emptyHistory:    { paddingVertical: SP.px24, alignItems: 'center' },
+  emptyHistoryTxt: { color: P.t4, fontSize: 13 },
+
+  histRow:         { borderRadius: BR.md, borderWidth: 1, borderColor: P.b2, overflow: 'hidden', flexDirection: 'row', alignItems: 'center', marginBottom: SP.px8, ...SH_TOKENS.xs },
+  histAccent:      { width: 4, alignSelf: 'stretch' },
+  histContent:     { flex: 1, padding: SP.px16 },
+  histTop:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  histTime:        { fontSize: 15, fontWeight: '700', color: P.t1, fontVariant: ['tabular-nums'] },
+  histPill:        { borderRadius: BR.xs, paddingHorizontal: SP.px8, paddingVertical: SP.px4, borderWidth: 1 },
+  histPillTxt:     { fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  histNote:        { fontSize: 12, color: P.t3, marginTop: SP.px4 },
+  histArrow:       { color: P.t4, fontSize: 18, paddingRight: SP.px16 },
+
+  // Success overlay
+  successOverlay:  { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 100 },
+  successBadge:    { borderRadius: BR.xxl, overflow: 'hidden', ...SH_TOKENS.ok },
+  successGrad:     { paddingHorizontal: SP.px40, paddingVertical: SP.px32, alignItems: 'center' },
+  successIcon:     { fontSize: 48, color: P.white, marginBottom: SP.px12 },
+  successTxt:      { fontSize: 16, fontWeight: '800', color: P.white, letterSpacing: 1 },
+  successSub:      { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: SP.px8 },
+
+  // Sheets
+  sheetOverlay:    { flex: 1, backgroundColor: P.overlay, justifyContent: 'flex-end' },
+  sheet:           { borderTopLeftRadius: BR.xxl, borderTopRightRadius: BR.xxl, padding: SP.px24, borderWidth: 1, borderColor: P.b3, overflow: 'hidden', maxHeight: '88%' },
+  sheetHandle:     { width: 40, height: 4, backgroundColor: P.b3, borderRadius: 2, alignSelf: 'center', marginBottom: SP.px20 },
+  sheetTitleRow:   { flexDirection: 'row', alignItems: 'center', gap: SP.px12, marginBottom: SP.px4 },
+  issueDot:        { width: 10, height: 10, borderRadius: 5, backgroundColor: P.warn },
+  sheetTitle:      { fontSize: 18, fontWeight: '800', color: P.t1, marginBottom: SP.px4 },
+  sheetSub:        { fontSize: 13, color: P.t3, lineHeight: 20, marginBottom: SP.px20 },
+  fieldLabel:      { fontSize: 9, fontWeight: '800', color: P.t4, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: SP.px8, marginTop: SP.px12 },
+
+  catBtn:          { backgroundColor: P.bg3, borderWidth: 1, borderColor: P.b2, borderRadius: BR.sm, padding: SP.px16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  catBtnTxt:       { color: P.t1, fontSize: 14 },
+  catBtnPlaceholder:{ color: P.t4, fontSize: 14 },
+  catArrow:        { color: P.t3, fontSize: 14 },
+
+  noteInput:       { backgroundColor: P.bg3, borderWidth: 1, borderColor: P.b2, borderRadius: BR.sm, padding: SP.px16, color: P.t1, fontSize: 14, minHeight: 80 },
+  photoBtn:        { backgroundColor: P.infoSubtle, borderWidth: 1, borderColor: P.infoBorder, borderRadius: BR.sm, padding: SP.px16, alignItems: 'center' },
+  photoBtnTxt:     { color: P.info, fontSize: 14, fontWeight: '600' },
+  photoPreview:    { width: '100%', height: 140, borderRadius: BR.sm, marginTop: SP.px8, resizeMode: 'cover' },
+
+  submitBtn:       { borderRadius: BR.md, overflow: 'hidden', marginTop: SP.px20, ...SH_TOKENS.warn },
+  submitTxt:       { color: P.bg0, fontSize: 14, fontWeight: '800', letterSpacing: 0.8 },
+  cancelBtn:       { backgroundColor: P.bg3, borderRadius: BR.md, paddingVertical: 13, alignItems: 'center', marginTop: SP.px12, borderWidth: 1, borderColor: P.b2 },
+  cancelTxt:       { color: P.t2, fontSize: 14 },
+
+  catOption:       { paddingVertical: SP.px16, borderBottomWidth: 1, borderBottomColor: P.b1, flexDirection: 'row', alignItems: 'center', gap: SP.px12 },
+  catOptionActive: { borderBottomColor: P.blueBorder },
+  catOptionCheck:  { width: 20 },
+  catOptionTxt:    { color: P.t1, fontSize: 14, flex: 1 },
+
+  // Detail modal
+  detailHeader:    { flexDirection: 'row', alignItems: 'center', gap: SP.px12, marginBottom: SP.px16 },
+  detailDot:       { width: 12, height: 12, borderRadius: 6 },
+  detailRow:       { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: SP.px12, borderBottomWidth: 1, borderBottomColor: P.b1 },
+  detailLabel:     { fontSize: 12, color: P.t3, fontWeight: '600' },
+  detailValue:     { fontSize: 13, color: P.t1, fontWeight: '700' },
+  detailNoteBox:   { flexDirection: 'row', backgroundColor: P.warnSubtle, borderRadius: BR.sm, marginTop: SP.px16, overflow: 'hidden', marginBottom: SP.px4 },
+  detailNoteStripe:{ width: 4 },
+  detailNoteTxt:   { flex: 1, padding: SP.px12, color: P.warn, fontSize: 13, lineHeight: 20 },
 });

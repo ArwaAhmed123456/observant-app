@@ -4,8 +4,11 @@ import {
   Modal, TextInput
 } from 'react-native';
 import { useApp, formatTime } from '../../context/AppContext';
-import { LogOut, Bell, MapPin, CheckCircle, AlertTriangle, Clock, Users, Zap, ClipboardList } from 'lucide-react-native';
+import { LogOut, Bell, MapPin, CheckCircle, AlertTriangle, Clock, Users, Zap, ClipboardList, Shield } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
+import { StatusTile } from '../components/StatusTile';
+import { EmptyState } from '../components/EmptyState';
+import { P, SP, BR, FONT, SH_TOKENS } from '../../ds';
 import { COLORS, S, R, TYPE, shadows, cardStyle } from '../../theme';
 
 const TABS = ['overview', 'alerts'];
@@ -163,88 +166,41 @@ export function ManagerDashboardScreen({ navigation }) {
             <KPICard value={todayStats.completedPatrols} label="Patrols"  />
           </View>
 
-          <Text style={styles.sectionTitle}>Guards ({guards.length})</Text>
-          {guards.length === 0 && <Text style={styles.emptyHint}>No guards assigned to your sites.</Text>}
+          <Text style={styles.sectionTitle}>DEPLOYED OFFICERS ({guards.length})</Text>
+          {guards.length === 0 ? (
+            <EmptyState
+              icon="shield"
+              title="No Officers Deployed"
+              message="There are currently no security officers assigned to your operational sites."
+              style={{ marginVertical: SP.px24 }}
+            />
+          ) : (
+            guards.map(guard => {
+              const { active, session } = getGuardStatus(guard);
+              const site         = sites.find(s => s.id === guard.siteId || s._id === guard.siteId);
+              const todayCC      = (checkCalls || []).filter(cc => (cc.guardId === guard.id || cc.guardId === guard._id) && cc.firedAt?.startsWith(todayStr));
+              const todayPatrols = (patrolSessions || []).filter(ps => (ps.guardId === guard.id || ps.guardId === guard._id) && ps.startedAt?.startsWith(todayStr));
 
-          {guards.map(guard => {
-            const { active, session } = getGuardStatus(guard);
-            const site         = sites.find(s => s.id === guard.siteId || s._id === guard.siteId);
-            const todayCC      = (checkCalls || []).filter(cc => (cc.guardId === guard.id || cc.guardId === guard._id) && cc.firedAt?.startsWith(todayStr));
-            const missedCC     = todayCC.filter(cc => cc.response === 'missed');
-            const lastCC       = [...todayCC].sort((a, b) => new Date(b.firedAt) - new Date(a.firedAt))[0];
-            const todayPatrols = (patrolSessions || []).filter(ps => (ps.guardId === guard.id || ps.guardId === guard._id) && ps.startedAt?.startsWith(todayStr));
-
-            return (
-              <TouchableOpacity
-                key={guard.id || guard._id}
-                style={[cardStyle, styles.guardCard, active && styles.guardCardActive]}
-                onPress={() => navigation?.navigate('GuardCheckCallPath', { guardId: guard.id || guard._id })}
-                activeOpacity={0.85}
-              >
-                <View style={styles.guardTop}>
-                  <View style={styles.guardInfo}>
-                    <View style={[styles.statusDot, { backgroundColor: active ? COLORS.ok : COLORS.borderMid }]} />
-                    <View>
-                      <Text style={styles.guardName}>{guard.name}</Text>
-                      <Text style={styles.guardBadge}>{guard.badgeNumber}</Text>
-                    </View>
-                  </View>
-                  <View style={[styles.statusPill, active ? styles.pillOn : styles.pillOff]}>
-                    <Text style={[styles.pillTxt, active ? styles.pillTxtOn : styles.pillTxtOff]}>
-                      {active ? 'ON DUTY' : 'OFF DUTY'}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.siteRow}>
-                  <MapPin color={COLORS.info} size={12} />
-                  <Text style={styles.siteTxt}>{site?.name || 'No site'}</Text>
-                </View>
-
-                {active && session && (
-                  <Text style={styles.sessionDetail}>
-                    <Clock size={11} color={COLORS.textMuted} /> Booked on {formatTime(session.bookedOnAt)}
-                    {session.punctuality && !['on_time','unscheduled'].includes(session.punctuality) && (
-                      <Text style={{ color: COLORS.issue }}> · {session.punctuality.replace('_',' ')}</Text>
-                    )}
-                  </Text>
-                )}
-
-                <View style={styles.guardStatsRow}>
-                  <Text style={styles.guardStat}>
-                    <CheckCircle size={11} color={missedCC.length > 0 ? COLORS.missed : COLORS.ok} />
-                    {' '}{todayCC.filter(cc => cc.response === 'yes').length}/{todayCC.length} calls{missedCC.length > 0 ? ` · ${missedCC.length} missed` : ''}
-                  </Text>
-                  <Text style={styles.guardStat}>{todayPatrols.filter(p => p.finishedAt).length} patrols</Text>
-                </View>
-
-                {lastCC && (
-                  <Text style={styles.lastCC}>
-                    Last check call: {formatTime(lastCC.firedAt)} —{' '}
-                    <Text style={{ color: lastCC.response === 'yes' ? COLORS.ok : lastCC.response === 'missed' ? COLORS.missed : COLORS.issue }}>
-                      {lastCC.response === 'yes' ? 'OK' : lastCC.response === 'missed' ? 'Missed' : lastCC.response === 'no' ? 'Issue' : 'Pending'}
-                    </Text>
-                  </Text>
-                )}
-
-                <View style={styles.guardCardFooter}>
-                  <Text style={styles.tapHint}>Tap to view check call path →</Text>
-                  <TouchableOpacity
-                    style={styles.manualLogBtn}
-                    onPress={(e) => { e.stopPropagation?.(); setManualGuard(guard); }}
-                  >
-                    <ClipboardList size={14} color={COLORS.info} />
-                    <Text style={styles.manualLogBtnTxt}>Manual Log</Text>
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+              return (
+                <StatusTile
+                  key={guard.id || guard._id}
+                  guard={guard}
+                  active={active}
+                  session={session}
+                  site={site}
+                  todayCheckCalls={todayCC}
+                  todayPatrols={todayPatrols}
+                  onPress={() => navigation?.navigate('GuardCheckCallPath', { guardId: guard.id || guard._id })}
+                  onManualLog={(g) => setManualGuard(g)}
+                />
+              );
+            })
+          )}
         </ScrollView>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} style={styles.scroll}>
           <View style={styles.alertsHeader}>
-            <Text style={styles.sectionTitle}>Alerts</Text>
+            <Text style={styles.sectionTitle}>SECURITY ALERTS & EXCEPTIONS</Text>
             {unread.length > 0 && (
               <TouchableOpacity onPress={markAllAlertsRead}>
                 <Text style={styles.markAll}>Mark all read</Text>
@@ -252,12 +208,14 @@ export function ManagerDashboardScreen({ navigation }) {
             )}
           </View>
 
-          {mgrAlerts.length === 0 && (
-            <View style={styles.emptyAlerts}>
-              <Bell color={COLORS.borderMid} size={40} />
-              <Text style={styles.emptyAlertsTxt}>No alerts yet</Text>
-            </View>
-          )}
+          {mgrAlerts.length === 0 ? (
+            <EmptyState
+              icon="alert"
+              title="Zero Security Exceptions"
+              message="All monitored security sites are operating within normal parameters. No active alerts."
+              style={{ marginTop: SP.px32 }}
+            />
+          ) : null}
 
           {mgrAlerts.map(alert => {
             const sev = alertSeverity(alert.type);

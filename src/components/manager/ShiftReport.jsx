@@ -138,6 +138,64 @@ export const ShiftReport = () => {
   const filteredRows = getRows();
   const visibleHeaders = AVAILABLE_COLUMNS.filter(c => activeColumns[c.key]);
 
+  // Checklist register rows: one officer/shift per date with exact check-call
+  // times in hourly slots. The attached site checklist uses two 13-slot bands.
+  const buildChecklistRows = () => {
+    const guardsMap = Object.fromEntries(users.map(u => [u.id, u]));
+    const sitesMap = Object.fromEntries(sites.map(s => [s.id, s]));
+    const groups = new Map();
+    (reportType === 'check_call' || reportType === 'combined' ? checkCalls : []).forEach((call) => {
+      const guard = guardsMap[call.guardId];
+      const site = sitesMap[call.siteId];
+      const at = new Date(call.promptTime || call.firedAt);
+      if (!Number.isFinite(at.getTime())) return;
+      if (dateRange === 'today' && at.toDateString() !== new Date().toDateString()) return;
+      if (dateRange === 'week') {
+        const weekStart = new Date(); weekStart.setHours(0, 0, 0, 0);
+        weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+        if (at < weekStart) return;
+      }
+      if (dateRange === 'month' && (at.getMonth() !== new Date().getMonth() || at.getFullYear() !== new Date().getFullYear())) return;
+      if (dateRange === 'custom' && customStartDate && customEndDate) {
+        const start = new Date(customStartDate); start.setHours(0, 0, 0, 0);
+        const end = new Date(customEndDate); end.setHours(23, 59, 59, 999);
+        if (at < start || at > end) return;
+      }
+      if (selectedSiteId !== 'all' && call.siteId !== selectedSiteId) return;
+      if (selectedGuardId !== 'all' && call.guardId !== selectedGuardId) return;
+
+      const serviceDate = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+      const shift = at.getHours() >= 7 && at.getHours() < 19 ? 'Day' : 'Night';
+      const session = shiftSessions.find(s => s.id === call.sessionId);
+      const key = [serviceDate, call.siteId, call.guardId, shift].join('|');
+      if (!groups.has(key)) {
+        groups.set(key, {
+          serviceDate, siteName: site?.name || '—', guardName: guard?.name || '—',
+          badgeNumber: guard?.badgeNumber || '—', shift,
+          shiftTime: session ? `${session.scheduledStartTime || ''}–${session.scheduledEndTime || ''}` : shift,
+          slots: {}, notes: [],
+        });
+      }
+      const row = groups.get(key);
+      const hour = at.getHours();
+      const slot = `${String(hour).padStart(2, '0')}00`;
+      const isMissed = call.status === 'missed' || call.response === 'missed';
+      const responseAt = call.respondedAt ? new Date(call.respondedAt) : null;
+      const late = !isMissed && responseAt && responseAt - at > 15 * 60 * 1000;
+      const exactTime = responseAt && Number.isFinite(responseAt.getTime())
+        ? responseAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+        : at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      const entry = isMissed ? `MISSED >15m (${exactTime})` : late ? `${exactTime} LATE` : exactTime;
+      row.slots[slot] = row.slots[slot] ? `${row.slots[slot]}; ${entry}` : entry;
+      const explanation = call.notes || call.note || call.missedReason || '';
+      if (isMissed) row.notes.push(`Missed call at ${slot}${explanation ? ` — ${explanation}` : ' — Incident Log Book explanation required'}`);
+      else if (late) row.notes.push(`Late call at ${slot}${explanation ? ` — ${explanation}` : ''}`);
+      else if (explanation) row.notes.push(explanation);
+    });
+    return [...groups.values()].sort((a, b) => a.serviceDate.localeCompare(b.serviceDate) || a.siteName.localeCompare(b.siteName) || a.guardName.localeCompare(b.guardName));
+  };
+  const checklistRows = buildChecklistRows();
+
   // Compute summary KPI counts
   const totalCalls = checkCalls.length;
   const okCalls = checkCalls.filter(c => c.response === 'yes').length;
@@ -157,12 +215,21 @@ export const ShiftReport = () => {
   };
 
   const handleExportCSV = () => {
-    exportToCSV(`Observant_Shift_Call_Report_${Date.now()}`, visibleHeaders, filteredRows);
+    const hours = (start, end) => Array.from({ length: 13 }, (_, i) => `${String((start + i) % 24).padStart(2, '0')}00`);
+    const csvHeaders = ['Date', 'Site Name', 'Security Officer', 'ID No', 'Shift', ...hours(7), 'Notes / Incident Log'];
+    const escape = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const csv = [csvHeaders, ...checklistRows.map(row => [row.serviceDate, row.siteName, row.guardName, row.badgeNumber, row.shiftTime,
+      ...hours(row.shift === 'Day' ? 7 : 19).map(hour => row.slots[hour] || '—'), row.notes.join('; ')])]
+      .map(line => line.map(escape).join(',')).join('\r\n');
+    const blob = new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+    link.download = `Observant_Check_Call_Log_${Date.now()}.csv`; link.click(); URL.revokeObjectURL(link.href);
   };
 
   const handleExportPDF = () => {
     const siteObj = sites.find(s => s.id === selectedSiteId);
     const guardObj = users.find(u => u.id === selectedGuardId);
+    const checklistDates = checklistRows.map(row => row.serviceDate).sort();
 
     openPrintablePDF({
       title: 'OBSERVANT SECURITY - OFFICIAL SHIFT CALL REPORT',
@@ -170,12 +237,15 @@ export const ShiftReport = () => {
       generatedBy: `${currentUser.name} (${currentUser.role === 'manager' ? 'Operations Manager' : 'Duty Supervisor'})`,
       filters: {
         dateRange: dateRange.toUpperCase(),
+        startDate: checklistDates[0] || '—',
+        finishDate: checklistDates[checklistDates.length - 1] || '—',
         siteName: siteObj ? siteObj.name : 'All Monitored Sites',
         guardName: guardObj ? guardObj.name : 'All Duty Guards',
         reportType: reportType.toUpperCase()
       },
       headers: visibleHeaders,
       rows: filteredRows,
+      checklistRows,
       includePhotos,
       summaryKpis: kpis
     });
@@ -329,6 +399,31 @@ export const ShiftReport = () => {
           })}
         </div>
       </div>
+
+      <div style={{ margin: '4px 0 18px', padding: '12px 14px', border: '1px solid var(--brand-blue-border)', borderRadius: '10px', background: 'var(--brand-blue-subtle)', color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.6 }}>
+        <strong style={{ color: 'var(--text-primary)' }}>Check call register</strong> · Record exact response times in the hourly day/night slots. Late responses are marked in red; calls unanswered after 15 minutes require a full Incident Log Book explanation.
+      </div>
+
+      <div style={{ marginBottom: '8px', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 800 }}>Hourly Check Call Register · {checklistRows.length} officer shifts</div>
+      <div style={{ overflowX: 'auto', border: '1px solid var(--border-subtle)', borderRadius: '8px', marginBottom: '20px' }}>
+        <table style={{ minWidth: '1180px', width: '100%', borderCollapse: 'collapse', fontSize: '10px' }}>
+          <thead><tr style={{ background: 'var(--bg-elevated)', textAlign: 'center' }}>
+            {['Date','Site Name','Security Officer','ID No','Shift',...Array.from({ length: 13 }, (_, i) => `${String(7 + i).padStart(2, '0')}00`),...Array.from({ length: 13 }, (_, i) => `${String((19 + i) % 24).padStart(2, '0')}00`),'Incident Log / Notes'].map(label => <th key={label} style={{ padding: '8px 5px', borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{label}</th>)}
+          </tr></thead>
+          <tbody>
+            {checklistRows.length ? checklistRows.map((row, rowIndex) => <tr key={`${row.serviceDate}-${row.guardName}-${row.shift}-${rowIndex}`} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+              <td style={{ padding: '7px 5px', whiteSpace: 'nowrap' }}>{row.serviceDate}</td><td style={{ padding: '7px 5px' }}>{row.siteName}</td><td style={{ padding: '7px 5px' }}>{row.guardName}</td><td style={{ padding: '7px 5px' }}>{row.badgeNumber}</td><td style={{ padding: '7px 5px' }}>{row.shiftTime}</td>
+              {[...Array.from({ length: 13 }, (_, i) => `${String(7 + i).padStart(2, '0')}00`),...Array.from({ length: 13 }, (_, i) => `${String((19 + i) % 24).padStart(2, '0')}00`)].map(hour => {
+                const value = row.slots[hour] || '—';
+                return <td key={hour} style={{ padding: '7px 4px', textAlign: 'center', color: value.includes('MISSED') || value.includes('LATE') ? '#EF4444' : 'var(--text-primary)', fontWeight: value.includes('MISSED') ? 800 : 500 }}>{value}</td>;
+              })}
+              <td style={{ padding: '7px 5px', minWidth: '140px' }}>{row.notes.join('; ') || '—'}</td>
+            </tr>) : <tr><td colSpan={32} style={{ padding: '16px', textAlign: 'center', color: 'var(--text-muted)' }}>No check calls match these filters.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ marginBottom: '8px', color: 'var(--text-primary)', fontSize: '13px', fontWeight: 800 }}>Detailed Activity Log</div>
 
       {/* Table Preview */}
       <div style={{ overflowX: 'auto', border: '1px solid var(--border-subtle)', borderRadius: '8px' }}>

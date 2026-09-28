@@ -31,6 +31,7 @@ export const openPrintablePDF = ({
   filters = {},
   headers = [],
   rows = [],
+  checklistRows = [],
   includePhotos = true,
   summaryKpis = {}
 }) => {
@@ -46,6 +47,23 @@ export const openPrintablePDF = ({
   });
 
   const photoColIndex = headers.findIndex(h => h.key === 'photos');
+  const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  const renderChecklist = () => {
+    const hoursFor = shift => Array.from({ length: 13 }, (_, i) => `${String(((shift === 'Day' ? 7 : 19) + i) % 24).padStart(2, '0')}00`);
+    const headerCells = hours => hours.map(hour => `<th>${hour}</th>`).join('');
+    const bands = ['Day', 'Night'].map(shift => {
+      const rowsForShift = checklistRows.filter(row => row.shift === shift);
+      const hours = hoursFor(shift);
+      return `<h2 class="band-title">${shift} Check Calls <span>${shift === 'Day' ? '0700–1900' : '1900–0700'}</span></h2>
+        <table class="checklist"><thead><tr><th>Site Name</th><th>Security Officer</th><th>ID No</th><th>Shift</th>${headerCells(hours)}<th>Incident / Notes</th></tr></thead>
+        <tbody>${rowsForShift.map(row => `<tr><td>${escapeHtml(row.siteName)}</td><td>${escapeHtml(row.guardName)}</td><td>${escapeHtml(row.badgeNumber)}</td><td>${escapeHtml(row.shiftTime)}</td>${hours.map(hour => {
+          const value = row.slots[hour] || '—';
+          const cls = value.includes('MISSED') ? 'critical' : value.includes('LATE') ? 'late' : '';
+          return `<td class="${cls}">${escapeHtml(value)}</td>`;
+        }).join('')}<td>${escapeHtml(row.notes.join('; ') || '—')}</td></tr>`).join('') || `<tr><td colspan="${hours.length + 5}" class="empty-row">No ${shift.toLowerCase()} check calls in this period.</td></tr>`}</tbody></table>`;
+    }).join('');
+    return `<section class="register"><h1>CHECK CALL LOG</h1><div class="register-meta"><span><b>Start Date:</b> ${escapeHtml(filters.startDate || filters.dateRange || 'All records')}</span><span><b>Finish Date:</b> ${escapeHtml(filters.finishDate || '')}</span></div><p>Record the precise time of every call. Late calls are highlighted in red. Calls unanswered after 15 minutes must be reported and fully explained in the Incident Log Book.</p>${bands}</section>`;
+  };
 
   const html = `
     <!DOCTYPE html>
@@ -218,6 +236,23 @@ export const openPrintablePDF = ({
           font-weight: 600;
           font-size: 10px;
         }
+        .register { page-break-after: always; }
+        .register h1 { font-size: 18px; letter-spacing: .8px; margin: 0 0 8px; }
+        .register-meta { display:flex; gap:28px; font-size:10px; margin-bottom:8px; }
+        .register > p { font-size:9px; color:#475569; margin:0 0 14px; }
+        .band-title { font-size:12px; margin:14px 0 6px; }
+        .band-title span { color:#64748b; font-size:9px; font-weight:500; margin-left:8px; }
+        table.checklist { table-layout:fixed; font-size:7px; margin-bottom:14px; }
+        .checklist th,.checklist td { padding:4px 3px; border:1px solid #cbd5e1; text-align:center; overflow-wrap:anywhere; }
+        .checklist th { background:#172033; font-size:6.5px; }
+        .checklist th:nth-child(1) { width:10%; }
+        .checklist th:nth-child(2) { width:9%; }
+        .checklist th:nth-child(3) { width:4%; }
+        .checklist th:nth-child(4) { width:5%; }
+        .checklist th:last-child { width:12%; }
+        .checklist td:nth-child(1),.checklist td:nth-child(2),.checklist td:last-child { text-align:left; }
+        .checklist .late,.checklist .critical { color:#dc2626; font-weight:800; }
+        .checklist .empty-row { padding:12px; text-align:center; color:#64748b; }
         @media screen {
           .print-bar {
             background: #1e293b;
@@ -270,6 +305,8 @@ export const openPrintablePDF = ({
       <div class="filter-banner">
         <strong>Report Scope:</strong> Range: ${filters.dateRange || 'All Records'} | Site: ${filters.siteName || 'All Sites'} | Guard: ${filters.guardName || 'All Guards'} | Type: ${filters.reportType || 'Combined'}
       </div>
+
+      ${checklistRows.length ? renderChecklist() : ''}
 
       <div class="kpi-grid">
         <div class="kpi-card">

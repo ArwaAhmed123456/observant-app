@@ -1,12 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Modal, TextInput, Switch, Alert, Share, Platform
+  Modal, TextInput, Switch, Share,
 } from 'react-native';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { FileText, Download, Filter, X, ChevronDown } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
-import { T } from '../../theme';
+import { EmptyState } from '../components/EmptyState';
+import { P, SP, BR, FONT, SH_TOKENS, card, input as inputStyle, btnPrimary } from '../../ds';
 
 const REPORT_TYPES = ['combined', 'check_calls', 'patrols'];
 const DATE_RANGES  = ['today', 'this_week', 'this_month', 'custom'];
@@ -139,17 +140,45 @@ export function ManagerReportsScreen() {
       checkCalls, patrolSessions, patrolCaptures, users, sites, shiftSessions, checkpoints, currentUser]);
 
   const generateCSV = () => {
-    const headers = ['Date','Type','Guard','Badge','Site','Shift','Check Call Time','Check Call Result','Patrol Time','Checkpoints','Note'];
-    const lines = [headers.join(',')];
-    rows.forEach(r => {
-      lines.push([
-        r.date, r.type === 'check_call' ? 'Check Call' : 'Patrol',
-        r.guardName, r.badgeNumber, r.site, r.shiftTime || '',
-        r.checkCallTime || '', r.checkCallResult || '',
-        r.patrolTime || '', r.checkpointsCapt || '',
-        `"${(r.note || r.missingCheckpoints || '').replace(/"/g,'""')}"`,
-      ].join(','));
-    });
+    const dayHours = Array.from({ length: 13 }, (_, i) => `${String(7 + i).padStart(2, '0')}00`);
+    const nightHours = Array.from({ length: 13 }, (_, i) => `${String((19 + i) % 24).padStart(2, '0')}00`);
+    const headers = ['Date','Site Name','Security Officer','ID No','Shift Times (DAY/Night)','Record Type',...dayHours,...nightHours,'Incident Log / Notes'];
+    const groups = new Map();
+    (reportType === 'combined' || reportType === 'check_calls' ? checkCalls : []).filter(cc => isInRange(cc.firedAt, dateRange, customStart, customEnd))
+      .filter(cc => currentUser.siteIds?.includes(cc.siteId))
+      .filter(cc => guardFilter === 'all' || cc.guardId === guardFilter)
+      .filter(cc => siteFilter === 'all' || cc.siteId === siteFilter)
+      .forEach(cc => {
+        const guard = users.find(u => u.id === cc.guardId);
+        const site = sites.find(s => s.id === cc.siteId);
+        const fired = new Date(cc.firedAt);
+        const day = fired.getHours() >= 7 && fired.getHours() < 19;
+        const date = formatDate(fired);
+        const key = [date, cc.siteId, cc.guardId, day ? 'Day' : 'Night'].join('|');
+        if (!groups.has(key)) groups.set(key, { date, site: site?.name || '—', guard: guard?.name || '—', badge: guard?.badgeNumber || '—', shift: day ? 'Day' : 'Night', type: 'Check Call Log', slots: {}, notes: [] });
+        const group = groups.get(key);
+        const slot = `${String(fired.getHours()).padStart(2, '0')}00`;
+        const missed = cc.response === 'missed';
+        const responded = cc.respondedAt ? new Date(cc.respondedAt) : null;
+        const late = !missed && responded && responded - fired > 15 * 60 * 1000;
+        const exact = responded && !Number.isNaN(responded.getTime()) ? formatTime(responded) : formatTime(fired);
+        const cell = missed ? `MISSED >15m (${exact})` : late ? `${exact} LATE` : exact;
+        group.slots[slot] = group.slots[slot] ? `${group.slots[slot]}; ${cell}` : cell;
+        if (missed) group.notes.push(`Missed call at ${slot} — ${cc.note || 'Incident Log Book explanation required'}`);
+        else if (late) group.notes.push(`Late call at ${slot}${cc.note ? ` — ${cc.note}` : ''}`);
+        else if (cc.note) group.notes.push(cc.note);
+      });
+    const checklistRows = [...groups.values()];
+    const patrolRows = reportType === 'check_calls' ? [] : rows.filter(row => row.type === 'patrol').map(row => ({
+      date: row.date, site: row.site, guard: row.guardName, badge: row.badgeNumber,
+      shift: row.shiftTime || '', type: 'Patrol', slots: {},
+      notes: [`${row.patrolTime || 'Patrol'} · Checkpoints ${row.checkpointsCapt || '—'}${row.missingCheckpoints ? ` · Missing: ${row.missingCheckpoints}` : ''}`],
+    }));
+    const allRows = [...checklistRows, ...patrolRows];
+    const escape = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const lines = [headers, ...allRows.map(row => [row.date,row.site,row.guard,row.badge,row.shift,row.type,
+      ...dayHours.map(hour => row.slots[hour] || ''), ...nightHours.map(hour => row.slots[hour] || ''), row.notes.join('; ')])]
+      .map(line => line.map(escape).join(','));
     const csv = lines.join('\n');
     Share.share({
       title: 'Observant Shift Report',
@@ -167,13 +196,13 @@ export function ManagerReportsScreen() {
         <Text style={styles.screenTitle}>Reports</Text>
         <View style={styles.topBtns}>
           <TouchableOpacity style={styles.iconBtn} onPress={() => setColModal(true)}>
-            <FileText color="#94a3b8" size={20} />
+            <FileText color={P.t2} size={20} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.iconBtn} onPress={() => setFilterModal(true)}>
-            <Filter color="#94a3b8" size={20} />
+            <Filter color={P.t2} size={20} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.exportBtn} onPress={generateCSV}>
-            <Download color="#fff" size={16} />
+            <Download color={P.white} size={15} />
             <Text style={styles.exportBtnTxt}>Export CSV</Text>
           </TouchableOpacity>
         </View>
@@ -191,9 +220,12 @@ export function ManagerReportsScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false}>
         {rows.length === 0 && (
-          <View style={styles.emptyState}>
-            <FileText color="#334155" size={40} />
-            <Text style={styles.emptyTxt}>No records for selected filters</Text>
+          <View style={{ marginTop: SP.px24 }}>
+            <EmptyState
+              variant="radar"
+              title="No records found"
+              message="Try adjusting your date range, guard, or site filters."
+            />
           </View>
         )}
 
@@ -223,8 +255,8 @@ export function ManagerReportsScreen() {
                 {cols.checkCallTime && <Text style={styles.rowDetail}>Time: {row.checkCallTime}</Text>}
                 {cols.checkCallResult && (
                   <Text style={[styles.rowResult, {
-                    color: row.checkCallResult.startsWith('✓') ? '#10b981' :
-                           row.checkCallResult.startsWith('✗') ? '#ef4444' : '#f59e0b'
+                    color: row.checkCallResult.startsWith('✓') ? P.ok :
+                           row.checkCallResult.startsWith('✗') ? P.danger : P.warn
                   }]}>
                     {row.checkCallResult}
                   </Text>
@@ -254,7 +286,7 @@ export function ManagerReportsScreen() {
           <View style={styles.modalCard}>
             <View style={styles.modalHead}>
               <Text style={styles.modalTitle}>Filters</Text>
-              <TouchableOpacity onPress={() => setFilterModal(false)}><X color="#64748b" size={20} /></TouchableOpacity>
+              <TouchableOpacity onPress={() => setFilterModal(false)}><X color={P.t2} size={20} /></TouchableOpacity>
             </View>
 
             <Text style={styles.fieldLabel}>Date Range</Text>
@@ -349,7 +381,7 @@ export function ManagerReportsScreen() {
           <View style={styles.modalCard}>
             <View style={styles.modalHead}>
               <Text style={styles.modalTitle}>Columns</Text>
-              <TouchableOpacity onPress={() => setColModal(false)}><X color="#64748b" size={20} /></TouchableOpacity>
+              <TouchableOpacity onPress={() => setColModal(false)}><X color={P.t2} size={20} /></TouchableOpacity>
             </View>
             {Object.entries(cols).map(([key, val]) => (
               <View key={key} style={styles.colRow}>
@@ -357,8 +389,8 @@ export function ManagerReportsScreen() {
                 <Switch
                   value={val}
                   onValueChange={v => setCols(prev => ({ ...prev, [key]: v }))}
-                  trackColor={{ true: '#10b981', false: '#334155' }}
-                  thumbColor="#fff"
+                  trackColor={{ true: P.ok, false: P.b3 }}
+                  thumbColor={P.white}
                 />
               </View>
             ))}
@@ -373,54 +405,50 @@ export function ManagerReportsScreen() {
 }
 
 const styles = StyleSheet.create({
-  root:         { flex: 1, backgroundColor: T.bgRoot },
-  content:      { flex: 1, padding: 20 },
-  topRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, paddingHorizontal: 20 },
-  screenTitle:  { color: T.textPrimary, fontSize: 22, fontWeight: '800' },
+  root:         { flex: 1, backgroundColor: P.bg0 },
+  topRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px12, paddingHorizontal: SP.px20, paddingTop: SP.px8 },
+  screenTitle:  { ...FONT.h2 },
   topBtns:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  iconBtn:      { padding: 8 },
-  exportBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#10b981', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
-  exportBtnTxt: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  filterSummary:{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8, paddingHorizontal: 20 },
-  filterTag:    { backgroundColor: T.bgInput, borderRadius: 6, paddingHorizontal: 10, paddingVertical: 4 },
-  rowCount:     { color: '#64748b', fontSize: 12, marginBottom: 12 },
-  row:          { backgroundColor: '#0f172a', borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#1e293b' },
-  rowPatrol:    { borderColor: '#1e3a5f' },
-  rowHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  typeBadge:    { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  typeBadgeCC:  { backgroundColor: 'rgba(59,130,246,0.2)' },
-  typeBadgeP:   { backgroundColor: 'rgba(16,185,129,0.15)' },
-  typeBadgeTxt: { color: '#94a3b8', fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
-  rowDate:      { color: '#475569', fontSize: 11 },
-  rowGuard:     { color: '#fff', fontSize: 14, fontWeight: '700' },
-  rowBadge:     { color: '#64748b', fontWeight: '400' },
-  rowSite:      { color: '#64748b', fontSize: 12, marginTop: 2, marginBottom: 4 },
-  rowDetail:    { color: '#94a3b8', fontSize: 12, marginTop: 3 },
+  iconBtn:      { padding: 8, backgroundColor: P.bg2, borderRadius: BR.sm, borderWidth: 1, borderColor: P.b2 },
+  exportBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.blue, borderRadius: BR.sm, paddingHorizontal: SP.px12, paddingVertical: 9, ...SH_TOKENS.blue },
+  exportBtnTxt: { color: P.white, fontSize: 12, fontWeight: '700' },
+  filterSummary:{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: SP.px8, paddingHorizontal: SP.px20 },
+  filterTag:    { backgroundColor: P.bg3, borderRadius: BR.xs, paddingHorizontal: SP.px8, paddingVertical: 4, borderWidth: 1, borderColor: P.b2 },
+  rowCount:     { color: P.t3, fontSize: 12, marginBottom: SP.px12, paddingHorizontal: SP.px20 },
+  row:          { ...card, padding: SP.px16, marginBottom: SP.px8, marginHorizontal: SP.px20 },
+  rowPatrol:    { borderColor: P.blueBorder },
+  rowHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px8 },
+  typeBadge:    { borderRadius: BR.xs, paddingHorizontal: 8, paddingVertical: 3 },
+  typeBadgeCC:  { backgroundColor: P.infoSubtle, borderWidth: 1, borderColor: P.infoBorder },
+  typeBadgeP:   { backgroundColor: P.okSubtle, borderWidth: 1, borderColor: P.okBorder },
+  typeBadgeTxt: { color: P.t2, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  rowDate:      { color: P.t3, fontSize: 11 },
+  rowGuard:     { color: P.t1, fontSize: 14, fontWeight: '700' },
+  rowBadge:     { color: P.t3, fontWeight: '400' },
+  rowSite:      { color: P.t3, fontSize: 12, marginTop: 2, marginBottom: 4 },
+  rowDetail:    { color: P.t2, fontSize: 12, marginTop: 3 },
   rowResult:    { fontSize: 13, fontWeight: '700', marginTop: 4 },
-  rowNote:      { color: '#64748b', fontSize: 11, marginTop: 4, fontStyle: 'italic' },
-  manualLogBadge: { backgroundColor: 'rgba(56,189,248,0.12)', borderWidth: 1, borderColor: '#38bdf8', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start', marginVertical: 4 },
-  manualLogBadgeTxt: { color: '#38bdf8', fontSize: 11, fontWeight: '700' },
-  emptyState:   { alignItems: 'center', marginTop: 60, gap: 14 },
-  emptyTxt:     { color: '#475569', fontSize: 14 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  modalCard:    { backgroundColor: '#0f172a', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, borderWidth: 1, borderColor: '#1e293b', maxHeight: '90%' },
-  modalHead:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle:   { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 16 },
-  fieldLabel:   { color: '#94a3b8', fontSize: 12, fontWeight: '600', marginBottom: 8, marginTop: 12, textTransform: 'uppercase' },
+  rowNote:      { color: P.t3, fontSize: 11, marginTop: 4, fontStyle: 'italic' },
+  manualLogBadge: { backgroundColor: P.infoSubtle, borderWidth: 1, borderColor: P.infoBorder, borderRadius: BR.xs, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start', marginVertical: 4 },
+  manualLogBadgeTxt: { color: P.info, fontSize: 11, fontWeight: '700' },
+  modalOverlay: { flex: 1, backgroundColor: P.overlay, justifyContent: 'flex-end' },
+  modalCard:    { backgroundColor: P.bg2, borderTopLeftRadius: BR.xl, borderTopRightRadius: BR.xl, padding: SP.px24, borderWidth: 1, borderColor: P.b2, maxHeight: '90%', ...SH_TOKENS.lg },
+  modalHead:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px16 },
+  modalTitle:   { ...FONT.h3, marginBottom: SP.px16 },
+  fieldLabel:   { color: P.t3, fontSize: 11, fontWeight: '700', marginBottom: SP.px8, marginTop: SP.px12, textTransform: 'uppercase', letterSpacing: 0.6 },
   pillRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
-  pill:         { backgroundColor: '#1e293b', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 7 },
-  pillActive:   { backgroundColor: '#10b981' },
-  pillTxt:      { color: '#64748b', fontSize: 13 },
-  pillTxtActive:{ color: '#fff', fontWeight: '700' },
-  input:        { backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155', borderRadius: 10, padding: 12, color: '#fff', fontSize: 14, marginBottom: 4 },
-  pickerBtn:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', borderRadius: 10, padding: 12 },
-  pickerBtnTxt: { color: '#fff', fontSize: 14 },
-  applyBtn:     { backgroundColor: '#10b981', borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginTop: 20 },
-  applyBtnTxt:  { color: '#fff', fontSize: 15, fontWeight: '800' },
-  pickerItem:   { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  pickerItemTxt:{ color: '#fff', fontSize: 15 },
-  cancelBtn:    { backgroundColor: '#1e293b', borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 12 },
-  cancelTxt:    { color: '#94a3b8', fontSize: 14 },
-  colRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#1e293b' },
-  colLabel:     { color: '#fff', fontSize: 14 },
+  pill:         { backgroundColor: P.bg3, borderRadius: BR.full, paddingHorizontal: 14, paddingVertical: 7, borderWidth: 1, borderColor: P.b2 },
+  pillActive:   { backgroundColor: P.blueSubtle, borderColor: P.blueBorder },
+  pillTxt:      { color: P.t3, fontSize: 13 },
+  pillTxtActive:{ color: P.info, fontWeight: '700' },
+  pickerBtn:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: P.bg3, borderRadius: BR.sm, padding: SP.px12, borderWidth: 1, borderColor: P.b2 },
+  pickerBtnTxt: { color: P.t1, fontSize: 14 },
+  applyBtn:     { ...btnPrimary, marginTop: SP.px20 },
+  applyBtnTxt:  { color: P.white, fontSize: 15, fontWeight: '800' },
+  pickerItem:   { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: P.b1 },
+  pickerItemTxt:{ color: P.t1, fontSize: 15 },
+  cancelBtn:    { backgroundColor: P.bg3, borderRadius: BR.md, paddingVertical: 13, alignItems: 'center', marginTop: SP.px12, borderWidth: 1, borderColor: P.b2 },
+  cancelTxt:    { color: P.t2, fontSize: 14 },
+  colRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: P.b1 },
+  colLabel:     { color: P.t1, fontSize: 14 },
 });
