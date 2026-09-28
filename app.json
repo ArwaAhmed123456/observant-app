@@ -21,7 +21,7 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundColor": "#090d16"
+      "backgroundColor": "#111722"
       },
       "permissions": [
         "CAMERA",

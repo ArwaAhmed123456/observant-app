@@ -51,14 +51,14 @@ export const COLORS = {
   brandSubtle:  'rgba(27,79,190,0.08)',
 
   // Backgrounds (deep charcoal navy — not pure black)
-  bgRoot:       '#0B0E14',
-  bgCard:       '#131C2E',
-  bgCardHover:  '#1A2540',
-  bgElevated:   '#1A2540',
-  bgInput:      '#1E2540',
-  bgSheet:      '#131828',
-  bgOverlay:    'rgba(5, 7, 14, 0.88)',
-  bgSurface:    'rgba(255, 255, 255, 0.03)',
+  bgRoot:       '#111722',
+  bgCard:       '#1B2738',
+  bgCardHover:  '#243349',
+  bgElevated:   '#243349',
+  bgInput:      '#202D40',
+  bgSheet:      '#182231',
+  bgOverlay:    'rgba(10, 15, 23, 0.88)',
+  bgSurface:    'rgba(255, 255, 255, 0.045)',
 
   // Glass morphism
   glass:        'rgba(255, 255, 255, 0.04)',
@@ -106,13 +106,13 @@ export const COLORS = {
   // Text hierarchy
   textPrimary:   '#F0F4FF',
   textSecondary: '#8FA3C8',
-  textMuted:     '#56617A',
-  textDisabled:  '#3A4260',
-  textInverse:   '#0B0E14',
+  textMuted:     '#8291A8',
+  textDisabled:  '#586A83',
+  textInverse:   '#111722',
 
   // Borders
-  borderSubtle:  'rgba(255, 255, 255, 0.07)',
-  borderMid:     'rgba(255, 255, 255, 0.12)',
+  borderSubtle:  'rgba(196, 211, 232, 0.11)',
+  borderMid:     'rgba(196, 211, 232, 0.17)',
   borderStrong:  'rgba(255, 255, 255, 0.20)',
 
   // compat aliases

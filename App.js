@@ -1,5 +1,5 @@
 import 'react-native-gesture-handler';
-import React, { useEffect } from 'react';
+import React from 'react';
 import { ActivityIndicator, View, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -13,7 +13,6 @@ import {
 import { COLORS } from './src/theme';
 
 import { AppProvider, useApp } from './src/context/AppContext';
-import { seedIfEmpty } from './src/data/store';
 
 // ── Screens ───────────────────────────────────────────────────────────────────
 import { LoginScreen }             from './src/native/screens/LoginScreen';
@@ -148,7 +147,6 @@ function RootNavigator() {
 }
 
 export default function App() {
-  useEffect(() => { seedIfEmpty(); }, []);
   return (
     <SafeAreaProvider>
       <AppProvider>

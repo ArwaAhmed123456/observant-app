@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, Alert } from 'react-native';
-import { load, save, KEYS } from '../data/store';
+import { load, save, KEYS, seedIfEmpty } from '../data/store';
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -48,6 +48,9 @@ export function AppProvider({ children }) {
 
   // ─── Load all data from AsyncStorage ──────────────────────────────────────
   const loadAll = useCallback(async () => {
+    // Seed before the first read. App-level parallel seeding could race login
+    // initialization and leave a fresh install looking like an empty app.
+    await seedIfEmpty();
     const [
       u, s, cp, ss, cc, ps, pc, rpl, al, ro, rt, uid, aud
     ] = await Promise.all([

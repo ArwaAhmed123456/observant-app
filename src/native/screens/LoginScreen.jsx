@@ -94,11 +94,7 @@ export function LoginScreen() {
   // ── Forgot password ────────────────────────────────────────────────────────
   const handleSendCode = async () => {
     if (!resetEmail.trim()) { setError('Enter your email address.'); return; }
-    setResetLoading(true);
-    await new Promise(r => setTimeout(r, 900));
-    setResetLoading(false);
-    setError('');
-    setStep(STEPS.FORGOT_VERIFY);
+    setError('Password reset is unavailable in this offline preview. Ask your manager for account help.');
   };
 
   const handleResetPassword = async () => {
@@ -160,7 +156,7 @@ export function LoginScreen() {
               transform: [{ translateY: cardSlide }, { translateX: shakeX }],
             },
           ]}>
-            <LinearGradient colors={['#162040', '#0F1828']} style={styles.cardGradient} />
+            <LinearGradient colors={['#26364B', '#182333']} style={styles.cardGradient} />
 
             {/* Step: Login */}
             {step === STEPS.LOGIN && (
@@ -335,6 +331,7 @@ export function LoginScreen() {
             </View>
             <Text style={styles.hintLine}>Manager: elena@observant.com  /  manager123</Text>
             <Text style={styles.hintLine}>Guard:   ahmad@observant.com   /  guard123</Text>
+            <Text style={styles.previewNote}>OFFLINE PREVIEW · DATA STAYS ON THIS DEVICE</Text>
           </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -463,5 +460,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: SP.px4,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  previewNote: {
+    color: P.warn,
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
+    letterSpacing: 0.8,
+    marginTop: SP.px12,
   },
 });

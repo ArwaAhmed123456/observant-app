@@ -20,11 +20,11 @@ const { width: SW, height: SH } = Dimensions.get('window');
 
 export const P = {
   // ── Background scale (dark navy, not pure black)
-  bg0: '#0B0E14',   // root — deepest
-  bg1: '#0F1520',   // screen surface
-  bg2: '#131C2E',   // card
-  bg3: '#1A2540',   // elevated card / input
-  bg4: '#223058',   // active / pressed state
+  bg0: '#111722',   // graphite navy — app canvas
+  bg1: '#151E2B',   // screen surface
+  bg2: '#1B2738',   // card
+  bg3: '#243349',   // elevated card / input
+  bg4: '#304460',   // active / pressed state
 
   // ── Brand — Royal Blue (logo circular field)
   blue:       '#1B4FBE',
@@ -78,20 +78,20 @@ export const P = {
   // ── Text scale
   t1: '#F0F4FF',   // primary — near-white with blue tint
   t2: '#8FA3C8',   // secondary — cool grey
-  t3: '#4F6390',   // muted
-  t4: '#2D3F62',   // disabled / placeholder
+  t3: '#8291A8',   // muted
+  t4: '#586A83',   // disabled / placeholder
 
   // ── Borders
-  b1: '#1E2D4A',   // hairline — barely visible
-  b2: '#243554',   // subtle border
-  b3: '#2F4470',   // visible border
+  b1: '#28364A',   // hairline
+  b2: '#34455E',   // subtle border
+  b3: '#435A78',   // visible border
 
   // ── Utility
   white:       '#FFFFFF',
   black:       '#000000',
   transparent: 'transparent',
-  overlay:     'rgba(7,10,18,0.78)',
-  overlayLight:'rgba(11,14,20,0.55)',
+  overlay:     'rgba(10,15,23,0.82)',
+  overlayLight:'rgba(17,23,34,0.58)',
 };
 
 // ─── 2. SPACING (8px grid) ───────────────────────────────────────────────────
