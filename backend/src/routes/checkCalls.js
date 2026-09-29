@@ -14,6 +14,9 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const validate     = require('../middleware/validate');
 const asyncHandler = require('../utils/asyncHandler');
 const { createAlert } = require('../services/alertService');
+const { upload: uploadPhoto, saveImage } = require('../services/mediaStore');
+const { Site } = require('../models');
+const { audit } = require('../utils/auditLogger');
 
 // ── Fire a check call ─────────────────────────────────────────────────────────
 router.post('/fire',
@@ -38,6 +41,7 @@ router.post('/fire',
       expiresAt,
       isRandom:       req.body.isRandom || false,
     });
+    await ShiftSession.findByIdAndUpdate(session._id, { nextCheckCallAt: null });
 
     res.status(201).json({ checkCall: cc });
   })
@@ -46,9 +50,13 @@ router.post('/fire',
 // ── Respond to a check call ───────────────────────────────────────────────────
 router.post('/:id/respond',
   authenticate, requireRole('guard'),
+  (req, res, next) => uploadPhoto.single('photo')(req, res, err => err ? res.status(400).json({ error: err.message }) : next()),
   [
     body('response').isIn(['yes', 'no']).withMessage('Response must be yes or no'),
     body('note').optional().trim().isLength({ max: 500 }),
+    body('category').optional().trim().isLength({ max: 100 }),
+    body('latitude').optional().isFloat(),
+    body('longitude').optional().isFloat(),
   ],
   validate,
   asyncHandler(async (req, res) => {
@@ -70,14 +78,36 @@ router.post('/:id/respond',
       return res.status(400).json({ error: 'Response window has expired' });
     }
 
+    if (req.body.latitude && req.body.longitude) {
+      const site = await Site.findById(cc.siteId).select('location geofenceRadiusMetres');
+      const [siteLon, siteLat] = site?.location?.coordinates || [];
+      if (siteLat && siteLon) {
+        const rad = deg => deg * Math.PI / 180;
+        const lat1 = Number(req.body.latitude), lon1 = Number(req.body.longitude);
+        const dLat = rad(siteLat - lat1), dLon = rad(siteLon - lon1);
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(siteLat)) * Math.sin(dLon / 2) ** 2;
+        const distance = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        if (distance > (site.geofenceRadiusMetres || 200)) {
+          await createAlert({ organisationId: orgId, siteId: cc.siteId, guardId, type: 'geofence_warning', title: 'Guard outside site perimeter', message: `Guard submitted a check call approximately ${Math.round(distance)} metres outside the site boundary.`, refModel: 'CheckCall', refId: cc._id });
+        }
+      }
+    }
+
+    if (req.file) {
+      const fileId = await saveImage(req.file, { organisationId: orgId.toString(), guardId: guardId.toString(), checkCallId: cc._id.toString() });
+      cc.photoUrl = `${req.protocol}://${req.get('host')}/api/media/${fileId}`;
+    }
+
     cc.response    = response;
     cc.respondedAt = now;
     cc.note        = note || null;
+    cc.category    = req.body.category || null;
     await cc.save();
 
     // Update session counter
     await ShiftSession.findByIdAndUpdate(cc.sessionId, {
       $inc: { checkCallCount: 1 },
+      $set: { nextCheckCallAt: new Date(now.getTime() + 60 * 60 * 1000) },
     });
 
     // If guard reported an issue, alert managers
@@ -97,6 +127,8 @@ router.post('/:id/respond',
       await CheckCall.findByIdAndUpdate(cc._id, { managerAlerted: true, managerAlertedAt: now });
     }
 
+    await audit({ req, action: response === 'no' ? 'issue_reported' : 'check_call_completed', targetModel: 'CheckCall', targetId: cc._id, targetName: req.user.name, details: { response, category: cc.category } });
+
     res.json({ checkCall: cc });
   })
 );
@@ -112,22 +144,19 @@ router.post('/expire',
     const guardId = req.user._id;
     const now     = new Date();
 
-    const cc = await CheckCall.findOne({
+    const cc = await CheckCall.findOneAndUpdate({
       _id:            checkCallId,
       organisationId: orgId,
       guardId,
       response:       null,
-    });
+      expiresAt:      { $lte: now },
+    }, { $set: { response: 'missed', managerAlerted: true, managerAlertedAt: now } }, { new: true });
     if (!cc) return res.status(404).json({ error: 'Check call not found or already responded' });
 
-    cc.response        = 'missed';
-    cc.managerAlerted  = true;
-    cc.managerAlertedAt = now;
-    await cc.save();
-
     // Update session missed counter
-    await ShiftSession.findByIdAndUpdate(cc.sessionId, {
+    if (cc.sessionId) await ShiftSession.findByIdAndUpdate(cc.sessionId, {
       $inc: { missedCheckCallCount: 1 },
+      $set: { nextCheckCallAt: new Date(now.getTime() + 60 * 60 * 1000) },
     });
 
     // Alert managers
@@ -160,7 +189,11 @@ router.get('/',
       filter.guardId = req.user._id;
     } else {
       if (guardId)   filter.guardId   = guardId;
-      if (siteId)    filter.siteId    = siteId;
+      if (req.user.role === 'manager') {
+        const allowedSites = req.user.managedSiteIds.map(String);
+        if (siteId && !allowedSites.includes(String(siteId))) filter.siteId = null;
+        else filter.siteId = siteId || { $in: req.user.managedSiteIds };
+      } else if (siteId) filter.siteId = siteId;
     }
     if (sessionId) filter.sessionId = sessionId;
     if (response)  filter.response  = response;
@@ -189,6 +222,8 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
   const cc = await CheckCall.findOne({
     _id: req.params.id,
     organisationId: req.user.organisationId,
+    ...(req.user.role === 'guard' ? { guardId: req.user._id } : {}),
+    ...(req.user.role === 'manager' ? { siteId: { $in: req.user.managedSiteIds } } : {}),
   })
     .populate('guardId', 'name badgeNumber')
     .populate('siteId',  'name');

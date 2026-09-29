@@ -14,17 +14,15 @@ const validate          = require('../middleware/validate');
 const asyncHandler      = require('../utils/asyncHandler');
 const { audit }         = require('../utils/auditLogger');
 
-// In production wire up a real email service (SendGrid, SES, etc.)
-// For now we log the code to the console so you can test it
-function sendResetEmail(email, code) {
-  console.log(`[PasswordReset] Reset code for ${email}: ${code}`);
-  // TODO: replace with real email send
-}
-
 router.post('/forgot-password',
   [body('email').isEmail().normalizeEmail()],
   validate,
   asyncHandler(async (req, res) => {
+    // Never claim a reset message was sent or expose reset codes in server logs.
+    // Configure an email provider before enabling this flow.
+    if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASSWORD || !process.env.SMTP_FROM) {
+      return res.status(503).json({ error: 'Password recovery email is not configured. Contact your administrator.' });
+    }
     const { email } = req.body;
     const user = await User.findOne({ email, active: true });
 
@@ -34,13 +32,31 @@ router.post('/forgot-password',
     // Invalidate any existing reset codes
     await PasswordReset.deleteMany({ userId: user._id });
 
-    const plainCode  = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
+    const plainCode  = crypto.randomInt(100000, 1000000).toString();
     const hashedCode = await bcrypt.hash(plainCode, 10);
     const expiresAt  = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
     await PasswordReset.create({ userId: user._id, email, code: hashedCode, expiresAt });
 
-    sendResetEmail(email, plainCode);
+    // A configured transport is required; avoid silently storing codes without delivery.
+    const nodemailer = require('nodemailer');
+    try {
+      const transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT || 587),
+        secure: process.env.SMTP_SECURE === 'true',
+        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD },
+      });
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM,
+        to: email,
+        subject: 'Observant account password reset',
+        text: `Your password reset code is ${plainCode}. It expires in 15 minutes.`,
+      });
+    } catch (error) {
+      await PasswordReset.deleteMany({ userId: user._id });
+      throw error;
+    }
 
     await audit({
       organisationId: user.organisationId,
@@ -77,7 +93,7 @@ router.post('/reset-password',
   [
     body('email').isEmail().normalizeEmail(),
     body('code').isLength({ min: 6, max: 6 }),
-    body('newPassword').isLength({ min: 8 }),
+    body('newPassword').isLength({ min: 12 }),
   ],
   validate,
   asyncHandler(async (req, res) => {
@@ -93,6 +109,7 @@ router.post('/reset-password',
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     user.password = newPassword;  // pre-save hook will hash it
+    user.refreshTokenHash = null;
     await user.save();
 
     record.used = true;

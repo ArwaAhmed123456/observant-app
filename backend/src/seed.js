@@ -1,122 +1,52 @@
 /**
- * Seed script — run once to populate Observant Security's org, users, sites, checkpoints.
- * Usage: npm run seed
+ * Create the Observant tenant and its first administrator.
+ * All values are supplied by the operator; no shared demo passwords or users
+ * are written into a real database.
  */
 require('dotenv').config();
 const connectDB = require('./db');
-const {
-  Organisation, User, Site, PatrolCheckpoint
-} = require('./models');
+const { Organisation, User } = require('./models');
 
 async function seed() {
-  await connectDB();
-
-  // ── Organisation ────────────────────────────────────────────────────────────
-  let org = await Organisation.findOne({ slug: 'observant-security' });
-  if (!org) {
-    org = await Organisation.create({
-      name:         'Observant Security Group UK',
-      slug:         'observant-security',
-      contactEmail: 'ops@observant.com',
-      contactPhone: '+44 800 092 1100',
-      address:      '44 Bishopsgate, London EC2N 4AG',
-      plan:         'pro',
-    });
-    console.log('[Seed] Organisation created:', org.name);
-  } else {
-    console.log('[Seed] Organisation already exists, skipping.');
+  const required = ['MONGODB_URI', 'ORG_NAME', 'ORG_SLUG', 'BOOTSTRAP_ADMIN_NAME', 'BOOTSTRAP_ADMIN_EMAIL', 'BOOTSTRAP_ADMIN_PASSWORD'];
+  const missing = required.filter(name => !process.env[name]);
+  if (missing.length) throw new Error(`Missing required environment values: ${missing.join(', ')}`);
+  if (process.env.BOOTSTRAP_ADMIN_PASSWORD.length < 16) {
+    throw new Error('BOOTSTRAP_ADMIN_PASSWORD must contain at least 16 characters.');
   }
 
-  // ── Sites ────────────────────────────────────────────────────────────────────
-  const siteDefs = [
-    { name: 'Horton Solar Farm',        address: 'Horton, Northamptonshire' },
-    { name: 'Canary Wharf Office Tower', address: '1 Canada Square, London E14 5AB' },
-    { name: 'Stansted Logistics Hub',    address: 'Stansted Airport, Essex CM24' },
-  ];
+  await connectDB();
+  const org = await Organisation.findOneAndUpdate(
+    { slug: process.env.ORG_SLUG },
+    { $setOnInsert: {
+      name: process.env.ORG_NAME,
+      slug: process.env.ORG_SLUG,
+      contactEmail: process.env.BOOTSTRAP_ADMIN_EMAIL,
+    } },
+    { new: true, upsert: true, setDefaultsOnInsert: true }
+  );
 
-  // Need manager to exist first — create manager before sites
-  let manager = await User.findOne({ organisationId: org._id, role: 'manager' });
-  if (!manager) {
-    // Temporarily create without managedSiteIds, update after sites exist
-    manager = await User.create({
+  const existing = await User.findOne({ organisationId: org._id, role: 'admin' });
+  if (existing) {
+    console.log(`[Seed] Administrator already exists (${existing.email}); no password or account changed.`);
+  } else {
+    await User.create({
       organisationId: org._id,
-      name:           'Elena Rostova',
-      email:          'elena@observant.com',
-      password:       'manager123',
-      role:           'manager',
-      badgeNumber:    'MGR-001',
-      phone:          '+44 7700 900001',
+      name: process.env.BOOTSTRAP_ADMIN_NAME,
+      email: process.env.BOOTSTRAP_ADMIN_EMAIL,
+      password: process.env.BOOTSTRAP_ADMIN_PASSWORD,
+      role: 'admin',
       managedSiteIds: [],
     });
-    console.log('[Seed] Manager created:', manager.email);
+    console.log(`[Seed] Created the first administrator for ${org.name}.`);
   }
 
-  const sites = [];
-  for (const def of siteDefs) {
-    let site = await Site.findOne({ organisationId: org._id, name: def.name });
-    if (!site) {
-      site = await Site.create({ ...def, organisationId: org._id, managerId: manager._id });
-      console.log('[Seed] Site created:', site.name);
-    }
-    sites.push(site);
-  }
-
-  // Assign all sites to manager
-  await User.findByIdAndUpdate(manager._id, { managedSiteIds: sites.map(s => s._id) });
-
-  // ── Guards ───────────────────────────────────────────────────────────────────
-  const guardDefs = [
-    { name: 'Ahmad Raza',   email: 'ahmad@observant.com',  badgeNumber: 'SG-1042', siteIdx: 0 },
-    { name: 'Marcus Chen',  email: 'marcus@observant.com', badgeNumber: 'SG-1055', siteIdx: 1 },
-    { name: 'Sofia Okafor', email: 'sofia@observant.com',  badgeNumber: 'SG-1071', siteIdx: 2 },
-  ];
-
-  for (const def of guardDefs) {
-    const existing = await User.findOne({ organisationId: org._id, email: def.email });
-    if (!existing) {
-      await User.create({
-        organisationId: org._id,
-        name:        def.name,
-        email:       def.email,
-        password:    'guard123',
-        role:        'guard',
-        badgeNumber: def.badgeNumber,
-        siteId:      sites[def.siteIdx]._id,
-      });
-      console.log('[Seed] Guard created:', def.email);
-    }
-  }
-
-  // ── Checkpoints ──────────────────────────────────────────────────────────────
-  const cpDefs = [
-    { siteIdx: 0, checkpoints: ['Main Gate', 'Inverter Block A', 'Perimeter Fence North', 'Control Room'] },
-    { siteIdx: 1, checkpoints: ['Ground Floor Reception', 'Server Room Corridor', 'Rooftop Access Door'] },
-    { siteIdx: 2, checkpoints: ['Loading Bay A', 'Warehouse North Exit', 'CCTV Hub'] },
-  ];
-
-  for (const { siteIdx, checkpoints } of cpDefs) {
-    const site = sites[siteIdx];
-    for (let i = 0; i < checkpoints.length; i++) {
-      const existing = await PatrolCheckpoint.findOne({ siteId: site._id, name: checkpoints[i] });
-      if (!existing) {
-        await PatrolCheckpoint.create({
-          organisationId: org._id,
-          siteId:   site._id,
-          name:     checkpoints[i],
-          order:    i + 1,
-          required: true,
-        });
-        console.log(`[Seed] Checkpoint created: ${checkpoints[i]} @ ${site.name}`);
-      }
-    }
-  }
-
-  console.log('\n[Seed] ✅ Done! Login credentials:');
-  console.log('  Manager : elena@observant.com   / manager123');
-  console.log('  Guard 1 : ahmad@observant.com   / guard123');
-  console.log('  Guard 2 : marcus@observant.com  / guard123');
-  console.log('  Guard 3 : sofia@observant.com   / guard123');
-  process.exit(0);
+  console.log('[Seed] Done. Create real sites, managers, and guards from the admin account.');
+  await require('mongoose').disconnect();
 }
 
-seed().catch(err => { console.error('[Seed] Error:', err); process.exit(1); });
+seed().catch(async error => {
+  console.error(`[Seed] ${error.message}`);
+  await require('mongoose').disconnect().catch(() => {});
+  process.exitCode = 1;
+});

@@ -20,7 +20,7 @@ const userSchema = new mongoose.Schema({
   siteId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Site', default: null },
   managedSiteIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Site' }],
 
-  // FCM token for push notifications (updated on each login from device)
+  // Expo push token (field retained as fcmToken for backwards compatible schema)
   fcmToken:    { type: String, default: null },
 
   active:      { type: Boolean, default: true },
@@ -34,10 +34,9 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ organisationId: 1, email: 1 }, { unique: true });
 
 // Hash password before save
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
+userSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
   this.password = await bcrypt.hash(this.password, 12);
-  next();
 });
 
 // Compare plain password

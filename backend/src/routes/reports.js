@@ -20,11 +20,8 @@ function buildFilter(req) {
   // Managers see all their sites; narrow by param
   if (req.user.role === 'manager') {
     const allowedSites = req.user.managedSiteIds.map(String);
-    if (siteId && allowedSites.includes(siteId)) {
-      filter.siteId = siteId;
-    } else {
-      filter.siteId = { $in: req.user.managedSiteIds };
-    }
+    if (siteId && !allowedSites.includes(siteId)) filter.siteId = null;
+    else filter.siteId = siteId || { $in: req.user.managedSiteIds };
   }
   if (guardId) filter.guardId = guardId;
   if (from || to) {
@@ -61,7 +58,7 @@ router.get('/shift-calls', authenticate, requireRole('manager','admin'),
             .populate('siteId',  'name')
             .select('-captures')
         : [],
-      ShiftSession.find({ organisationId: req.user.organisationId })
+      ShiftSession.find({ organisationId: req.user.organisationId, ...(req.user.role === 'manager' ? { siteId: { $in: req.user.managedSiteIds } } : {}) })
         .select('_id bookedOnAt bookedOffAt'),
     ]);
 
@@ -177,8 +174,9 @@ router.get('/summary', authenticate, requireRole('manager','admin'),
 
     const siteFilter = {};
     if (siteId) {
+      if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(siteId))) return res.status(403).json({ error: 'Site is outside your assigned sites.' });
       siteFilter.siteId = siteId;
-    } else {
+    } else if (req.user.role === 'manager') {
       siteFilter.siteId = { $in: req.user.managedSiteIds };
     }
 

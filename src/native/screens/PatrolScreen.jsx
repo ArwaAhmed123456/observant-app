@@ -4,6 +4,7 @@ import {
   Image, Modal, ActivityIndicator, Alert,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { authorizedImageSource } from '../../services/api';
 import { useApp, formatTime } from '../../context/AppContext';
 import { Camera, CheckCircle, AlertTriangle, Play, Square, Navigation } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
@@ -153,7 +154,7 @@ export function PatrolScreen() {
                       <View style={styles.capturedBadge}>
                         <CheckCircle color={P.ok} size={18} />
                         {capture?.photoUri && (
-                          <Image source={{ uri: capture.photoUri }} style={styles.thumb} />
+                          <Image source={authorizedImageSource(capture.photoUri)} style={styles.thumb} />
                         )}
                       </View>
                     ) : (

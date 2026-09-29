@@ -26,7 +26,7 @@ router.post('/trigger',
     const orgId   = req.user.organisationId;
     const guardId = req.user._id;
 
-    const guard   = await User.findById(guardId).select('name badgeNumber siteId');
+    const guard   = await User.findOne({ _id: guardId, organisationId: orgId }).select('name badgeNumber siteId');
     const session = await ShiftSession.findOne({ organisationId: orgId, guardId, bookedOffAt: null });
 
     const locationStr = latitude && longitude
@@ -62,8 +62,10 @@ router.post('/trigger',
 router.post('/:id/resolve',
   authenticate, requireRole('manager', 'admin'),
   asyncHandler(async (req, res) => {
+    const filter = { _id: req.params.id, organisationId: req.user.organisationId, type: 'sos' };
+    if (req.user.role === 'manager') filter.managerIds = req.user._id;
     const alert = await Alert.findOneAndUpdate(
-      { _id: req.params.id, organisationId: req.user.organisationId, type: 'sos' },
+      filter,
       { $addToSet: { readBy: req.user._id } },
       { new: true }
     );
@@ -76,6 +78,7 @@ router.post('/:id/resolve',
       targetModel: 'Alert',
       targetId:  alert._id,
       targetName:`SOS by ${alert.guardId}`,
+      details: { status: 'resolved' },
     });
 
     res.json({ alert });
@@ -87,7 +90,7 @@ router.get('/', authenticate, requireRole('manager', 'admin'),
     const alerts = await Alert.find({
       organisationId: req.user.organisationId,
       type: 'sos',
-      managerIds: req.user._id,
+      ...(req.user.role === 'admin' ? {} : { managerIds: req.user._id }),
     })
       .sort({ createdAt: -1 })
       .limit(50)

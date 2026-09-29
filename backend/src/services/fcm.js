@@ -1,77 +1,43 @@
-/**
- * Firebase Cloud Messaging service.
- *
- * Setup:
- *  1. Go to Firebase Console → Project Settings → Service Accounts
- *  2. Generate a new private key → download JSON
- *  3. Set FIREBASE_SERVICE_ACCOUNT_PATH in .env pointing to that JSON file
- *     OR set FIREBASE_SERVICE_ACCOUNT_JSON as the stringified JSON
- */
-const admin = require('firebase-admin');
 const { Alert } = require('../models');
 
-let initialised = false;
-
 function init() {
-  if (initialised) return;
-  try {
-    let credential;
-    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      const sa = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-      credential = admin.credential.cert(sa);
-    } else if (process.env.FIREBASE_SERVICE_ACCOUNT_PATH) {
-      credential = admin.credential.cert(require(process.env.FIREBASE_SERVICE_ACCOUNT_PATH));
-    } else {
-      console.warn('[FCM] No Firebase credentials configured — push notifications disabled');
-      return;
-    }
-    admin.initializeApp({ credential });
-    initialised = true;
-    console.log('[FCM] Firebase Admin initialised');
-  } catch (err) {
-    console.error('[FCM] Init failed:', err.message);
-  }
+  console.log('[Push] Expo Push Service ready');
 }
 
-/**
- * Send a push notification to one or more FCM tokens.
- * @param {string[]} tokens  - FCM registration tokens
- * @param {object}   payload - { title, body, data }
- */
 async function sendPush(tokens, { title, body, data = {} }) {
-  if (!initialised) return { success: false, reason: 'FCM not initialised' };
   if (!tokens?.length) return { success: false, reason: 'No tokens' };
-
-  const message = {
-    notification: { title, body },
-    data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
-    tokens,
-    android: { priority: 'high', notification: { sound: 'default', channelId: 'observant_alerts' } },
-    apns: { payload: { aps: { sound: 'default', badge: 1 } } },
-  };
-
+  const messages = tokens
+    .filter(token => /^Expo(nent)?PushToken\[/.test(token))
+    .map(to => ({
+      to, title, body,
+      data: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, String(value)])),
+      sound: 'default', priority: 'high', channelId: 'observant_alerts',
+    }));
+  if (!messages.length) return { success: false, reason: 'No supported Expo push tokens' };
   try {
-    const response = await admin.messaging().sendEachForMulticast(message);
-    return { success: true, successCount: response.successCount, failureCount: response.failureCount };
-  } catch (err) {
-    console.error('[FCM] Send error:', err.message);
-    return { success: false, reason: err.message };
+    const response = await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'Accept-Encoding': 'gzip, deflate' },
+      body: JSON.stringify(messages),
+    });
+    const payload = await response.json();
+    const receipts = payload.data || [];
+    const successCount = receipts.filter(item => item.status === 'ok').length;
+    const failureCount = messages.length - successCount;
+    return { success: response.ok && successCount > 0, successCount, failureCount };
+  } catch (error) {
+    console.error('[Push] Expo delivery failed:', error.message);
+    return { success: false, successCount: 0, failureCount: messages.length, reason: error.message };
   }
 }
 
-/**
- * High-level: send push to all managers of a site and mark Alert.pushSent
- */
 async function notifyManagers(alertDoc, managerUsers) {
-  const tokens = managerUsers.map(u => u.fcmToken).filter(Boolean);
-  const result = await sendPush(tokens, {
+  const result = await sendPush(managerUsers.map(user => user.fcmToken).filter(Boolean), {
     title: alertDoc.title,
-    body:  alertDoc.message,
-    data:  { alertId: alertDoc._id.toString(), type: alertDoc.type },
+    body: alertDoc.message,
+    data: { alertId: alertDoc._id.toString(), type: alertDoc.type },
   });
-  if (result.success) {
-    await Alert.findByIdAndUpdate(alertDoc._id, { pushSent: true, pushSentAt: new Date() });
-  }
+  if (result.success) await Alert.findByIdAndUpdate(alertDoc._id, { pushSent: true, pushSentAt: new Date() });
   return result;
 }
 

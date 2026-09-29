@@ -113,7 +113,7 @@ export function CheckCallScreen() {
       resetForm();
       return;
     }
-    await respondToCheckCall(ccId, 'no', noteText);
+    await respondToCheckCall(ccId, 'no', noteText, { category, photoUri: issuePhoto });
     setResponding(false);
     setShowIssueForm(false);
     resetForm();

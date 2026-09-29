@@ -9,7 +9,7 @@
  */
 const router = require('express').Router();
 const { body } = require('express-validator');
-const { ShiftSession, ShiftRoster, User } = require('../models');
+const { ShiftSession, ShiftRoster, PatrolSession, User } = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
 const validate     = require('../middleware/validate');
 const asyncHandler = require('../utils/asyncHandler');
@@ -24,6 +24,10 @@ router.post('/book-on',
     const guardId = req.user._id;
     const orgId   = req.user.organisationId;
     const now     = new Date();
+    const assignedSiteId = req.user.siteId;
+    if (!assignedSiteId || (siteId && String(siteId) !== String(assignedSiteId))) {
+      return res.status(403).json({ error: 'Book on only at your assigned site.' });
+    }
 
     // Close any stale open session
     await ShiftSession.updateMany(
@@ -53,11 +57,14 @@ router.post('/book-on',
     const session = await ShiftSession.create({
       organisationId:     orgId,
       guardId,
-      siteId:             siteId || req.user.siteId,
+      siteId:             assignedSiteId,
       rosterId:           roster?._id || null,
       bookedOnAt:         now,
       scheduledStart,
       scheduledEnd,
+      scheduledEndAt: req.body.scheduledEndAt ? new Date(req.body.scheduledEndAt) : null,
+      nextCheckCallAt: new Date(now.getTime() + 60 * 60 * 1000),
+      nextRandomPromptAt: new Date(now.getTime() + (30 + Math.random() * 30) * 60 * 1000),
       punctuality,
       punctualityMinutes: diffMins,
     });
@@ -85,9 +92,15 @@ router.post('/book-on',
 router.post('/book-off',
   authenticate, requireRole('guard'),
   asyncHandler(async (req, res) => {
+    const activePatrol = await PatrolSession.findOne({
+      organisationId: req.user.organisationId,
+      guardId: req.user._id,
+      status: 'in_progress',
+    }).select('_id');
+    if (activePatrol) return res.status(409).json({ error: 'Finish your active patrol before booking off.' });
     const session = await ShiftSession.findOneAndUpdate(
       { organisationId: req.user.organisationId, guardId: req.user._id, bookedOffAt: null },
-      { bookedOffAt: new Date() },
+      { bookedOffAt: new Date(), nextCheckCallAt: null, nextRandomPromptAt: null },
       { new: true }
     );
     if (!session) return res.status(404).json({ error: 'No active session found' });
@@ -154,6 +167,8 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
   const session = await ShiftSession.findOne({
     _id: req.params.id,
     organisationId: req.user.organisationId,
+    ...(req.user.role === 'guard' ? { guardId: req.user._id } : {}),
+    ...(req.user.role === 'manager' ? { siteId: { $in: req.user.managedSiteIds } } : {}),
   })
     .populate('guardId', 'name badgeNumber avatarUrl')
     .populate('siteId',  'name address');

@@ -9,6 +9,7 @@ const rateLimit    = require('express-rate-limit');
 const connectDB      = require('./db');
 const errorHandler   = require('./middleware/errorHandler');
 const fcm            = require('./services/fcm');
+const { startOperationsWorker } = require('./services/operationsWorker');
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 const authRoutes          = require('./routes/auth');
@@ -23,18 +24,28 @@ const reportRoutes        = require('./routes/reports');
 const sosRoutes           = require('./routes/sos');
 const manualLogRoutes     = require('./routes/manualLog');
 const auditLogRoutes      = require('./routes/auditLog');
+const mediaRoutes         = require('./routes/media');
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 const app  = express();
 const PORT = process.env.PORT || 5000;
 
-connectDB();
-fcm.init();
+if (process.env.NODE_ENV === 'production') {
+  for (const name of ['JWT_SECRET', 'JWT_REFRESH_SECRET']) {
+    if (!process.env[name] || process.env[name].length < 32 || process.env[name].startsWith('REPLACE_')) {
+      throw new Error(`${name} must be a unique secret of at least 32 characters in production.`);
+    }
+  }
+}
 
 // ── Global middleware ─────────────────────────────────────────────────────────
 app.use(helmet());
+const allowedOrigins = (process.env.CORS_ORIGINS || '*').split(',').map(value => value.trim());
 app.use(cors({
-  origin: process.env.CORS_ORIGINS?.split(',') || '*',
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Origin is not allowed by CORS'));
+  },
   credentials: true,
 }));
 app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
@@ -57,13 +68,20 @@ const authLimiter = rateLimit({
 });
 
 app.use('/api', globalLimiter);
+app.use('/api/media', mediaRoutes);
 app.use('/api/auth/login',        authLimiter);
 app.use('/api/auth/register-org', authLimiter);
 
 // ── Health check ──────────────────────────────────────────────────────────────
-app.get('/health', (req, res) =>
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), env: process.env.NODE_ENV })
-);
+app.get('/health', (req, res) => {
+  const mongoose = require('mongoose');
+  const ready = mongoose.connection.readyState === 1;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ok' : 'unavailable',
+    database: ready ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // ── API routes ────────────────────────────────────────────────────────────────
 app.use('/api/auth',         authRoutes);
@@ -87,9 +105,30 @@ app.use((req, res) =>
 // ── Global error handler (must be last) ──────────────────────────────────────
 app.use(errorHandler);
 
-// ── Start ─────────────────────────────────────────────────────────────────────
-app.listen(PORT, () =>
-  console.log(`[Server] Observant API running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`)
-);
+// ── Start only after MongoDB is ready ─────────────────────────────────────────
+async function start() {
+  await connectDB();
+  fcm.init();
+  startOperationsWorker();
+  const server = app.listen(PORT, () =>
+    console.log(`[Server] Observant API running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`)
+  );
+  const shutdown = signal => {
+    console.log(`[Server] ${signal} received; closing connections.`);
+    server.close(async () => {
+      await require('mongoose').disconnect();
+      process.exit(0);
+    });
+  };
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
+}
+
+if (require.main === module) {
+  start().catch(error => {
+    console.error(error.message);
+    process.exit(1);
+  });
+}
 
 module.exports = app;

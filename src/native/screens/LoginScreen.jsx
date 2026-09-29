@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useApp } from '../../context/AppContext';
+import { API_ENABLED, apiPost } from '../../services/api';
 import {
   P, SP, BR, FONT, SH_TOKENS, GR, card, input, btnPrimary, btnPrimaryText,
   LOGO, LOGO_SIZES, ANIM,
@@ -18,7 +19,7 @@ import {
 const STEPS = { LOGIN: 'login', FORGOT_SEND: 'forgot_send', FORGOT_VERIFY: 'forgot_verify' };
 
 export function LoginScreen() {
-  const { login } = useApp();
+  const { login, resetPasswordWithCode } = useApp();
 
   // ── State ──────────────────────────────────────────────────────────────────
   const [step, setStep]         = useState(STEPS.LOGIN);
@@ -86,7 +87,7 @@ export function LoginScreen() {
     const result = await login(email.trim().toLowerCase(), password);
     setLoading(false);
     if (!result.success) {
-      setError('Incorrect email or password. Please try again.');
+      setError(result.error || 'Sign in failed. Please try again.');
       shake();
     }
   };
@@ -94,18 +95,26 @@ export function LoginScreen() {
   // ── Forgot password ────────────────────────────────────────────────────────
   const handleSendCode = async () => {
     if (!resetEmail.trim()) { setError('Enter your email address.'); return; }
-    setError('Password reset is unavailable in this offline preview. Ask your manager for account help.');
+    if (!API_ENABLED) { setError('Password reset requires a connected server. Ask your manager for account help.'); return; }
+    setResetLoading(true);
+    try {
+      await apiPost('/api/auth/forgot-password', { email: resetEmail.trim().toLowerCase() });
+      setError('');
+      setStep(STEPS.FORGOT_VERIFY);
+    } catch (requestError) { setError(requestError.message); }
+    finally { setResetLoading(false); }
   };
 
   const handleResetPassword = async () => {
     if (!resetCode || !newPassword) { setError('Fill in all fields.'); return; }
-    if (newPassword.length < 8)    { setError('Password must be at least 8 characters.'); return; }
+    if (newPassword.length < 12)   { setError('Password must be at least 12 characters.'); return; }
     setResetLoading(true);
-    await new Promise(r => setTimeout(r, 900));
+    const result = await resetPasswordWithCode(resetEmail, resetCode, newPassword);
     setResetLoading(false);
-    setError('');
+    if (!result.success) { setError(result.error || 'Could not reset the password.'); return; }
+    setError('Password updated. Sign in with your new password.');
+    setPassword('');
     setStep(STEPS.LOGIN);
-    // Brief success flash handled by next login
   };
 
   const goBack = () => { setStep(STEPS.LOGIN); setError(''); };
@@ -294,7 +303,7 @@ export function LoginScreen() {
                   style={styles.input}
                   value={newPassword}
                   onChangeText={setNewPassword}
-                  placeholder="Minimum 8 characters"
+                  placeholder="Minimum 12 characters"
                   placeholderTextColor={P.t4}
                   secureTextEntry
                   autoCapitalize="none"
@@ -322,16 +331,22 @@ export function LoginScreen() {
             )}
           </Animated.View>
 
-          {/* Demo credentials hint */}
+          {/* Local preview credentials or live server status */}
           <Animated.View style={[styles.hint, { opacity: cardOpacity }]}>
             <View style={styles.hintHeader}>
               <View style={styles.hintDot} />
-              <Text style={styles.hintLabel}>DEMO CREDENTIALS</Text>
+              <Text style={styles.hintLabel}>{API_ENABLED ? 'SECURE SERVER SIGN-IN' : 'DEVICE-ONLY DEMO ACCESS'}</Text>
               <View style={styles.hintDot} />
             </View>
-            <Text style={styles.hintLine}>Manager: elena@observant.com  /  manager123</Text>
-            <Text style={styles.hintLine}>Guard:   ahmad@observant.com   /  guard123</Text>
-            <Text style={styles.previewNote}>OFFLINE PREVIEW · DATA STAYS ON THIS DEVICE</Text>
+            {API_ENABLED ? (
+              <Text style={styles.hintLine}>Accounts and shift activity are stored in your organisation database.</Text>
+            ) : (
+              <>
+                <Text style={styles.hintLine}>Manager: elena@observant.com  /  manager123</Text>
+                <Text style={styles.hintLine}>Guard:   ahmad@observant.com   /  guard123</Text>
+                <Text style={styles.previewNote}>OFFLINE PREVIEW · DATA STAYS ON THIS DEVICE</Text>
+              </>
+            )}
           </Animated.View>
         </ScrollView>
       </KeyboardAvoidingView>

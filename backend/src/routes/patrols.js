@@ -26,15 +26,19 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const validate     = require('../middleware/validate');
 const asyncHandler = require('../utils/asyncHandler');
 const { createAlert } = require('../services/alertService');
-const { uploadPatrolPhoto } = require('../services/cloudinary');
+const { upload: uploadPhoto, saveImage } = require('../services/mediaStore');
 
 // ════════════════════════════════════════════════════════════
 // CHECKPOINT CONFIG
 // ════════════════════════════════════════════════════════════
 
-router.get('/checkpoints', authenticate, asyncHandler(async (req, res) => {
+router.get('/checkpoints', authenticate, requireRole('guard','manager','admin'), asyncHandler(async (req, res) => {
   const { siteId } = req.query;
   if (!siteId) return res.status(400).json({ error: 'siteId query param required' });
+  const site = await require('../models').Site.findOne({ _id: siteId, organisationId: req.user.organisationId, active: true });
+  if (!site) return res.status(404).json({ error: 'Site not found.' });
+  if (req.user.role === 'guard' && String(req.user.siteId) !== String(site._id)) return res.status(403).json({ error: 'Site is outside your assignment.' });
+  if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(site._id))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
   const cps = await PatrolCheckpoint.find({
     organisationId: req.user.organisationId,
     siteId,
@@ -53,6 +57,9 @@ router.post('/checkpoints',
   validate,
   asyncHandler(async (req, res) => {
     const { siteId, name, order, required, qrCode } = req.body;
+    const site = await require('../models').Site.findOne({ _id: siteId, organisationId: req.user.organisationId, active: true });
+    if (!site) return res.status(404).json({ error: 'Site not found.' });
+    if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(site._id))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
     const maxOrder = await PatrolCheckpoint.countDocuments({
       organisationId: req.user.organisationId, siteId
     });
@@ -72,8 +79,15 @@ router.patch('/checkpoints/:id',
   authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
     const allowed = ['name','order','required','active','qrCode','location'];
+    const checkpoint = await PatrolCheckpoint.findOne({ _id: req.params.id, organisationId: req.user.organisationId });
+    if (!checkpoint) return res.status(404).json({ error: 'Checkpoint not found.' });
+    if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(checkpoint.siteId))) return res.status(403).json({ error: 'Checkpoint is outside your assigned area.' });
     const updates = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
+    if (updates.location?.coordinates?.length === 2) {
+      const [longitude, latitude] = updates.location.coordinates;
+      updates.location.coordinates = [Number(longitude), Number(latitude)];
+    }
     const cp = await PatrolCheckpoint.findOneAndUpdate(
       { _id: req.params.id, organisationId: req.user.organisationId },
       updates, { new: true }
@@ -86,6 +100,9 @@ router.patch('/checkpoints/:id',
 router.delete('/checkpoints/:id',
   authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
+    const checkpoint = await PatrolCheckpoint.findOne({ _id: req.params.id, organisationId: req.user.organisationId });
+    if (!checkpoint) return res.status(404).json({ error: 'Checkpoint not found.' });
+    if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(checkpoint.siteId))) return res.status(403).json({ error: 'Checkpoint is outside your assigned area.' });
     await PatrolCheckpoint.findOneAndUpdate(
       { _id: req.params.id, organisationId: req.user.organisationId },
       { active: false }
@@ -115,6 +132,11 @@ router.post('/start',
     });
     if (existing) return res.json({ patrol: existing, alreadyActive: true });
 
+    const latest = await PatrolSession.findOne({ organisationId: orgId, guardId, status: { $in: ['complete', 'incomplete'] } }).sort({ finishedAt: -1 });
+    if (latest?.finishedAt && Date.now() - new Date(latest.finishedAt).getTime() < 60 * 60 * 1000 && !req.body.triggeredByAntiIdle) {
+      return res.status(429).json({ error: 'The next hourly patrol is not due yet. Complete a random patrol prompt if one is active.' });
+    }
+
     const patrol = await PatrolSession.create({
       organisationId:      orgId,
       shiftSessionId:      session._id,
@@ -132,7 +154,7 @@ router.post('/start',
 router.post('/:id/capture',
   authenticate, requireRole('guard'),
   (req, res, next) => {
-    uploadPatrolPhoto(req, res, err => {
+    uploadPhoto.single('photo')(req, res, err => {
       if (err) return res.status(400).json({ error: err.message });
       next();
     });
@@ -151,15 +173,23 @@ router.post('/:id/capture',
     });
     if (!patrol) return res.status(404).json({ error: 'Active patrol not found' });
 
+    const checkpoint = await PatrolCheckpoint.findOne({ _id: checkpointId, organisationId: req.user.organisationId, siteId: patrol.siteId, active: true });
+    if (!checkpoint) return res.status(400).json({ error: 'Checkpoint does not belong to this active patrol site.' });
+
     // Avoid duplicate capture for same checkpoint
     if (patrol.capturedCheckpointIds.map(String).includes(checkpointId)) {
       return res.status(409).json({ error: 'Checkpoint already captured' });
     }
 
+    const fileId = await saveImage(req.file, {
+      organisationId: req.user.organisationId.toString(),
+      guardId: req.user._id.toString(),
+      patrolId: patrol._id.toString(),
+    });
     const capture = {
       checkpointId,
-      photoUrl:   req.file.path,
-      publicId:   req.file.filename,
+      photoUrl:   `${req.protocol}://${req.get('host')}/api/media/${fileId}`,
+      publicId:   fileId,
       capturedAt: new Date(),
       latitude:   latitude  ? parseFloat(latitude)  : null,
       longitude:  longitude ? parseFloat(longitude) : null,
@@ -207,6 +237,11 @@ router.post('/:id/finish',
       });
     }
 
+    const latest = await PatrolSession.findOne({ organisationId: orgId, guardId, _id: { $ne: patrol._id }, status: { $in: ['complete', 'incomplete'] } }).sort({ finishedAt: -1 });
+    if (latest?.finishedAt && Date.now() - new Date(latest.finishedAt).getTime() < 30 * 60 * 1000 && !patrol.triggeredByAntiIdle) {
+      return res.status(429).json({ error: 'A patrol cannot be repeated again this soon.' });
+    }
+
     const now    = new Date();
     const status = missingIds.length > 0 ? 'incomplete' : 'complete';
 
@@ -217,6 +252,8 @@ router.post('/:id/finish',
 
     // Update session patrol counter
     await ShiftSession.findByIdAndUpdate(patrol.shiftSessionId, { $inc: { patrolCount: 1 } });
+    const nextRandomPromptAt = new Date(now.getTime() + (30 + Math.random() * 30) * 60 * 1000);
+    await ShiftSession.findByIdAndUpdate(patrol.shiftSessionId, { nextRandomPromptAt });
 
     // Alert managers if incomplete
     if (status === 'incomplete') {
@@ -258,6 +295,12 @@ router.get('/',
       if (from) filter.startedAt.$gte = new Date(from);
       if (to)   filter.startedAt.$lte = new Date(to);
     }
+    if (req.user.role === 'manager') {
+      if (siteId && !req.user.managedSiteIds.some(id => String(id) === String(siteId))) {
+        return res.status(403).json({ error: 'Site is outside your assigned area.' });
+      }
+      filter.siteId = siteId || { $in: req.user.managedSiteIds };
+    }
 
     const [patrols, total] = await Promise.all([
       PatrolSession.find(filter)
@@ -275,9 +318,22 @@ router.get('/',
 );
 
 // ── Get one patrol (with captures) ───────────────────────────────────────────
+// Keep the static random-prompt path before /:id, which would otherwise catch it.
+router.get('/random-prompt', authenticate, asyncHandler(async (req, res) => {
+  const filter = { organisationId: req.user.organisationId };
+  if (req.user.role === 'guard') filter.guardId = req.user._id;
+  else if (req.query.guardId) filter.guardId = req.query.guardId;
+  if (req.query.sessionId) filter.shiftSessionId = req.query.sessionId;
+  const logs = await RandomPromptLog.find(filter).sort({ triggeredAt: -1 }).limit(Math.min(Number(req.query.limit) || 100, 200));
+  res.json({ logs });
+}));
+
 router.get('/:id', authenticate, asyncHandler(async (req, res) => {
   const patrol = await PatrolSession.findOne({
-    _id: req.params.id, organisationId: req.user.organisationId
+    _id: req.params.id,
+    organisationId: req.user.organisationId,
+    ...(req.user.role === 'guard' ? { guardId: req.user._id } : {}),
+    ...(req.user.role === 'manager' ? { siteId: { $in: req.user.managedSiteIds } } : {}),
   })
     .populate('guardId', 'name badgeNumber avatarUrl')
     .populate('siteId',  'name address')
@@ -313,7 +369,7 @@ router.post('/random-prompt/:id/respond',
   [body('patrolSessionId').optional().isMongoId()],
   asyncHandler(async (req, res) => {
     const log = await RandomPromptLog.findOneAndUpdate(
-      { _id: req.params.id, guardId: req.user._id, responded: false },
+      { _id: req.params.id, organisationId: req.user.organisationId, guardId: req.user._id, responded: false },
       {
         responded:       true,
         respondedAt:     new Date(),

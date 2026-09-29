@@ -6,8 +6,8 @@ const mongoose = require('mongoose');
 
 const captureSchema = new mongoose.Schema({
   checkpointId: { type: mongoose.Schema.Types.ObjectId, ref: 'PatrolCheckpoint', required: true },
-  photoUrl:     { type: String, required: true },    // Cloudinary URL
-  publicId:     { type: String, required: true },    // Cloudinary public_id (for deletion)
+  photoUrl:     { type: String, required: true },    // Authenticated MongoDB GridFS URL
+  publicId:     { type: String, required: true },    // MongoDB GridFS file id
   capturedAt:   { type: Date, default: Date.now },
   latitude:     { type: Number, default: null },
   longitude:    { type: Number, default: null },
@@ -15,7 +15,7 @@ const captureSchema = new mongoose.Schema({
 
 const patrolSessionSchema = new mongoose.Schema({
   organisationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organisation', required: true, index: true },
-  shiftSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ShiftSession', required: true },
+  shiftSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'ShiftSession', default: null },
   guardId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   siteId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Site', required: true },
 
@@ -38,6 +38,9 @@ const patrolSessionSchema = new mongoose.Schema({
   // Was manager alerted about missing checkpoints?
   managerAlerted:   { type: Boolean, default: false },
   triggeredByAntiIdle: { type: Boolean, default: false },
+  isManualLog: { type: Boolean, default: false },
+  manuallyLoggedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  managerNote: { type: String, default: null, maxlength: 500 },
 }, { timestamps: true });
 
 patrolSessionSchema.index({ organisationId: 1, guardId: 1, startedAt: -1 });

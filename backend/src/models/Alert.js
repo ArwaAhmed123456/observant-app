@@ -22,6 +22,8 @@ const alertSchema = new mongoose.Schema({
       'guard_booked_late',
       'shift_end_reminder',
       'random_prompt_ignored',
+      'sos',
+      'geofence_warning',
     ],
     required: true,
   },

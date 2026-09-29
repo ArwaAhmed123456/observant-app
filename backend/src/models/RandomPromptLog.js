@@ -13,6 +13,8 @@ const randomPromptLogSchema = new mongoose.Schema({
   triggeredAt:  { type: Date, required: true, default: Date.now },
   responded:    { type: Boolean, default: false },
   respondedAt:  { type: Date, default: null },
+  managerAlerted: { type: Boolean, default: false },
+  expiresAt: { type: Date, default: null },
 
   // If guard responded, link to the patrol they started
   patrolSessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'PatrolSession', default: null },

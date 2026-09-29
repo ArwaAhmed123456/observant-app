@@ -1,9 +1,53 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, Alert } from 'react-native';
 import { load, save, KEYS, seedIfEmpty } from '../data/store';
+import {
+  API_ENABLED, apiGet, apiPost, apiPatch, apiDelete, restoreTokens, setTokens,
+  apiUpload,
+  idOf, normalizeUser, normalizeSite, normalizeSession, normalizeCheckCall,
+  normalizePatrol, normalizeRoster, normalizeAlert, normalizeCheckpoint,
+} from '../services/api';
+import { registerPushNotifications } from '../services/pushNotifications';
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
+
+async function loadRemoteSnapshot(user) {
+  const isManager = user.role === 'manager' || user.role === 'admin' || user.role === 'superadmin';
+  const [sitesResult, shiftsResult, callsResult, patrolsResult, rostersResult, usersResult, alertsResult, templatesResult, auditResult] = await Promise.all([
+    apiGet('/api/sites'),
+    apiGet('/api/shifts?limit=100'),
+    apiGet('/api/check-calls?limit=100'),
+    apiGet('/api/patrols?limit=100'),
+    apiGet('/api/rosters'),
+    isManager ? apiGet('/api/users?active=all') : Promise.resolve({ users: [] }),
+    isManager ? apiGet('/api/alerts?limit=100') : Promise.resolve({ alerts: [] }),
+    isManager ? apiGet('/api/rosters/templates') : Promise.resolve({ templates: [] }),
+    isManager ? apiGet('/api/audit-logs?limit=100') : Promise.resolve({ logs: [] }),
+  ]);
+  const sites = (sitesResult.sites || []).map(normalizeSite);
+  const checkpointsBySite = await Promise.all(sites.map(site => apiGet(`/api/patrols/checkpoints?siteId=${encodeURIComponent(site.id)}`)));
+  const patrols = (patrolsResult.patrols || []).map(normalizePatrol);
+  return {
+    users: isManager ? (usersResult.users || []).map(normalizeUser) : [user],
+    sites,
+    checkpoints: checkpointsBySite.flatMap(result => (result.checkpoints || []).map(normalizeCheckpoint)),
+    shiftSessions: (shiftsResult.sessions || []).map(normalizeSession),
+    checkCalls: (callsResult.checkCalls || []).map(normalizeCheckCall),
+    patrolSessions: patrols,
+    patrolCaptures: patrols.flatMap(patrol => patrol.captures || []),
+    rosters: (rostersResult.rosters || []).map(normalizeRoster),
+    alerts: (alertsResult.alerts || []).map(alert => ({ ...normalizeAlert(alert), read: !!alert.isRead })),
+    rosterTemplates: templatesResult.templates || [],
+    auditLogs: (auditResult.logs || []).map(log => ({
+      id: idOf(log), action: log.action, actorName: log.actorName || log.actorId?.name || 'System',
+      actorRole: log.actorRole || log.actorId?.role || 'system', targetName: log.targetName || '—',
+      details: typeof log.details === 'string' ? log.details : log.details ? JSON.stringify(log.details) : '',
+      severity: /sos|missed|deactivated/i.test(log.action) ? 'warning' : 'info',
+      timestamp: log.createdAt,
+    })),
+  };
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CHECK_CALL_INTERVAL_MS = 60 * 60 * 1000;   // 1 hour
@@ -44,10 +88,52 @@ export function AppProvider({ children }) {
   const patrolTimerRef      = useRef(null);
   const antiIdleTimerRef    = useRef(null);
   const shiftEndTimerRef    = useRef(null);
+  const expireCheckCallHandlerRef = useRef(null);
   const appStateRef         = useRef(AppState.currentState);
 
   // ─── Load all data from AsyncStorage ──────────────────────────────────────
   const loadAll = useCallback(async () => {
+    if (API_ENABLED) {
+      const savedTokens = await restoreTokens();
+      if (savedTokens?.accessToken) {
+        try {
+          const { user: rawUser } = await apiGet('/api/auth/me');
+          const user = normalizeUser(rawUser);
+          const snapshot = await loadRemoteSnapshot(user);
+          Object.entries(snapshot).forEach(([key, value]) => {
+            const setters = {
+              users: setUsers, sites: setSites, checkpoints: setCheckpoints,
+              shiftSessions: setShiftSessions, checkCalls: setCheckCalls,
+              patrolSessions: setPatrolSessions, patrolCaptures: setPatrolCaptures,
+              rosters: setRosters, alerts: setAlerts, rosterTemplates: setRosterTemplates, auditLogs: setAuditLogs,
+            };
+            setters[key]?.(value);
+          });
+          setCurrentUser(user);
+          const activeShift = snapshot.shiftSessions.find(session => session.guardId === user.id && !session.bookedOffAt);
+          const pendingCall = snapshot.checkCalls.find(call => call.guardId === user.id && !call.response);
+          const activePatrolRecord = snapshot.patrolSessions.find(patrol => patrol.guardId === user.id && patrol.status === 'in_progress');
+          if (activeShift) {
+            if (activeShift.scheduledEndAt && new Date(activeShift.scheduledEndAt).getTime() - Date.now() <= SHIFT_END_WARN_MS) setShiftEndWarning(true);
+            setActiveCheckCall(pendingCall || null);
+            if (activePatrolRecord) {
+              const detail = await apiGet(`/api/patrols/${activePatrolRecord.id}`);
+              const active = normalizePatrol(detail.patrol);
+              setActivePatrol(active);
+              setPatrolSessions(previous => previous.map(item => item.id === active.id ? active : item));
+            }
+          }
+        } catch (error) {
+          if (error.status === 401) {
+            await setTokens(null);
+            await save(KEYS.CURRENT_USER_ID, null);
+          }
+          console.warn('[Observant] Could not restore server session:', error.message);
+        }
+      }
+      setAuthLoading(false);
+      return;
+    }
     // Seed before the first read. App-level parallel seeding could race login
     // initialization and leave a fresh install looking like an empty app.
     await seedIfEmpty();
@@ -91,6 +177,44 @@ export function AppProvider({ children }) {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  useEffect(() => {
+    if (!API_ENABLED || !currentUser) return undefined;
+    const refreshOperations = async () => {
+      try {
+        const [shifts, calls, patrols, alerts, prompts] = await Promise.all([
+          apiGet('/api/shifts?limit=100'),
+          apiGet('/api/check-calls?limit=100'),
+          apiGet('/api/patrols?limit=100'),
+          currentUser.role === 'guard' ? Promise.resolve({ alerts: [] }) : apiGet('/api/alerts?limit=100'),
+          apiGet('/api/patrols/random-prompt?limit=100'),
+        ]);
+        setShiftSessions((shifts.sessions || []).map(normalizeSession));
+        const activeShift = (shifts.sessions || []).find(session => idOf(session.guardId) === currentUser.id && !session.bookedOffAt);
+        if (activeShift?.scheduledEndAt && new Date(activeShift.scheduledEndAt).getTime() - Date.now() <= SHIFT_END_WARN_MS) setShiftEndWarning(true);
+        const callsList = (calls.checkCalls || []).map(normalizeCheckCall);
+        setCheckCalls(callsList);
+        const pending = callsList.find(call => call.guardId === currentUser.id && !call.response);
+        setActiveCheckCall(pending || null);
+        const patrolList = (patrols.patrols || []).map(normalizePatrol);
+        setPatrolSessions(patrolList);
+        const active = patrolList.find(patrol => patrol.guardId === currentUser.id && patrol.status === 'in_progress');
+        if (active && !activePatrol) {
+          const detail = await apiGet(`/api/patrols/${active.id}`);
+          setActivePatrol(normalizePatrol(detail.patrol));
+        }
+        setAlerts((alerts.alerts || []).map(alert => ({ ...normalizeAlert(alert), read: !!alert.isRead })));
+        const promptList = prompts.logs || [];
+        setRandomPromptLogs(promptList.map(prompt => ({ ...prompt, id: idOf(prompt), guardId: idOf(prompt.guardId), sessionId: idOf(prompt.shiftSessionId) })));
+        if (currentUser.role === 'guard' && promptList.some(prompt => !prompt.responded)) setAntiIdlePrompt(true);
+      } catch (error) {
+        console.warn('[Observant] Operation refresh failed:', error.message);
+      }
+    };
+    refreshOperations();
+    const interval = setInterval(refreshOperations, 30_000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id, currentUser?.role, activePatrol?.id]);
+
   // ─── Handle app coming to foreground — resume timers if shift is active ───
   useEffect(() => {
     const sub = AppState.addEventListener('change', nextState => {
@@ -104,6 +228,7 @@ export function AppProvider({ children }) {
 
   // ─── Audit Log ────────────────────────────────────────────────────────────
   const addAuditLog = useCallback(async ({ action, actorName, actorRole, targetName, details, severity = 'info' }) => {
+    if (API_ENABLED) return null; // The server writes actor-attributed audit records for remote operations.
     const newEntry = {
       id: `aud_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
       action,
@@ -123,6 +248,33 @@ export function AppProvider({ children }) {
 
   // ─── Auth ─────────────────────────────────────────────────────────────────
   const login = useCallback(async (email, password) => {
+    if (API_ENABLED) {
+      try {
+        const response = await apiPost('/api/auth/login', { email: email.trim().toLowerCase(), password });
+        await setTokens({ accessToken: response.accessToken, refreshToken: response.refreshToken });
+        const user = normalizeUser(response.user);
+        const snapshot = await loadRemoteSnapshot(user);
+        setUsers(snapshot.users); setSites(snapshot.sites); setCheckpoints(snapshot.checkpoints);
+        setShiftSessions(snapshot.shiftSessions); setCheckCalls(snapshot.checkCalls);
+        setPatrolSessions(snapshot.patrolSessions); setPatrolCaptures(snapshot.patrolCaptures);
+        setRosters(snapshot.rosters); setAlerts(snapshot.alerts); setRosterTemplates(snapshot.rosterTemplates);
+        setAuditLogs(snapshot.auditLogs);
+        setCurrentUser(user);
+        const activeSession = snapshot.shiftSessions.find(item => item.guardId === user.id && !item.bookedOffAt);
+        setActiveCheckCall(snapshot.checkCalls.find(item => item.guardId === user.id && !item.response) || null);
+        const activePatrolRecord = snapshot.patrolSessions.find(item => item.guardId === user.id && item.status === 'in_progress');
+        if (activePatrolRecord) {
+          const detail = await apiGet(`/api/patrols/${activePatrolRecord.id}`);
+          setActivePatrol(normalizePatrol(detail.patrol));
+        }
+        registerPushNotifications();
+        await save(KEYS.CURRENT_USER_ID, user.id);
+        return { success: true, user };
+      } catch (error) {
+        await setTokens(null);
+        return { success: false, error: error.message };
+      }
+    }
     const allUsers = await load(KEYS.USERS);
     const user = (allUsers || []).find(
       u => u.email.toLowerCase() === email.toLowerCase().trim() && u.password === password
@@ -144,10 +296,27 @@ export function AppProvider({ children }) {
     setAntiIdlePrompt(false);
     setShiftEndWarning(false);
     await save(KEYS.CURRENT_USER_ID, null);
+    if (API_ENABLED) {
+      try { await apiPost('/api/auth/logout', {}); } catch {}
+      await setTokens(null);
+    }
   }, []);
 
   // ─── Super Admin User Management ──────────────────────────────────────────
   const createUser = useCallback(async (userData) => {
+    if (API_ENABLED) {
+      try {
+        const response = await apiPost('/api/users', {
+          name: userData.name.trim(), email: userData.email.trim().toLowerCase(),
+          password: userData.password, role: userData.role === 'superadmin' ? 'admin' : (userData.role || 'guard'),
+          badgeNumber: userData.badgeNumber, phone: userData.phone,
+          siteId: userData.siteId || null, managedSiteIds: userData.siteIds || [],
+        });
+        const user = normalizeUser(response.user);
+        setUsers(previous => [user, ...previous]);
+        return { success: true, user };
+      } catch (error) { return { success: false, error: error.message }; }
+    }
     const allUsers = await load(KEYS.USERS) || [];
     const normalizedEmail = (userData.email || '').trim().toLowerCase();
     if (allUsers.some(u => u.email.toLowerCase() === normalizedEmail)) {
@@ -181,6 +350,19 @@ export function AppProvider({ children }) {
   }, [addAuditLog]);
 
   const updateUser = useCallback(async (userId, updates) => {
+    if (API_ENABLED) {
+      try {
+        const { user: saved } = await apiPatch(`/api/users/${userId}`, {
+          ...updates,
+          ...(updates.status ? { active: updates.status !== 'inactive' } : {}),
+          ...(updates.siteIds ? { managedSiteIds: updates.siteIds } : {}),
+        });
+        const user = normalizeUser(saved);
+        setUsers(previous => previous.map(item => item.id === userId ? user : item));
+        if (currentUser?.id === userId) setCurrentUser(user);
+        return { success: true };
+      } catch (error) { return { success: false, error: error.message }; }
+    }
     const allUsers = await load(KEYS.USERS) || [];
     const target = allUsers.find(u => u.id === userId);
     if (!target) return { success: false, error: 'User not found' };
@@ -203,6 +385,17 @@ export function AppProvider({ children }) {
   }, [currentUser, addAuditLog]);
 
   const toggleUserStatus = useCallback(async (userId) => {
+    if (API_ENABLED) {
+      const target = users.find(user => user.id === userId);
+      if (!target) return { success: false, error: 'User not found' };
+      const active = target.status === 'inactive';
+      try {
+        const { user: saved } = await apiPatch(`/api/users/${userId}`, { active });
+        const updated = normalizeUser(saved);
+        setUsers(previous => previous.map(user => user.id === userId ? updated : user));
+        return { success: true, status: updated.status };
+      } catch (error) { return { success: false, error: error.message }; }
+    }
     const allUsers = await load(KEYS.USERS) || [];
     const target = allUsers.find(u => u.id === userId);
     if (!target) return { success: false, error: 'User not found' };
@@ -223,6 +416,15 @@ export function AppProvider({ children }) {
   }, [addAuditLog]);
 
   const deleteUser = useCallback(async (userId) => {
+    if (API_ENABLED) {
+      const target = users.find(user => user.id === userId);
+      if (!target) return { success: false, error: 'User not found' };
+      try {
+        await apiDelete(`/api/users/${userId}`);
+        setUsers(previous => previous.map(user => user.id === userId ? { ...user, status: 'inactive' } : user));
+        return { success: true };
+      } catch (error) { return { success: false, error: error.message }; }
+    }
     const allUsers = await load(KEYS.USERS) || [];
     const target = allUsers.find(u => u.id === userId);
     if (!target) return { success: false, error: 'User not found' };
@@ -242,6 +444,14 @@ export function AppProvider({ children }) {
   }, [addAuditLog]);
 
   const updatePassword = useCallback(async (userId, oldPassword, newPassword) => {
+    if (API_ENABLED) {
+      try {
+        await apiPost('/api/auth/change-password', { currentPassword: oldPassword, newPassword });
+        await setTokens(null);
+        setCurrentUser(null);
+        return { success: true, requiresLogin: true };
+      } catch (error) { return { success: false, error: error.message }; }
+    }
     const allUsers = await load(KEYS.USERS) || [];
     const target = allUsers.find(u => u.id === userId);
     if (!target) return { success: false, error: 'User not found' };
@@ -263,6 +473,12 @@ export function AppProvider({ children }) {
   }, [addAuditLog]);
 
   const resetPasswordWithCode = useCallback(async (email, code, newPassword) => {
+    if (API_ENABLED) {
+      try {
+        await apiPost('/api/auth/reset-password', { email: email.trim().toLowerCase(), code, newPassword });
+        return { success: true };
+      } catch (error) { return { success: false, error: error.message }; }
+    }
     const allUsers = await load(KEYS.USERS) || [];
     const normalizedEmail = (email || '').trim().toLowerCase();
     const target = allUsers.find(u => u.email.toLowerCase() === normalizedEmail);
@@ -307,6 +523,7 @@ export function AppProvider({ children }) {
   }, [rosters]);
 
   const addAlert = useCallback(async (alert) => {
+    if (API_ENABLED) return null; // The API persists and routes operational alerts.
     const newAlert = {
       id: `al_${Date.now()}`,
       createdAt: new Date().toISOString(),
@@ -322,6 +539,25 @@ export function AppProvider({ children }) {
 
   // ─── Shift: Book On ───────────────────────────────────────────────────────
   const bookOn = useCallback(async (guardId, siteId) => {
+    if (API_ENABLED) {
+      const scheduledEnd = getTodayRoster(guardId)?.days?.[todayKey()]?.end;
+      let scheduledEndAt = null;
+      if (scheduledEnd) {
+        const [hours, minutes] = scheduledEnd.split(':').map(Number);
+        const end = new Date();
+        end.setHours(hours, minutes, 0, 0);
+        if (end <= new Date()) end.setDate(end.getDate() + 1);
+        scheduledEndAt = end.toISOString();
+      }
+      const { session: remoteSession } = await apiPost('/api/shifts/book-on', { siteId, scheduledEndAt });
+      const session = normalizeSession(remoteSession);
+      setShiftSessions(previous => [session, ...previous.filter(item => item.id !== session.id)]);
+      setActiveCheckCall(null);
+      setShiftEndWarning(false);
+      // Server worker creates hourly calls and expires them even if the app is closed.
+      startShiftEndTimer(session);
+      return session;
+    }
     const allSessions = await load(KEYS.SHIFT_SESSIONS) || [];
     // Close any stale open session for this guard
     const cleaned = allSessions.map(s =>
@@ -364,16 +600,28 @@ export function AppProvider({ children }) {
     scheduleNextPatrolTimer(session, null);
 
     return session;
-  }, [getTodayRoster, shiftSessions]);
+  }, [getTodayRoster, shiftSessions, startCheckCallTimer, startShiftEndTimer, scheduleNextPatrolTimer]);
 
   // ─── Shift: Book Off ──────────────────────────────────────────────────────
   const bookOff = useCallback(async (sessionId) => {
+    if (API_ENABLED) {
+      const { session: remoteSession } = await apiPost('/api/shifts/book-off', {});
+      clearAllTimers();
+      setActiveCheckCall(null);
+      setActivePatrol(null);
+      setAntiIdlePrompt(false);
+      setShiftEndWarning(false);
+      if (remoteSession) {
+        const session = normalizeSession(remoteSession);
+        setShiftSessions(previous => previous.map(item => item.id === session.id ? session : item));
+      }
+      return;
+    }
     clearAllTimers();
     setActiveCheckCall(null);
     setActivePatrol(null);
     setAntiIdlePrompt(false);
     setShiftEndWarning(false);
-
     const allSessions = await load(KEYS.SHIFT_SESSIONS) || [];
     const updated = allSessions.map(s =>
       s.id === sessionId ? { ...s, bookedOffAt: new Date().toISOString() } : s
@@ -384,6 +632,7 @@ export function AppProvider({ children }) {
 
   // ─── Check Call Timers ────────────────────────────────────────────────────
   const startCheckCallTimer = useCallback((session) => {
+    if (API_ENABLED) return;
     if (checkCallTimerRef.current) clearTimeout(checkCallTimerRef.current);
     checkCallTimerRef.current = setTimeout(() => {
       fireCheckCall(session);
@@ -391,6 +640,19 @@ export function AppProvider({ children }) {
   }, []);
 
   const fireCheckCall = useCallback(async (session) => {
+    if (API_ENABLED) {
+      try {
+        const { checkCall } = await apiPost('/api/check-calls/fire', { isRandom: false });
+        const call = normalizeCheckCall(checkCall);
+        setCheckCalls(previous => [call, ...previous]);
+        setActiveCheckCall(call);
+        if (checkCallExpireRef.current) clearTimeout(checkCallExpireRef.current);
+        checkCallExpireRef.current = setTimeout(() => expireCheckCallHandlerRef.current?.(call, session), Math.max(0, new Date(call.expiresAt).getTime() - Date.now()));
+      } catch (error) {
+        console.warn('[Observant] Could not open check call:', error.message);
+      }
+      return;
+    }
     const cc = {
       id: `cc_${Date.now()}`,
       sessionId: session.id,
@@ -423,6 +685,22 @@ export function AppProvider({ children }) {
       checkCallExpireRef.current = null;
     }
 
+    if (API_ENABLED) {
+      const form = new FormData();
+      form.append('response', response);
+      if (note) form.append('note', note);
+      if (extra?.photoUri) form.append('photo', { uri: extra.photoUri, name: 'check-call-issue.jpg', type: 'image/jpeg' });
+      if (extra?.category) form.append('category', extra.category);
+      if (extra?.location?.latitude != null) form.append('latitude', String(extra.location.latitude));
+      if (extra?.location?.longitude != null) form.append('longitude', String(extra.location.longitude));
+      const { checkCall } = await apiUpload(`/api/check-calls/${checkCallId}/respond`, form);
+      const updatedCall = normalizeCheckCall(checkCall);
+      setCheckCalls(previous => previous.map(item => item.id === checkCallId ? updatedCall : item));
+      setActiveCheckCall(null);
+      const session = shiftSessions.find(item => item.id === updatedCall.sessionId);
+      if (session && !session.bookedOffAt) startCheckCallTimer(session);
+      return updatedCall;
+    }
     const allCC = await load(KEYS.CHECK_CALLS) || [];
     const cc = allCC.find(c => c.id === checkCallId);
     if (!cc) return;
@@ -521,6 +799,12 @@ export function AppProvider({ children }) {
 
   // ─── Manual Logs by Manager ───────────────────────────────────────────────
   const addManualCheckCall = useCallback(async ({ guardId, siteId, response = 'yes', note = '' }) => {
+    if (API_ENABLED) {
+      const { checkCall } = await apiPost('/api/manual-log/check-call', { guardId, response, note });
+      const saved = normalizeCheckCall(checkCall);
+      setCheckCalls(previous => [saved, ...previous]);
+      return saved;
+    }
     const allCC = await load(KEYS.CHECK_CALLS) || [];
     const guard = users.find(u => u.id === guardId);
     const site  = sites.find(s => s.id === siteId);
@@ -554,6 +838,12 @@ export function AppProvider({ children }) {
   }, [users, sites, currentUser, addAuditLog]);
 
   const addManualPatrol = useCallback(async ({ guardId, siteId, note = '', startedAt, finishedAt }) => {
+    if (API_ENABLED) {
+      const { patrol } = await apiPost('/api/manual-log/patrol', { guardId, note, startedAt, finishedAt });
+      const saved = normalizePatrol(patrol);
+      setPatrolSessions(previous => [saved, ...previous]);
+      return saved;
+    }
     const allPS = await load(KEYS.PATROL_SESSIONS) || [];
     const guard = users.find(u => u.id === guardId);
     const site  = sites.find(s => s.id === siteId);
@@ -588,6 +878,16 @@ export function AppProvider({ children }) {
 
   // ─── Emergency SOS ────────────────────────────────────────────────────────
   const triggerSOS = useCallback(async ({ location, note } = {}) => {
+    if (API_ENABLED) {
+      const { alert } = await apiPost('/api/sos/trigger', {
+        latitude: location?.latitude,
+        longitude: location?.longitude,
+        note,
+      });
+      const saved = { ...normalizeAlert(alert), read: false };
+      setAlerts(previous => [saved, ...previous]);
+      return saved;
+    }
     const guard = currentUser;
     const site = sites.find(s => s.id === guard?.siteId);
     const now = new Date().toISOString();
@@ -617,6 +917,17 @@ export function AppProvider({ children }) {
   }, [currentUser, sites, addAlert, addAuditLog]);
 
   const expireCheckCall = useCallback(async (cc, session) => {
+    if (API_ENABLED) {
+      try {
+        const { checkCall } = await apiPost('/api/check-calls/expire', { checkCallId: cc.id });
+        const saved = normalizeCheckCall(checkCall);
+        setCheckCalls(previous => previous.map(item => item.id === saved.id ? saved : item));
+        setActiveCheckCall(null);
+      } catch (error) {
+        if (error.status !== 404) console.warn('[Observant] Check call expiry failed:', error.message);
+      }
+      return;
+    }
     const allCC = await load(KEYS.CHECK_CALLS) || [];
     const existing = allCC.find(c => c.id === cc.id);
     if (!existing || existing.response) return; // already responded
@@ -699,6 +1010,20 @@ export function AppProvider({ children }) {
 
   // ─── Patrol: Start ────────────────────────────────────────────────────────
   const startPatrol = useCallback(async (guardId, siteId, sessionId) => {
+    if (API_ENABLED) {
+      const pending = [...randomPromptLogs].reverse().find(log => !log.responded && log.sessionId === sessionId);
+      if (pending && antiIdlePrompt) await apiPost(`/api/patrols/random-prompt/${pending.id}/respond`, {});
+      const { patrol } = await apiPost('/api/patrols/start', { triggeredByAntiIdle: antiIdlePrompt });
+      const saved = normalizePatrol(patrol);
+      setPatrolSessions(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
+      setActivePatrol(saved);
+      setAntiIdlePrompt(false);
+      if (pending && !antiIdlePrompt) {
+        await apiPost(`/api/patrols/random-prompt/${pending.id}/respond`, { patrolSessionId: saved.id });
+        setRandomPromptLogs(previous => previous.map(log => log.id === pending.id ? { ...log, responded: true, respondedAt: new Date().toISOString() } : log));
+      }
+      return saved;
+    }
     if (antiIdleTimerRef.current) clearTimeout(antiIdleTimerRef.current);
     if (patrolTimerRef.current)   clearTimeout(patrolTimerRef.current);
     setAntiIdlePrompt(false);
@@ -731,10 +1056,21 @@ export function AppProvider({ children }) {
     setPatrolSessions(updated);
     setActivePatrol(patrol);
     return patrol;
-  }, []);
+  }, [antiIdlePrompt, randomPromptLogs]);
 
   // ─── Patrol: Capture Checkpoint Photo ─────────────────────────────────────
   const captureCheckpoint = useCallback(async (patrolId, checkpointId, photoUri) => {
+    if (API_ENABLED) {
+      const form = new FormData();
+      form.append('checkpointId', checkpointId);
+      form.append('photo', { uri: photoUri, name: `checkpoint-${checkpointId}.jpg`, type: 'image/jpeg' });
+      const { patrol } = await apiUpload(`/api/patrols/${patrolId}/capture`, form);
+      const saved = normalizePatrol(patrol);
+      setPatrolSessions(previous => previous.map(item => item.id === saved.id ? saved : item));
+      setPatrolCaptures(saved.captures || []);
+      setActivePatrol(saved);
+      return saved.captures?.[saved.captures.length - 1];
+    }
     const capture = {
       id: `pc_${Date.now()}`,
       patrolId,
@@ -766,6 +1102,19 @@ export function AppProvider({ children }) {
 
   // ─── Patrol: Finish ───────────────────────────────────────────────────────
   const finishPatrol = useCallback(async (patrolId, forceFinish = false) => {
+    if (API_ENABLED) {
+      try {
+        const { patrol } = await apiPost(`/api/patrols/${patrolId}/finish`, { forceFinish });
+        const saved = normalizePatrol(patrol);
+        setPatrolSessions(previous => previous.map(item => item.id === saved.id ? saved : item));
+        setActivePatrol(null);
+        setPatrolCaptures(saved.captures || []);
+        return { incomplete: false, patrol: saved };
+      } catch (error) {
+        if (error.status === 422) return { incomplete: true, missing: error.missingCheckpointIds || [], patrol: activePatrol };
+        throw error;
+      }
+    }
     const allPatrols = await load(KEYS.PATROL_SESSIONS) || [];
     const patrol = allPatrols.find(p => p.id === patrolId);
     if (!patrol) return;
@@ -817,7 +1166,7 @@ export function AppProvider({ children }) {
     }
 
     return { incomplete: false, patrol: updatedPatrols.find(p => p.id === patrolId) };
-  }, [checkpoints, users, sites, addAlert, scheduleNextPatrolTimer]);
+  }, [checkpoints, users, sites, addAlert, scheduleNextPatrolTimer, activePatrol]);
 
   // ─── Shift-end warning ────────────────────────────────────────────────────
   const startShiftEndTimer = useCallback((session) => {
@@ -851,6 +1200,12 @@ export function AppProvider({ children }) {
 
   // ─── Roster management ────────────────────────────────────────────────────
   const publishRoster = useCallback(async (rosterData) => {
+    if (API_ENABLED) {
+      const { roster } = await apiPost('/api/rosters', rosterData);
+      const saved = normalizeRoster(roster);
+      setRosters(previous => [saved, ...previous.filter(item => !(item.guardId === saved.guardId && item.weekStartDate === saved.weekStartDate))]);
+      return saved;
+    }
     const all = await load(KEYS.SHIFT_ROSTERS) || [];
     const existing = all.findIndex(r => r.guardId === rosterData.guardId && r.weekStartDate === rosterData.weekStartDate);
     let updated;
@@ -865,6 +1220,11 @@ export function AppProvider({ children }) {
   }, []);
 
   const saveRosterTemplate = useCallback(async (template) => {
+    if (API_ENABLED) {
+      const { template: saved } = await apiPost('/api/rosters/templates', template);
+      setRosterTemplates(previous => [...previous, saved]);
+      return saved;
+    }
     const all = await load(KEYS.ROSTER_TEMPLATES) || [];
     const updated = [...all, { id: `rt_${Date.now()}`, createdAt: new Date().toISOString(), ...template }];
     await save(KEYS.ROSTER_TEMPLATES, updated);
@@ -872,6 +1232,11 @@ export function AppProvider({ children }) {
   }, []);
 
   const deleteRosterTemplate = useCallback(async (templateId) => {
+    if (API_ENABLED) {
+      await apiDelete(`/api/rosters/templates/${templateId}`);
+      setRosterTemplates(previous => previous.filter(item => item.id !== templateId));
+      return;
+    }
     const all = await load(KEYS.ROSTER_TEMPLATES) || [];
     const updated = all.filter(t => t.id !== templateId);
     await save(KEYS.ROSTER_TEMPLATES, updated);
@@ -880,6 +1245,11 @@ export function AppProvider({ children }) {
 
   // ─── Alerts ───────────────────────────────────────────────────────────────
   const markAlertRead = useCallback(async (alertId) => {
+    if (API_ENABLED) {
+      await apiPatch(`/api/alerts/${alertId}/read`, {});
+      setAlerts(previous => previous.map(alert => alert.id === alertId ? { ...alert, read: true } : alert));
+      return;
+    }
     const all = await load(KEYS.ALERTS) || [];
     const updated = all.map(a => a.id === alertId ? { ...a, read: true } : a);
     await save(KEYS.ALERTS, updated);
@@ -887,6 +1257,11 @@ export function AppProvider({ children }) {
   }, []);
 
   const markAllAlertsRead = useCallback(async () => {
+    if (API_ENABLED) {
+      await apiPatch('/api/alerts/read-all', {});
+      setAlerts(previous => previous.map(alert => ({ ...alert, read: true })));
+      return;
+    }
     const all = await load(KEYS.ALERTS) || [];
     const updated = all.map(a => ({ ...a, read: true }));
     await save(KEYS.ALERTS, updated);
@@ -895,14 +1270,58 @@ export function AppProvider({ children }) {
 
   // ─── Checkpoint config ────────────────────────────────────────────────────
   const saveCheckpoints = useCallback(async (newCheckpoints) => {
+    if (API_ENABLED) {
+      const existingIds = new Set(checkpoints.map(item => item.id));
+      const nextIds = new Set(newCheckpoints.map(item => item.id));
+      const saved = [];
+      for (const checkpoint of newCheckpoints) {
+        if (existingIds.has(checkpoint.id)) {
+          const { checkpoint: updated } = await apiPatch(`/api/patrols/checkpoints/${checkpoint.id}`, checkpoint);
+          saved.push(normalizeCheckpoint(updated));
+        } else {
+          const { checkpoint: created } = await apiPost('/api/patrols/checkpoints', checkpoint);
+          saved.push(normalizeCheckpoint(created));
+        }
+      }
+      for (const checkpoint of checkpoints) {
+        if (!nextIds.has(checkpoint.id)) await apiDelete(`/api/patrols/checkpoints/${checkpoint.id}`);
+      }
+      setCheckpoints(saved);
+      return;
+    }
     await save(KEYS.PATROL_CHECKPOINTS, newCheckpoints);
     setCheckpoints(newCheckpoints);
-  }, []);
+  }, [checkpoints]);
 
   // ─── Users management ─────────────────────────────────────────────────────
   const refreshUsers = useCallback(async () => {
+    if (API_ENABLED) {
+      const { users: remoteUsers } = await apiGet('/api/users?active=all');
+      const normalized = (remoteUsers || []).map(normalizeUser);
+      setUsers(normalized);
+      return normalized;
+    }
     const u = await load(KEYS.USERS);
     setUsers(u || []);
+  }, []);
+
+  const createSite = useCallback(async (siteData) => {
+    if (API_ENABLED) {
+      const { site } = await apiPost('/api/sites', siteData);
+      const saved = normalizeSite(site);
+      setSites(previous => [...previous, saved]);
+      if (saved.managerId) {
+        setUsers(previous => previous.map(user => user.id === saved.managerId
+          ? { ...user, siteIds: [...new Set([...(user.siteIds || []), saved.id])] }
+          : user));
+      }
+      return { success: true, site: saved };
+    }
+    const saved = { id: `site_${Date.now()}`, active: true, geofenceRadiusMeters: 200, ...siteData };
+    const updated = [...(await load(KEYS.SITES) || []), saved];
+    await save(KEYS.SITES, updated);
+    setSites(updated);
+    return { success: true, site: saved };
   }, []);
 
   // ─── Computed helpers ─────────────────────────────────────────────────────
@@ -927,7 +1346,7 @@ export function AppProvider({ children }) {
   const getUnreadAlerts = useCallback((managerId) => {
     const mgr = users.find(u => u.id === managerId);
     if (!mgr) return [];
-    return alerts.filter(a => !a.read && mgr.siteIds?.includes(a.siteId));
+    return alerts.filter(a => !a.read && (mgr.role === 'admin' || mgr.siteIds?.includes(a.siteId)));
   }, [alerts, users]);
 
   const getSiteCheckpoints = useCallback((siteId) =>
@@ -948,7 +1367,7 @@ export function AppProvider({ children }) {
 
   const value = {
     // Auth
-    currentUser, authLoading, login, logout,
+    currentUser, authLoading, login, logout, createSite,
     updatePassword, resetPasswordWithCode,
     // Reference data
     users, sites, checkpoints, refreshUsers,

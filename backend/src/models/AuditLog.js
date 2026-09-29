@@ -14,9 +14,10 @@ const auditLogSchema = new mongoose.Schema({
     type: String,
     required: true,
     enum: [
-      'account_created', 'account_edited', 'account_deactivated', 'account_deleted',
-      'password_reset_requested', 'password_reset_completed',
+      'account_created', 'account_edited', 'account_deactivated', 'account_deleted', 'site_created',
+      'password_reset_requested', 'password_reset_completed', 'password_changed',
       'manual_log_check_call', 'manual_log_patrol',
+      'issue_reported', 'check_call_completed',
       'sos_triggered', 'sos_resolved',
       'roster_published',
       'login', 'logout',

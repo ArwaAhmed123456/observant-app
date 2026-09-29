@@ -11,10 +11,14 @@ const shiftSessionSchema = new mongoose.Schema({
 
   bookedOnAt:  { type: Date, required: true, default: Date.now },
   bookedOffAt: { type: Date, default: null },
+  nextCheckCallAt: { type: Date, default: null, index: true },
+  nextRandomPromptAt: { type: Date, default: null },
 
   // Scheduled times from the roster (snapshot at book-on time)
   scheduledStart: { type: String, default: null }, // HH:MM
   scheduledEnd:   { type: String, default: null },
+  scheduledEndAt: { type: Date, default: null },
+  shiftEndWarningSentAt: { type: Date, default: null },
 
   // How on-time was the guard?
   punctuality: {

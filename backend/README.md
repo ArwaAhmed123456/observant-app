@@ -9,11 +9,11 @@ Node.js / Express / MongoDB REST API for the Observant Guard & Patrol mobile app
 | Layer | Tech |
 |-------|------|
 | Runtime | Node.js 18+ |
-| Framework | Express 4 |
+| Framework | Express 5 |
 | Database | MongoDB Atlas (Mongoose ODM) |
 | Auth | JWT (access 15m + refresh 30d) |
-| Push notifications | Firebase Cloud Messaging (FCM) |
-| Photo storage | Cloudinary |
+| Push notifications | Expo Push Service (FCM optional) |
+| Photo storage | MongoDB GridFS |
 | Rate limiting | express-rate-limit |
 
 ---
@@ -32,29 +32,20 @@ cp .env.example .env
 # Edit .env with your real values (see comments in file)
 ```
 
-### 3. Set up MongoDB Atlas (free tier works fine)
-1. Go to https://cloud.mongodb.com
-2. Create a free M0 cluster
-3. Add a database user (username + password)
-4. Whitelist your IP (or 0.0.0.0/0 for dev)
-5. Click **Connect → Drivers** and copy the connection string into `MONGODB_URI`
+### 3. Configure MongoDB Atlas
+Set `MONGODB_URI` to the Atlas cluster's dedicated `ObservantApp` database. MongoDB creates collections automatically (`users`, `sites`, `shiftsessions`, `checkcalls`, `patrolsessions`, and others); it does not use SQL-style tables. The previous app database remains separate. Add the API host's outbound IP to Atlas Network Access, or use a host-supported network rule.
 
-### 4. Set up Cloudinary (free tier)
-1. Sign up at https://cloudinary.com
-2. Copy Cloud Name, API Key, API Secret into `.env`
+### 4. Configure patrol image storage
+Checkpoint and avatar images are stored in the MongoDB `observantMedia` GridFS bucket.
 
-### 5. Set up Firebase (for push notifications)
-1. Go to https://console.firebase.google.com
-2. Create a project (or use existing)
-3. Project Settings → Service Accounts → Generate new private key
-4. Save the downloaded JSON as `backend/firebase-service-account.json`
-5. Set `FIREBASE_SERVICE_ACCOUNT_PATH=./firebase-service-account.json` in `.env`
+### 5. Push notifications
+The Android app registers an Expo Push token automatically after sign-in. The server sends shift, check-call, patrol, and manager alert notifications through Expo Push Service.
 
 ### 6. Seed initial data
 ```bash
 npm run seed
 ```
-This creates the Observant organisation, 1 manager, 3 guards, 3 sites, and 10 patrol checkpoints.
+This idempotently creates the Observant organisation and first administrator only. No demo users or sites are inserted. Sign in as the administrator, create an active manager, create a site under **Sites & Geofences**, then assign guards and checkpoints.
 
 ### 7. Run the server
 ```bash
@@ -94,8 +85,9 @@ Authorization: Bearer <accessToken>
 
 **Login request:**
 ```json
-{ "email": "elena@observant.com", "password": "manager123" }
+{ "email": "<BOOTSTRAP_ADMIN_EMAIL>", "password": "<BOOTSTRAP_ADMIN_PASSWORD>" }
 ```
+The seed uses `BOOTSTRAP_ADMIN_PASSWORD` from your environment and never prints it. Keep it in a secret manager (or the ignored local bootstrap file) and rotate it after first sign-in.
 **Login response:**
 ```json
 {
@@ -224,10 +216,10 @@ Authorization: Bearer <accessToken>
 
 ## Deployment (Render / Railway / VPS)
 
-1. Push backend folder to its own Git repo (or subfolder)
-2. Set all env vars in your hosting dashboard
-3. Build command: `npm install`
-4. Start command: `npm start`
-5. Run seed once: `npm run seed`
+1. Create a Node web service with `backend` as its root directory.
+2. Set `NODE_ENV=production`, `MONGODB_URI`, two distinct strong JWT secrets (32+ characters), and an explicit `CORS_ORIGINS` in the host's secret settings. Add SMTP values if account recovery emails are enabled.
+3. Build command: `npm install`; start command: `npm start`; health check: `/health`.
+4. Run `npm run seed` once from the service environment. It is safe to rerun.
+5. Set the deployed HTTPS API origin as `EXPO_PUBLIC_API_URL` in the Expo/EAS environment and build Android again. An APK built without this value remains in local demo mode.
 
-The API is stateless — no sessions stored server-side. Scale horizontally freely.
+MongoDB stores refresh-token hashes and operational records. A background worker schedules hourly check calls, 10-minute missed-call escalation, random patrol prompts, ignored-prompt alerts, and shift-end reminders. Run one API instance unless the worker is moved behind a distributed scheduler/lock.

@@ -9,9 +9,11 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
   // Find all active managers who manage this site
   const managers = await User.find({
     organisationId,
-    role: { $in: ['manager', 'admin'] },
-    managedSiteIds: siteId,
     active: true,
+    $or: [
+      { role: 'admin' },
+      { role: 'manager', managedSiteIds: siteId },
+    ],
   }).select('_id fcmToken');
 
   const managerIds = managers.map(m => m._id);

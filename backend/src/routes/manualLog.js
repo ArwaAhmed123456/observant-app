@@ -6,7 +6,7 @@
  */
 const router = require('express').Router();
 const { body } = require('express-validator');
-const { CheckCall, PatrolSession, ShiftSession, User } = require('../models');
+const { CheckCall, PatrolSession, ShiftSession, User, Site } = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
 const validate     = require('../middleware/validate');
 const asyncHandler = require('../utils/asyncHandler');
@@ -28,6 +28,9 @@ router.post('/check-call',
 
     const guard   = await User.findOne({ _id: guardId, organisationId: orgId }).select('name badgeNumber siteId');
     if (!guard) return res.status(404).json({ error: 'Guard not found in this organisation' });
+    if (guard.role !== 'guard' || !guard.siteId) return res.status(400).json({ error: 'Only guards assigned to a site can have operational events logged.' });
+    const site = await Site.findOne({ _id: guard.siteId, organisationId: orgId, active: true });
+    if (req.user.role === 'manager' && (!site || !req.user.managedSiteIds.some(id => String(id) === String(site._id)))) return res.status(403).json({ error: 'Guard is outside your assigned sites.' });
 
     // Find or note session
     const session = await ShiftSession.findOne({ organisationId: orgId, guardId, bookedOffAt: null });
@@ -44,6 +47,9 @@ router.post('/check-call',
       respondedAt:       now,
       response,
       note:              note || null,
+      siteId:            guard.siteId,
+      isManualLog:       true,
+      manuallyLoggedBy:  req.user._id,
       manuallyLoggedBy:  req.user._id,   // extra field — add to schema below
       isManualLog:       true,
     });
@@ -78,6 +84,9 @@ router.post('/patrol',
 
     const guard   = await User.findOne({ _id: guardId, organisationId: orgId }).select('name badgeNumber siteId');
     if (!guard) return res.status(404).json({ error: 'Guard not found' });
+    if (guard.role !== 'guard' || !guard.siteId) return res.status(400).json({ error: 'Only guards assigned to a site can have operational events logged.' });
+    const site = await Site.findOne({ _id: guard.siteId, organisationId: orgId, active: true });
+    if (req.user.role === 'manager' && (!site || !req.user.managedSiteIds.some(id => String(id) === String(site._id)))) return res.status(403).json({ error: 'Guard is outside your assigned sites.' });
 
     const session = await ShiftSession.findOne({ organisationId: orgId, guardId, bookedOffAt: null });
     const now     = new Date();
@@ -93,6 +102,7 @@ router.post('/patrol',
       isManualLog:      true,
       manuallyLoggedBy: req.user._id,
       captures:         [],
+      managerNote: note || null,
     });
 
     await audit({

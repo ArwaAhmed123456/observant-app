@@ -5,7 +5,7 @@
  * POST /api/auth/refresh       — swap refresh token for new access token
  * POST /api/auth/logout        — revoke refresh token
  * GET  /api/auth/me            — current user profile
- * PATCH /api/auth/me/fcm-token — update FCM device token
+ * PATCH /api/auth/me/fcm-token — update Expo push token
  */
 const router  = require('express').Router();
 const { body } = require('express-validator');
@@ -14,6 +14,7 @@ const { authenticate }  = require('../middleware/auth');
 const validate          = require('../middleware/validate');
 const asyncHandler      = require('../utils/asyncHandler');
 const { signAccess, signRefresh, verifyRefresh, hashToken, compareToken } = require('../utils/tokens');
+const { audit } = require('../utils/auditLogger');
 
 // ── Register new organisation + admin user ────────────────────────────────────
 router.post('/register-org',
@@ -28,6 +29,8 @@ router.post('/register-org',
   validate,
   asyncHandler(async (req, res) => {
     const { orgName, orgSlug, email, password, name, contactEmail } = req.body;
+
+    if (process.env.ALLOW_ORG_REGISTRATION !== 'true') return res.status(403).json({ error: 'Organisation registration is disabled. Contact your system administrator.' });
 
     const existing = await Organisation.findOne({ slug: orgSlug });
     if (existing) return res.status(409).json({ error: 'Organisation slug already taken' });
@@ -145,10 +148,36 @@ router.get('/me', authenticate, asyncHandler(async (req, res) => {
   res.json({ user: req.user });
 }));
 
-// ── Update FCM token ──────────────────────────────────────────────────────────
+router.post('/change-password', authenticate,
+  [
+    body('currentPassword').notEmpty(),
+    body('newPassword').isLength({ min: 12 }).withMessage('New password must be at least 12 characters'),
+  ],
+  validate,
+  asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user._id).select('+password +refreshTokenHash');
+    if (!user || !(await user.comparePassword(req.body.currentPassword))) {
+      return res.status(400).json({ error: 'Current password is incorrect' });
+    }
+    user.password = req.body.newPassword;
+    user.refreshTokenHash = null;
+    await user.save();
+    await audit({
+      req,
+      organisationId: user.organisationId,
+      action: 'password_changed',
+      targetModel: 'User',
+      targetId: user._id,
+      targetName: user.email,
+    });
+    res.json({ message: 'Password changed. Sign in again with your new password.' });
+  })
+);
+
+// ── Update Expo push token ────────────────────────────────────────────────────
 router.patch('/me/fcm-token',
   authenticate,
-  [body('fcmToken').notEmpty()],
+    [body('fcmToken').matches(/^Expo(nent)?PushToken\[[^\]]+\]$/).withMessage('Invalid Expo push token')],
   validate,
   asyncHandler(async (req, res) => {
     await User.findByIdAndUpdate(req.user._id, { fcmToken: req.body.fcmToken });

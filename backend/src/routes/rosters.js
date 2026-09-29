@@ -18,6 +18,7 @@ const { authenticate, requireRole } = require('../middleware/auth');
 const validate     = require('../middleware/validate');
 const asyncHandler = require('../utils/asyncHandler');
 const fcm          = require('../services/fcm');
+const { audit }    = require('../utils/auditLogger');
 
 // ── List rosters ──────────────────────────────────────────────────────────────
 router.get('/', authenticate, asyncHandler(async (req, res) => {
@@ -54,6 +55,11 @@ router.post('/',
     const { guardId, siteId, weekStartDate, days } = req.body;
     const orgId = req.user.organisationId;
 
+    const guard = await User.findOne({ _id: guardId, organisationId: orgId, role: 'guard', active: true }).select('name fcmToken siteId');
+    if (!guard) return res.status(404).json({ error: 'Active guard not found in this organisation.' });
+    if (String(guard.siteId) !== String(siteId)) return res.status(400).json({ error: 'Roster site must match the guard assigned site.' });
+    if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(siteId))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
+
     const roster = await ShiftRoster.findOneAndUpdate(
       { organisationId: orgId, guardId, weekStartDate },
       {
@@ -69,7 +75,6 @@ router.post('/',
     );
 
     // Send FCM push to guard
-    const guard = await User.findById(guardId).select('name fcmToken');
     if (guard?.fcmToken) {
       const workedDays = Object.entries(days)
         .filter(([, v]) => v)
@@ -83,6 +88,8 @@ router.post('/',
       });
       await ShiftRoster.findByIdAndUpdate(roster._id, { notifiedAt: new Date() });
     }
+
+    await audit({ req, action: 'roster_published', targetModel: 'ShiftRoster', targetId: roster._id, targetName: guard?.name || String(guardId), details: { siteId, weekStartDate } });
 
     res.status(201).json({ roster });
   })

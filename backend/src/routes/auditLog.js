@@ -12,12 +12,8 @@ router.get('/', authenticate, requireRole('manager', 'admin'),
     const { action, actorId, targetModel, from, to, limit = 50, page = 1 } = req.query;
 
     const filter = {};
-    // Admins see all orgs; managers see only their own org
-    if (req.user.role !== 'admin') {
-      filter.organisationId = req.user.organisationId;
-    } else if (req.query.organisationId) {
-      filter.organisationId = req.query.organisationId;
-    }
+    // Tenant admins and managers are both scoped to their organisation.
+    filter.organisationId = req.user.organisationId;
 
     if (action)      filter.action      = action;
     if (actorId)     filter.actorId     = actorId;

@@ -18,12 +18,13 @@ router.get('/', authenticate, requireRole('manager','admin'),
     const { type, siteId, read, limit = 50, page = 1 } = req.query;
     const orgId = req.user.organisationId;
 
-    const filter = {
-      organisationId: orgId,
-      managerIds: req.user._id,
-    };
+    const filter = { organisationId: orgId };
+    if (req.user.role === 'manager') filter.managerIds = req.user._id;
     if (type)   filter.type   = type;
-    if (siteId) filter.siteId = siteId;
+    if (siteId) {
+      if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(siteId))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
+      filter.siteId = siteId;
+    }
     if (read === 'true')  filter.readBy = req.user._id;
     if (read === 'false') filter.readBy = { $ne: req.user._id };
 
@@ -52,7 +53,7 @@ router.get('/unread-count', authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
     const count = await Alert.countDocuments({
       organisationId: req.user.organisationId,
-      managerIds:     req.user._id,
+      ...(req.user.role === 'admin' ? {} : { managerIds: req.user._id }),
       readBy:         { $ne: req.user._id },
     });
     res.json({ count });
@@ -63,7 +64,7 @@ router.get('/unread-count', authenticate, requireRole('manager','admin'),
 router.patch('/:id/read', authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
     const alert = await Alert.findOneAndUpdate(
-      { _id: req.params.id, organisationId: req.user.organisationId, managerIds: req.user._id },
+      { _id: req.params.id, organisationId: req.user.organisationId, ...(req.user.role === 'admin' ? {} : { managerIds: req.user._id }) },
       { $addToSet: { readBy: req.user._id } },
       { new: true }
     );
@@ -78,7 +79,7 @@ router.patch('/read-all', authenticate, requireRole('manager','admin'),
     await Alert.updateMany(
       {
         organisationId: req.user.organisationId,
-        managerIds: req.user._id,
+        ...(req.user.role === 'admin' ? {} : { managerIds: req.user._id }),
         readBy: { $ne: req.user._id },
       },
       { $addToSet: { readBy: req.user._id } }
@@ -90,9 +91,9 @@ router.patch('/read-all', authenticate, requireRole('manager','admin'),
 // ── Delete alert ──────────────────────────────────────────────────────────────
 router.delete('/:id', authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
-    await Alert.findOneAndDelete({
-      _id: req.params.id, organisationId: req.user.organisationId,
-    });
+    const filter = { _id: req.params.id, organisationId: req.user.organisationId };
+    if (req.user.role === 'manager') filter.managerIds = req.user._id;
+    await Alert.findOneAndDelete(filter);
     res.json({ message: 'Alert deleted' });
   })
 );

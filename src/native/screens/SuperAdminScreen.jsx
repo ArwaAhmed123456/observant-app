@@ -25,7 +25,7 @@ const SECTIONS = [
 
 export function SuperAdminScreen() {
   const {
-    currentUser, users, sites, logout,
+    currentUser, users, sites, logout, createSite,
     auditLogs, createUser, updateUser, toggleUserStatus, deleteUser,
     shiftSessions, checkCalls, patrolSessions, alerts
   } = useApp();
@@ -48,6 +48,11 @@ export function SuperAdminScreen() {
   const [formBadge, setFormBadge]         = useState('');
   const [formPhone, setFormPhone]         = useState('');
   const [modalLoading, setModalLoading]   = useState(false);
+  const [showSiteModal, setShowSiteModal] = useState(false);
+  const [siteName, setSiteName] = useState('');
+  const [siteAddress, setSiteAddress] = useState('');
+  const [siteManagerId, setSiteManagerId] = useState('');
+  const [siteRadius, setSiteRadius] = useState('200');
 
   // System-wide Data Filters
   const [dateFilter, setDateFilter]     = useState('all'); // all | today | this_week
@@ -65,7 +70,7 @@ export function SuperAdminScreen() {
     setFormEmail('');
     setFormPassword('');
     setFormRole('guard');
-    setFormSiteId(sites[0]?.id || 's1');
+    setFormSiteId(sites[0]?.id || '');
     setFormBadge(`SG-${Math.floor(1000 + Math.random() * 9000)}`);
     setFormPhone('+44 7700 900');
     setShowUserModal(true);
@@ -78,7 +83,7 @@ export function SuperAdminScreen() {
     setFormEmail(user.email);
     setFormPassword('');
     setFormRole(user.role);
-    setFormSiteId(user.siteId || (user.siteIds && user.siteIds[0]) || 's1');
+    setFormSiteId(user.siteId || (user.siteIds && user.siteIds[0]) || '');
     setFormBadge(user.badgeNumber || '');
     setFormPhone(user.phone || '');
     setShowUserModal(true);
@@ -89,6 +94,9 @@ export function SuperAdminScreen() {
     if (!formName.trim() || !formEmail.trim()) {
       return Alert.alert('Missing Fields', 'Please provide a name and email.');
     }
+    if (formRole === 'guard' && !formSiteId) return Alert.alert('Site required', 'Assign a site to this guard before creating the account.');
+    if (!editingUser && formPassword.trim().length < 12) return Alert.alert('Password too short', 'Choose an initial password with at least 12 characters.');
+    if (editingUser && formPassword.trim() && formPassword.trim().length < 12) return Alert.alert('Password too short', 'Choose a new password with at least 12 characters.');
     setModalLoading(true);
 
     if (editingUser) {
@@ -99,7 +107,7 @@ export function SuperAdminScreen() {
         badgeNumber: formBadge.trim(),
         phone: formPhone.trim(),
         siteId: formRole === 'guard' ? formSiteId : undefined,
-        siteIds: formRole === 'manager' ? [formSiteId] : undefined,
+        siteIds: formRole === 'manager' && formSiteId ? [formSiteId] : undefined,
       };
       if (formPassword.trim()) {
         updates.password = formPassword.trim();
@@ -123,7 +131,7 @@ export function SuperAdminScreen() {
         password: formPassword.trim(),
         role: formRole,
         siteId: formSiteId,
-        siteIds: formRole === 'manager' ? [formSiteId] : undefined,
+        siteIds: formRole === 'manager' && formSiteId ? [formSiteId] : undefined,
         badgeNumber: formBadge.trim(),
         phone: formPhone.trim(),
         status: 'active',
@@ -705,7 +713,19 @@ export function SuperAdminScreen() {
               SECTION 4: SITES & GEOFENCES
           ══════════════════════════════════════════════════════════════════ */}
           {activeSection === 'sites' && (
-            <View style={styles.sitesGrid}>
+            <>
+              <TouchableOpacity
+                style={[styles.actionBtn, { alignSelf: 'flex-start', marginBottom: 16 }]}
+                onPress={() => {
+                  setSiteName(''); setSiteAddress(''); setSiteRadius('200');
+                  setSiteManagerId(users.find(user => user.role === 'manager' && user.status !== 'inactive')?.id || '');
+                  setShowSiteModal(true);
+                }}
+              >
+                <Plus color={COLORS.white} size={16} />
+                <Text style={styles.actionBtnTxt}>Add Site</Text>
+              </TouchableOpacity>
+              <View style={styles.sitesGrid}>
               {sites.map(site => {
                 const manager = users.find(u => u.id === site.managerId);
                 const assignedGuards = users.filter(u => u.siteId === site.id);
@@ -738,7 +758,9 @@ export function SuperAdminScreen() {
                   </View>
                 );
               })}
-            </View>
+              {sites.length === 0 && <Text style={styles.siteCardAddress}>No sites configured. Add a site, then assign managers and guards.</Text>}
+              </View>
+            </>
           )}
 
         </ScrollView>
@@ -787,7 +809,7 @@ export function SuperAdminScreen() {
                 style={styles.formInput}
                 value={formPassword}
                 onChangeText={setFormPassword}
-                placeholder="Min 8 characters"
+                placeholder="Minimum 12 characters"
                 placeholderTextColor={COLORS.textDisabled}
                 secureTextEntry
               />
@@ -864,6 +886,47 @@ export function SuperAdminScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showSiteModal} transparent animationType="fade" onRequestClose={() => setShowSiteModal(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalBox}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitleText}>Create Operational Site</Text>
+              <TouchableOpacity onPress={() => setShowSiteModal(false)}><X color={COLORS.textMuted} size={20} /></TouchableOpacity>
+            </View>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              <Text style={styles.formLabel}>Site name *</Text>
+              <TextInput style={styles.formInput} value={siteName} onChangeText={setSiteName} placeholder="e.g. North Gate" placeholderTextColor={COLORS.textDisabled} />
+              <Text style={styles.formLabel}>Address</Text>
+              <TextInput style={styles.formInput} value={siteAddress} onChangeText={setSiteAddress} placeholder="Street, city" placeholderTextColor={COLORS.textDisabled} />
+              <Text style={styles.formLabel}>Manager *</Text>
+              {users.filter(user => user.role === 'manager' && user.status !== 'inactive').map(manager => (
+                <TouchableOpacity key={manager.id} style={[styles.siteOptionBtn, siteManagerId === manager.id && styles.siteOptionBtnActive]} onPress={() => setSiteManagerId(manager.id)}>
+                  <Text style={styles.siteOptionBtnTxt}>{manager.name}</Text>
+                </TouchableOpacity>
+              ))}
+              {users.every(user => user.role !== 'manager' || user.status === 'inactive') && <Text style={styles.siteCardAddress}>Create an active manager account first.</Text>}
+              <Text style={styles.formLabel}>Geofence radius (metres)</Text>
+              <TextInput style={styles.formInput} value={siteRadius} onChangeText={setSiteRadius} keyboardType="number-pad" placeholder="200" placeholderTextColor={COLORS.textDisabled} />
+              <TouchableOpacity
+                style={[styles.actionBtn, { marginTop: 20, opacity: modalLoading ? 0.6 : 1 }]}
+                disabled={modalLoading}
+                onPress={async () => {
+                  if (!siteName.trim() || !siteManagerId) return Alert.alert('Required fields', 'Enter a site name and select an active manager.');
+                  setModalLoading(true);
+                  const result = await createSite({ name: siteName.trim(), address: siteAddress.trim(), managerId: siteManagerId, geofenceRadiusMetres: Math.max(50, Number(siteRadius) || 200) });
+                  setModalLoading(false);
+                  if (!result.success) return Alert.alert('Site could not be created', result.error || 'Please try again.');
+                  setShowSiteModal(false);
+                  Alert.alert('Site created', `${result.site.name} is ready for guard and checkpoint setup.`);
+                }}
+              >
+                <Text style={styles.actionBtnTxt}>{modalLoading ? 'Saving…' : 'Create Site'}</Text>
+              </TouchableOpacity>
+            </ScrollView>
           </View>
         </View>
       </Modal>
