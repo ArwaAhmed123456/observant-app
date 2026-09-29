@@ -50,20 +50,20 @@ export const COLORS = {
   brandBorder:  'rgba(27,79,190,0.35)',
   brandSubtle:  'rgba(27,79,190,0.08)',
 
-  // Backgrounds (deep charcoal navy — not pure black)
-  bgRoot:       '#111722',
-  bgCard:       '#1B2738',
-  bgCardHover:  '#243349',
-  bgElevated:   '#243349',
-  bgInput:      '#202D40',
-  bgSheet:      '#182231',
-  bgOverlay:    'rgba(10, 15, 23, 0.88)',
-  bgSurface:    'rgba(255, 255, 255, 0.045)',
+  // Backgrounds (porcelain canvas and clean white surfaces)
+  bgRoot:       '#F4F6FA',
+  bgCard:       '#FFFFFF',
+  bgCardHover:  '#F7F9FC',
+  bgElevated:   '#FFFFFF',
+  bgInput:      '#F3F6FA',
+  bgSheet:      '#FFFFFF',
+  bgOverlay:    'rgba(15, 23, 42, 0.48)',
+  bgSurface:    '#FFFFFF',
 
   // Glass morphism
-  glass:        'rgba(255, 255, 255, 0.04)',
-  glassBorder:  'rgba(255, 255, 255, 0.08)',
-  glassStrong:  'rgba(255, 255, 255, 0.07)',
+  glass:        'rgba(255, 255, 255, 0.78)',
+  glassBorder:  'rgba(20, 32, 51, 0.10)',
+  glassStrong:  'rgba(255, 255, 255, 0.92)',
 
   // Status semantic — Green = safe/completed/okay
   ok:           '#22C55E',
@@ -93,9 +93,9 @@ export const COLORS = {
   sosGlow:      'rgba(255, 45, 85, 0.40)',
 
   // Blue = informational/neutral action
-  info:         '#3B82F6',
-  infoBg:       'rgba(59, 130, 246, 0.12)',
-  infoBorder:   'rgba(59, 130, 246, 0.30)',
+  info:         '#1B4FBE',
+  infoBg:       'rgba(27, 79, 190, 0.10)',
+  infoBorder:   'rgba(27, 79, 190, 0.24)',
 
   // Cyan = patrol/technical
   cyan:         '#06B6D4',
@@ -104,16 +104,16 @@ export const COLORS = {
   cyanGlow:     'rgba(6, 182, 212, 0.20)',
 
   // Text hierarchy
-  textPrimary:   '#F0F4FF',
-  textSecondary: '#8FA3C8',
-  textMuted:     '#8291A8',
-  textDisabled:  '#586A83',
-  textInverse:   '#111722',
+  textPrimary:   '#142033',
+  textSecondary: '#46546A',
+  textMuted:     '#68768B',
+  textDisabled:  '#8A96A8',
+  textInverse:   '#FFFFFF',
 
   // Borders
-  borderSubtle:  'rgba(196, 211, 232, 0.11)',
-  borderMid:     'rgba(196, 211, 232, 0.17)',
-  borderStrong:  'rgba(255, 255, 255, 0.20)',
+  borderSubtle:  '#E9EDF3',
+  borderMid:     '#DCE3EC',
+  borderStrong:  '#C5CFDC',
 
   // compat aliases
   missed:        '#EF4444',
@@ -122,8 +122,8 @@ export const COLORS = {
   issue:         '#F59E0B',
   issueBg:       'rgba(245, 158, 11, 0.12)',
   issueBorder:   'rgba(245, 158, 11, 0.30)',
-  upcoming:      '#334155',
-  upcomingBg:    'rgba(51, 65, 85, 0.20)',
+  upcoming:      '#68768B',
+  upcomingBg:    '#F1F4F8',
   purple:        '#A855F7',
   purpleBg:      'rgba(168, 85, 247, 0.12)',
   amber:         '#F59E0B',
@@ -188,49 +188,49 @@ export const shadows = {
   sm: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
+    shadowOpacity: 0.07,
+    shadowRadius: 5,
     elevation: 2,
   },
   md: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
+    shadowOpacity: 0.10,
+    shadowRadius: 12,
     elevation: 5,
   },
   lg: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.45,
-    shadowRadius: 18,
+    shadowOpacity: 0.13,
+    shadowRadius: 22,
     elevation: 10,
   },
   brand: {
     shadowColor: '#1B4FBE',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.16,
     shadowRadius: 14,
     elevation: 7,
   },
   blue: {
     shadowColor: '#1B4FBE',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.16,
     shadowRadius: 14,
     elevation: 7,
   },
   gold: {
     shadowColor: '#C9A84C',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.30,
+    shadowOpacity: 0.16,
     shadowRadius: 12,
     elevation: 6,
   },
   ok: {
     shadowColor: '#22C55E',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.30,
+    shadowOpacity: 0.16,
     shadowRadius: 12,
     elevation: 6,
   },
@@ -283,7 +283,7 @@ export const primaryBtnText = {
 
 export const headerStyle = {
   backgroundColor: COLORS.bgRoot,
-  paddingTop: 52,
+  paddingTop: 12,
 };
 
 // ─── T — backward-compat flat namespace ──────────────────────────────────────

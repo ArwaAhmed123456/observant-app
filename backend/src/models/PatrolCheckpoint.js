@@ -10,6 +10,8 @@ const patrolCheckpointSchema = new mongoose.Schema({
   name:     { type: String, required: true, trim: true },
   order:    { type: Number, required: true, default: 1 },
   required: { type: Boolean, default: true },
+  nfcRequired: { type: Boolean, default: false },
+  nfcTagId: { type: String, default: null, trim: true },
   active:   { type: Boolean, default: true },
 
   // Optional QR/NFC code to scan at this checkpoint

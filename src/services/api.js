@@ -128,7 +128,7 @@ export function normalizeAlert(value) {
 }
 
 export function normalizeCheckpoint(value) {
-  return { ...value, id: idOf(value), siteId: idOf(value.siteId) };
+  return { ...value, id: idOf(value), siteId: idOf(value.siteId), required: value.required !== false, nfcRequired: Boolean(value.nfcRequired), nfcTagId: value.nfcTagId || null };
 }
 
 export function normalizeUser(value) {

@@ -211,7 +211,7 @@ export function CheckCallScreen() {
           </View>
         ) : (
           <View style={s.noActiveCard}>
-            <LinearGradient colors={['#131C2E', '#0F1520']} style={StyleSheet.absoluteFillObject} />
+            <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
             <View style={s.noActiveIconWrap}>
               <Text style={s.noActiveIcon}>✓</Text>
             </View>
@@ -233,7 +233,7 @@ export function CheckCallScreen() {
           const tok = statusToken(cc.response || 'upcoming');
           return (
             <TouchableOpacity key={cc.id||cc._id} style={s.histRow} onPress={() => setDetailCC(cc)} activeOpacity={0.8}>
-              <LinearGradient colors={['#131C2E', '#0F1520']} style={StyleSheet.absoluteFillObject} />
+              <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
               <View style={[s.histAccent, { backgroundColor: tok.color }]} />
               <View style={s.histContent}>
                 <View style={s.histTop}>
@@ -269,7 +269,7 @@ export function CheckCallScreen() {
       <Modal visible={showIssueForm} transparent animationType="slide">
         <View style={s.sheetOverlay}>
           <View style={s.sheet}>
-            <LinearGradient colors={['#162040', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
             <View style={s.sheetHandle} />
             <View style={s.sheetTitleRow}>
               <View style={s.issueDot} />
@@ -327,7 +327,7 @@ export function CheckCallScreen() {
       <Modal visible={showCatPicker} transparent animationType="slide">
         <View style={s.sheetOverlay}>
           <View style={s.sheet}>
-            <LinearGradient colors={['#162040', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
             <View style={s.sheetHandle} />
             <Text style={s.sheetTitle}>Select Category</Text>
             {CATEGORIES.map(cat => (
@@ -351,7 +351,7 @@ export function CheckCallScreen() {
       <Modal visible={!!detailCC} transparent animationType="fade" onRequestClose={() => setDetailCC(null)}>
         <View style={s.sheetOverlay}>
           <View style={s.sheet}>
-            <LinearGradient colors={['#162040', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
             <View style={s.sheetHandle} />
             {detailCC && (() => {
               const tok = statusToken(detailCC.response || 'upcoming');

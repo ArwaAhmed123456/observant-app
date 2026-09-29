@@ -6,8 +6,10 @@ const mongoose = require('mongoose');
 
 const captureSchema = new mongoose.Schema({
   checkpointId: { type: mongoose.Schema.Types.ObjectId, ref: 'PatrolCheckpoint', required: true },
-  photoUrl:     { type: String, required: true },    // Authenticated MongoDB GridFS URL
-  publicId:     { type: String, required: true },    // MongoDB GridFS file id
+  photoUrl:     { type: String, default: null },    // Authenticated MongoDB GridFS URL
+  publicId:     { type: String, default: null },    // MongoDB GridFS file id
+  nfcTagId:     { type: String, default: null },
+  nfcVerifiedAt:{ type: Date, default: null },
   capturedAt:   { type: Date, default: Date.now },
   latitude:     { type: Number, default: null },
   longitude:    { type: Number, default: null },

@@ -56,7 +56,8 @@ router.post('/checkpoints',
   ],
   validate,
   asyncHandler(async (req, res) => {
-    const { siteId, name, order, required, qrCode } = req.body;
+    const { siteId, name, order, required, nfcRequired, nfcTagId, qrCode } = req.body;
+    if (nfcRequired && !nfcTagId) return res.status(400).json({ error: 'Pair an NFC tag before requiring NFC verification.' });
     const site = await require('../models').Site.findOne({ _id: siteId, organisationId: req.user.organisationId, active: true });
     if (!site) return res.status(404).json({ error: 'Site not found.' });
     if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(site._id))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
@@ -69,6 +70,8 @@ router.post('/checkpoints',
       name,
       order:    order || maxOrder + 1,
       required: required !== false,
+      nfcRequired: Boolean(nfcRequired),
+      nfcTagId: nfcTagId || null,
       qrCode:   qrCode || null,
     });
     res.status(201).json({ checkpoint: cp });
@@ -78,12 +81,15 @@ router.post('/checkpoints',
 router.patch('/checkpoints/:id',
   authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
-    const allowed = ['name','order','required','active','qrCode','location'];
+    const allowed = ['name','order','required','nfcRequired','nfcTagId','active','qrCode','location'];
     const checkpoint = await PatrolCheckpoint.findOne({ _id: req.params.id, organisationId: req.user.organisationId });
     if (!checkpoint) return res.status(404).json({ error: 'Checkpoint not found.' });
     if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(checkpoint.siteId))) return res.status(403).json({ error: 'Checkpoint is outside your assigned area.' });
     const updates = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
+    if (updates.nfcRequired === true && !(updates.nfcTagId || checkpoint.nfcTagId)) {
+      return res.status(400).json({ error: 'Pair an NFC tag before requiring NFC verification.' });
+    }
     if (updates.location?.coordinates?.length === 2) {
       const [longitude, latitude] = updates.location.coordinates;
       updates.location.coordinates = [Number(longitude), Number(latitude)];
@@ -150,7 +156,7 @@ router.post('/start',
   })
 );
 
-// ── Capture checkpoint photo ──────────────────────────────────────────────────
+// ── Capture checkpoint proof (photo, NFC tag, or both) ────────────────────────
 router.post('/:id/capture',
   authenticate, requireRole('guard'),
   (req, res, next) => {
@@ -160,9 +166,7 @@ router.post('/:id/capture',
     });
   },
   asyncHandler(async (req, res) => {
-    const { checkpointId, latitude, longitude } = req.body;
-
-    if (!req.file) return res.status(400).json({ error: 'Photo file required' });
+    const { checkpointId, latitude, longitude, nfcTagId } = req.body;
     if (!checkpointId) return res.status(400).json({ error: 'checkpointId required' });
 
     const patrol = await PatrolSession.findOne({
@@ -176,20 +180,29 @@ router.post('/:id/capture',
     const checkpoint = await PatrolCheckpoint.findOne({ _id: checkpointId, organisationId: req.user.organisationId, siteId: patrol.siteId, active: true });
     if (!checkpoint) return res.status(400).json({ error: 'Checkpoint does not belong to this active patrol site.' });
 
+    if (checkpoint.required && !req.file) return res.status(400).json({ error: 'Photo required for this checkpoint.' });
+    if (checkpoint.nfcRequired && !nfcTagId) return res.status(400).json({ error: 'NFC card tap required for this checkpoint.' });
+    if (!checkpoint.required && !checkpoint.nfcRequired) return res.status(400).json({ error: 'This checkpoint has no required proof method.' });
+    if (checkpoint.nfcRequired && String(nfcTagId).toLowerCase() !== String(checkpoint.nfcTagId || '').toLowerCase()) {
+      return res.status(400).json({ error: 'NFC card does not match the tag assigned to this checkpoint.' });
+    }
+
     // Avoid duplicate capture for same checkpoint
     if (patrol.capturedCheckpointIds.map(String).includes(checkpointId)) {
       return res.status(409).json({ error: 'Checkpoint already captured' });
     }
 
-    const fileId = await saveImage(req.file, {
+    const fileId = req.file ? await saveImage(req.file, {
       organisationId: req.user.organisationId.toString(),
       guardId: req.user._id.toString(),
       patrolId: patrol._id.toString(),
-    });
+    }) : null;
     const capture = {
       checkpointId,
-      photoUrl:   `${req.protocol}://${req.get('host')}/api/media/${fileId}`,
+      photoUrl:   fileId ? `${req.protocol}://${req.get('host')}/api/media/${fileId}` : null,
       publicId:   fileId,
+      nfcTagId:   checkpoint.nfcRequired ? nfcTagId : null,
+      nfcVerifiedAt: checkpoint.nfcRequired ? new Date() : null,
       capturedAt: new Date(),
       latitude:   latitude  ? parseFloat(latitude)  : null,
       longitude:  longitude ? parseFloat(longitude) : null,
@@ -222,18 +235,19 @@ router.post('/:id/finish',
       organisationId: orgId,
       siteId: patrol.siteId,
       active: true,
-      required: true,
-    }).select('_id');
+      $or: [{ required: true }, { nfcRequired: true }],
+    }).select('_id required nfcRequired');
 
-    const requiredIds  = required.map(cp => cp._id.toString());
-    const capturedIds  = patrol.capturedCheckpointIds.map(String);
-    const missingIds   = requiredIds.filter(id => !capturedIds.includes(id));
+    const missingIds   = required.filter(cp => {
+      const capture = patrol.captures.find(item => String(item.checkpointId) === String(cp._id));
+      return !capture || (cp.required && !capture.photoUrl) || (cp.nfcRequired && !capture.nfcVerifiedAt);
+    }).map(cp => cp._id.toString());
 
     if (missingIds.length > 0 && !forceFinish) {
       return res.status(422).json({
         incomplete: true,
         missingCheckpointIds: missingIds,
-        message: `${missingIds.length} required checkpoint(s) not yet photographed.`,
+        message: `${missingIds.length} required checkpoint(s) are missing photo or NFC verification.`,
       });
     }
 

@@ -1,11 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image,
   TextInput, Modal, Alert, Dimensions, Platform
 } from 'react-native';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
 import { COLORS, S, R, TYPE, shadows, cardStyle, inputStyle } from '../../theme';
+import { LOGO } from '../../ds';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   Users, Shield, AlertTriangle, FileText, CheckCircle,
   XCircle, Plus, Edit2, Trash2, Power, Search, Filter,
@@ -24,6 +26,7 @@ const SECTIONS = [
 ];
 
 export function SuperAdminScreen() {
+  const insets = useSafeAreaInsets();
   const {
     currentUser, users, sites, logout, createSite,
     auditLogs, createUser, updateUser, toggleUserStatus, deleteUser,
@@ -298,9 +301,7 @@ export function SuperAdminScreen() {
       {/* Super Admin Top Header */}
       <View style={styles.adminHeader}>
         <View style={styles.headerBrand}>
-          <View style={styles.adminBadgeIcon}>
-            <Shield color={COLORS.brand} size={22} />
-          </View>
+          <Image source={LOGO} style={styles.adminLogo} resizeMode="contain" />
           <View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Text style={styles.headerTitle}>OBSERVANT</Text>
@@ -352,7 +353,7 @@ export function SuperAdminScreen() {
           })}
         </View>
 
-        <ScrollView style={styles.mainScroll} contentContainerStyle={styles.mainScrollContent} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.mainScroll} contentContainerStyle={[styles.mainScrollContent, { paddingBottom: 24 + insets.bottom }]} showsVerticalScrollIndicator={false}>
 
           {/* ══════════════════════════════════════════════════════════════════
               SECTION 1: ACCOUNTS & ACCESS
@@ -696,7 +697,7 @@ export function SuperAdminScreen() {
                         </View>
 
                         <Text style={styles.auditActor}>
-                          Initiated by: <Text style={{ color: COLORS.white, fontWeight: '700' }}>{log.actorName} ({log.actorRole.toUpperCase()})</Text>
+                          Initiated by: <Text style={{ color: COLORS.textPrimary, fontWeight: '700' }}>{log.actorName} ({log.actorRole.toUpperCase()})</Text>
                           {log.targetName ? ` → Target: ${log.targetName}` : ''}
                         </Text>
 
@@ -940,7 +941,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#0c121e',
+    backgroundColor: COLORS.bgCard,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.borderSubtle,
     paddingHorizontal: S.xl,
@@ -949,19 +950,20 @@ const styles = StyleSheet.create({
     gap: S.md,
   },
   headerBrand: { flexDirection: 'row', alignItems: 'center', gap: S.md },
+  adminLogo: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#FFFFFF' },
   adminBadgeIcon: {
     width: 44,
     height: 44,
     borderRadius: 10,
-    backgroundColor: 'rgba(16,185,129,0.12)',
+    backgroundColor: COLORS.brandSubtle,
     borderWidth: 1,
     borderColor: COLORS.brandBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: { color: COLORS.white, fontSize: 18, fontWeight: '900', letterSpacing: 1 },
+  headerTitle: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '900', letterSpacing: 1 },
   adminTag: {
-    backgroundColor: 'rgba(16,185,129,0.15)',
+    backgroundColor: COLORS.brandSubtle,
     borderWidth: 1,
     borderColor: COLORS.brandBorder,
     borderRadius: 4,
@@ -983,7 +985,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderMid,
   },
   userDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.ok },
-  userNameTxt: { color: COLORS.white, fontSize: 13, fontWeight: '700' },
+  userNameTxt: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '700' },
   signOutBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1017,7 +1019,7 @@ const styles = StyleSheet.create({
   },
   navBtnActive: { borderBottomColor: COLORS.brand },
   navBtnTxt: { color: COLORS.textMuted, fontSize: 14, fontWeight: '600' },
-  navBtnTxtActive: { color: COLORS.white, fontWeight: '800' },
+  navBtnTxtActive: { color: COLORS.textPrimary, fontWeight: '800' },
   mainScroll: { flex: 1 },
   mainScrollContent: { padding: S.xl, paddingBottom: 80 },
   kpiRow: {
@@ -1036,7 +1038,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderSubtle,
     ...shadows.sm,
   },
-  kpiVal: { color: COLORS.white, fontSize: 28, fontWeight: '800' },
+  kpiVal: { color: COLORS.textPrimary, fontSize: 28, fontWeight: '800' },
   kpiLabel: { color: COLORS.textMuted, fontSize: 12, marginTop: 4 },
   toolbar: {
     flexDirection: 'row',
@@ -1063,7 +1065,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.borderMid,
     gap: 8,
   },
-  searchInput: { flex: 1, color: COLORS.white, fontSize: 13, paddingVertical: 10 },
+  searchInput: { flex: 1, color: COLORS.textPrimary, fontSize: 13, paddingVertical: 10 },
   filterGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   filterPill: {
     backgroundColor: COLORS.bgInput,
@@ -1075,7 +1077,7 @@ const styles = StyleSheet.create({
   },
   filterPillActive: { backgroundColor: COLORS.brand, borderColor: COLORS.brand },
   filterPillTxt: { color: COLORS.textMuted, fontSize: 12, fontWeight: '600' },
-  filterPillTxtActive: { color: COLORS.black, fontWeight: '800' },
+  filterPillTxtActive: { color: COLORS.white, fontWeight: '800' },
   createAccountBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1086,7 +1088,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     ...shadows.brand,
   },
-  createAccountBtnTxt: { color: COLORS.black, fontSize: 13, fontWeight: '800' },
+  createAccountBtnTxt: { color: COLORS.white, fontSize: 13, fontWeight: '800' },
   accountList: { gap: S.md },
   userCard: {
     backgroundColor: COLORS.bgCard,
@@ -1105,12 +1107,12 @@ const styles = StyleSheet.create({
   userAvatar: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   userAvatarTxt: { color: COLORS.white, fontSize: 15, fontWeight: '800' },
   userMeta: { flex: 1 },
-  userName: { color: COLORS.white, fontSize: 15, fontWeight: '800' },
+  userName: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '800' },
   roleBadge: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
   roleBadgeAdmin: { backgroundColor: 'rgba(168,85,247,0.18)' },
   roleBadgeMgr:   { backgroundColor: 'rgba(56,189,248,0.18)' },
   roleBadgeGuard: { backgroundColor: 'rgba(16,185,129,0.18)' },
-  roleBadgeTxt:   { fontSize: 10, fontWeight: '800', color: COLORS.white },
+  roleBadgeTxt:   { fontSize: 10, fontWeight: '800', color: COLORS.textPrimary },
   statusBadge: { borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1 },
   statusBadgeActive: { backgroundColor: COLORS.okBg, borderColor: COLORS.okBorder },
   statusBadgeInactive: { backgroundColor: COLORS.missedBg, borderColor: COLORS.missedBorder },
@@ -1140,7 +1142,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.borderSubtle,
   },
-  emptyCardTitle: { color: COLORS.white, fontSize: 16, fontWeight: '800' },
+  emptyCardTitle: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' },
   emptyCardSub: { color: COLORS.textMuted, fontSize: 13, textAlign: 'center' },
   siteFilterRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   siteFilterLabel: { color: COLORS.textMuted, fontSize: 12, fontWeight: '600' },
@@ -1154,7 +1156,7 @@ const styles = StyleSheet.create({
   },
   dataTableHeader: {
     flexDirection: 'row',
-    backgroundColor: '#0c121e',
+    backgroundColor: COLORS.bgCardHover,
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
@@ -1170,12 +1172,12 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.borderSubtle,
     gap: 8,
   },
-  rowTypeTxt: { color: COLORS.white, fontSize: 13, fontWeight: '700' },
+  rowTypeTxt: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '700' },
   rowStatusPill: { fontSize: 11, fontWeight: '800', marginTop: 2 },
-  rowOfficerName: { color: COLORS.white, fontSize: 13, fontWeight: '600' },
+  rowOfficerName: { color: COLORS.textPrimary, fontSize: 13, fontWeight: '600' },
   rowOfficerBadge: { color: COLORS.textMuted, fontSize: 11 },
   rowSiteTxt: { color: COLORS.textSecondary, fontSize: 12 },
-  rowTimeTxt: { color: COLORS.white, fontSize: 12, fontWeight: '700' },
+  rowTimeTxt: { color: COLORS.textPrimary, fontSize: 12, fontWeight: '700' },
   rowDateTxt: { color: COLORS.textMuted, fontSize: 11 },
   rowDetailTxt: { color: COLORS.textSecondary, fontSize: 12 },
   tableManualBadge: { backgroundColor: 'rgba(56,189,248,0.12)', borderWidth: 1, borderColor: COLORS.info, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginBottom: 4, alignSelf: 'flex-start' },
@@ -1210,18 +1212,18 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   siteHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  siteCardTitle: { color: COLORS.white, fontSize: 16, fontWeight: '800' },
+  siteCardTitle: { color: COLORS.textPrimary, fontSize: 16, fontWeight: '800' },
   siteCardAddress: { color: COLORS.textMuted, fontSize: 13, marginBottom: S.lg },
   siteInfoBlock: { gap: 6, backgroundColor: COLORS.bgInput, borderRadius: R.md, padding: S.md },
   siteInfoRow: { color: COLORS.textSecondary, fontSize: 13 },
-  siteInfoLabel: { color: COLORS.white, fontWeight: '700' },
+  siteInfoLabel: { color: COLORS.textPrimary, fontWeight: '700' },
   // Modal styles
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: S.lg },
   modalBox: { width: '100%', maxWidth: 520, backgroundColor: COLORS.bgCard, borderRadius: R.xl, padding: S.xl, borderWidth: 1, borderColor: COLORS.borderSubtle, ...shadows.lg },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.lg },
-  modalTitleText: { color: COLORS.white, fontSize: 18, fontWeight: '800' },
+  modalTitleText: { color: COLORS.textPrimary, fontSize: 18, fontWeight: '800' },
   formLabel: { color: COLORS.textSecondary, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', marginBottom: 6, marginTop: 12 },
-  formInput: { backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.borderMid, borderRadius: R.md, padding: 12, color: COLORS.white, fontSize: 14 },
+  formInput: { backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.borderMid, borderRadius: R.md, padding: 12, color: COLORS.textPrimary, fontSize: 14 },
   rolePickerRow: { flexDirection: 'row', gap: S.md },
   roleSelectBtn: { flex: 1, backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.borderMid, borderRadius: R.md, paddingVertical: 12, alignItems: 'center' },
   roleSelectBtnActive: { backgroundColor: 'rgba(16,185,129,0.15)', borderColor: COLORS.brand },
@@ -1231,11 +1233,11 @@ const styles = StyleSheet.create({
   siteOptionBtn: { backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.borderMid, borderRadius: R.md, padding: 10 },
   siteOptionBtnActive: { borderColor: COLORS.info, backgroundColor: 'rgba(56,189,248,0.15)' },
   siteOptionBtnTxt: { color: COLORS.textSecondary, fontSize: 13 },
-  siteOptionBtnTxtActive: { color: COLORS.white, fontWeight: '700' },
+  siteOptionBtnTxtActive: { color: COLORS.brand, fontWeight: '700' },
   modalFooter: { flexDirection: 'row', justifyContent: 'flex-end', gap: S.md, marginTop: S.xl },
   modalCancelBtn: { paddingVertical: 12, paddingHorizontal: 18, borderRadius: R.md, backgroundColor: COLORS.bgInput },
   modalCancelBtnTxt: { color: COLORS.textSecondary, fontWeight: '600' },
   modalSubmitBtn: { paddingVertical: 12, paddingHorizontal: 22, borderRadius: R.md, backgroundColor: COLORS.brand, ...shadows.brand },
-  modalSubmitBtnTxt: { color: COLORS.black, fontWeight: '800' },
+  modalSubmitBtnTxt: { color: COLORS.white, fontWeight: '800' },
   btnDisabled: { opacity: 0.6 },
 });

@@ -1059,11 +1059,12 @@ export function AppProvider({ children }) {
   }, [antiIdlePrompt, randomPromptLogs]);
 
   // ─── Patrol: Capture Checkpoint Photo ─────────────────────────────────────
-  const captureCheckpoint = useCallback(async (patrolId, checkpointId, photoUri) => {
+  const captureCheckpoint = useCallback(async (patrolId, checkpointId, photoUri, nfcTagId = null) => {
     if (API_ENABLED) {
       const form = new FormData();
       form.append('checkpointId', checkpointId);
-      form.append('photo', { uri: photoUri, name: `checkpoint-${checkpointId}.jpg`, type: 'image/jpeg' });
+      if (photoUri) form.append('photo', { uri: photoUri, name: `checkpoint-${checkpointId}.jpg`, type: 'image/jpeg' });
+      if (nfcTagId) form.append('nfcTagId', nfcTagId);
       const { patrol } = await apiUpload(`/api/patrols/${patrolId}/capture`, form);
       const saved = normalizePatrol(patrol);
       setPatrolSessions(previous => previous.map(item => item.id === saved.id ? saved : item));
@@ -1076,6 +1077,8 @@ export function AppProvider({ children }) {
       patrolId,
       checkpointId,
       photoUri,
+      nfcTagId,
+      nfcVerifiedAt: nfcTagId ? new Date().toISOString() : null,
       capturedAt: new Date().toISOString(),
     };
 
@@ -1119,7 +1122,7 @@ export function AppProvider({ children }) {
     const patrol = allPatrols.find(p => p.id === patrolId);
     if (!patrol) return;
 
-    const siteCheckpoints = checkpoints.filter(cp => cp.siteId === patrol.siteId && cp.required);
+    const siteCheckpoints = checkpoints.filter(cp => cp.siteId === patrol.siteId && (cp.required || cp.nfcRequired));
     const missing = siteCheckpoints
       .filter(cp => !(patrol.checkpointsCaptured || []).includes(cp.id))
       .map(cp => cp.id);

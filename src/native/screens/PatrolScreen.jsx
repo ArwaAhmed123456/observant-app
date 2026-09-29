@@ -6,10 +6,11 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { authorizedImageSource } from '../../services/api';
 import { useApp, formatTime } from '../../context/AppContext';
-import { Camera, CheckCircle, AlertTriangle, Play, Square, Navigation } from 'lucide-react-native';
+import { Camera, CheckCircle, AlertTriangle, Play, Square, Navigation, ScanLine, Radio } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, btnPrimary, btnGold, btnDanger } from '../../ds';
+import { readNfcTag } from '../../services/nfc';
 
 export function PatrolScreen() {
   const {
@@ -21,6 +22,7 @@ export function PatrolScreen() {
   const [starting, setStarting]   = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [incompleteModal, setIncompleteModal] = useState(null);
+  const [workingCheckpoint, setWorkingCheckpoint] = useState(null);
 
   const activeSession = getGuardActiveSession(currentUser.id);
   const site          = sites.find(s => s.id === currentUser.siteId);
@@ -40,20 +42,27 @@ export function PatrolScreen() {
     setStarting(false);
   };
 
-  const handleCapturePhoto = async (checkpoint) => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Camera Permission', 'Camera access is required to capture checkpoint photos.');
-      return;
-    }
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
-      allowsEditing: false,
-    });
-    if (!result.canceled && result.assets?.[0]) {
-      await captureCheckpoint(activePatrol.id, checkpoint.id, result.assets[0].uri);
-    }
+  const handleCheckpointProof = async (checkpoint) => {
+    setWorkingCheckpoint(checkpoint.id);
+    try {
+      let photoUri = null;
+      let nfcTagId = null;
+      if (checkpoint.required) {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+        if (status !== 'granted') throw new Error('Camera access is required to capture this checkpoint photo.');
+        const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.7, allowsEditing: false });
+        if (result.canceled || !result.assets?.[0]) return;
+        photoUri = result.assets[0].uri;
+      }
+      if (checkpoint.nfcRequired) {
+        Alert.alert('Tap checkpoint card', 'Hold the back of your phone against the assigned NFC card.');
+        nfcTagId = await readNfcTag();
+        const expected = String(checkpoint.nfcTagId || '').toLowerCase();
+        if (!expected || nfcTagId.toLowerCase() !== expected) throw new Error('That NFC card does not match this checkpoint. Ask your manager to pair the correct card.');
+      }
+      await captureCheckpoint(activePatrol.id, checkpoint.id, photoUri, nfcTagId);
+    } catch (error) { Alert.alert('Checkpoint not recorded', error.message || 'Please try again.'); }
+    finally { setWorkingCheckpoint(null); }
   };
 
   const handleFinishPatrol = async () => {
@@ -146,7 +155,7 @@ export function PatrolScreen() {
                       <Text style={styles.cpName}>{cp.name}</Text>
                       {capture && (
                         <Text style={styles.cpCapturedAt}>
-                          Captured {formatTime(capture.capturedAt)}
+                          {capture.photoUri ? 'Photo' : ''}{capture.photoUri && capture.nfcVerifiedAt ? ' + ' : ''}{capture.nfcVerifiedAt ? 'NFC' : ''} verified · {formatTime(capture.capturedAt)}
                         </Text>
                       )}
                     </View>
@@ -158,9 +167,9 @@ export function PatrolScreen() {
                         )}
                       </View>
                     ) : (
-                      <TouchableOpacity style={styles.photoBtn} onPress={() => handleCapturePhoto(cp)}>
-                        <Camera color={P.white} size={14} />
-                        <Text style={styles.photoBtnTxt}>Photo</Text>
+                      <TouchableOpacity style={styles.photoBtn} onPress={() => handleCheckpointProof(cp)} disabled={workingCheckpoint === cp.id}>
+                        {workingCheckpoint === cp.id ? <ActivityIndicator color={P.white} size="small" /> : cp.required && cp.nfcRequired ? <><Camera color={P.white} size={13} /><Radio color={P.white} size={13} /></> : cp.required ? <Camera color={P.white} size={14} /> : <ScanLine color={P.white} size={14} />}
+                        <Text style={styles.photoBtnTxt}>{workingCheckpoint === cp.id ? 'Wait' : cp.required && cp.nfcRequired ? 'Verify' : cp.required ? 'Photo' : 'Tap NFC'}</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -244,7 +253,7 @@ export function PatrolScreen() {
               </View>
               <Text style={styles.modalTitle}>Missing Checkpoints</Text>
               <Text style={styles.modalSub}>
-                These checkpoints have no photo:{'\n\n'}
+              These checkpoints are missing required proof:{'\n\n'}
                 <Text style={{ color: P.warn }}>{incompleteModal?.missingNames}</Text>
                 {'\n\n'}Finishing now will notify your manager.
               </Text>

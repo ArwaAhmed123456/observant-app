@@ -6,7 +6,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   Image, KeyboardAvoidingView, Platform, ScrollView,
-  ActivityIndicator, Animated, StatusBar,
+  ActivityIndicator, Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useApp } from '../../context/AppContext';
@@ -121,14 +121,12 @@ export function LoginScreen() {
 
   return (
     <View style={styles.root}>
-      <StatusBar barStyle="light-content" backgroundColor={P.bg0} />
-      {/* Deep background gradient */}
-      <LinearGradient colors={['#0D1828', P.bg0]} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient colors={['#FFFFFF', P.bg0]} style={StyleSheet.absoluteFillObject} />
 
       {/* Radial glow behind logo */}
       <Animated.View style={[styles.glowOrb, { transform: [{ scale: logoPulse }] }]}>
         <LinearGradient
-          colors={['rgba(27,79,190,0.22)', 'transparent']}
+          colors={['rgba(27,79,190,0.10)', 'transparent']}
           style={styles.glowOrbInner}
         />
       </Animated.View>
@@ -165,7 +163,7 @@ export function LoginScreen() {
               transform: [{ translateY: cardSlide }, { translateX: shakeX }],
             },
           ]}>
-            <LinearGradient colors={['#26364B', '#182333']} style={styles.cardGradient} />
+            <LinearGradient colors={['#FFFFFF', '#F7F9FC']} style={styles.cardGradient} />
 
             {/* Step: Login */}
             {step === STEPS.LOGIN && (
@@ -464,7 +462,7 @@ const styles = StyleSheet.create({
     borderColor: P.b2,
     borderRadius: BR.md,
     padding: SP.px16,
-    backgroundColor: 'rgba(13,20,40,0.7)',
+    backgroundColor: '#F8FAFC',
   },
   hintHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SP.px8, marginBottom: SP.px8 },
   hintDot:    { width: 20, height: 1, backgroundColor: P.goldBorder },

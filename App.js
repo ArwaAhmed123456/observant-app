@@ -1,10 +1,10 @@
 import 'react-native-gesture-handler';
 import React from 'react';
 import { ActivityIndicator, View, StyleSheet } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import {
   Home, Phone, MapPin, Calendar,
@@ -31,13 +31,25 @@ import { SuperAdminScreen }        from './src/native/screens/SuperAdminScreen';
 const Stack = createNativeStackNavigator();
 const Tab   = createBottomTabNavigator();
 
+const APP_NAV_THEME = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: COLORS.bgRoot,
+    card: COLORS.bgCard,
+    text: COLORS.textPrimary,
+    border: COLORS.borderSubtle,
+    primary: COLORS.brand,
+  },
+};
+
 const TAB_BAR = {
   backgroundColor: COLORS.bgCard,
   borderTopColor:  COLORS.borderSubtle,
   borderTopWidth:  1,
   paddingBottom:   6,
   paddingTop:      6,
-  height:          62,
+  height:          64,
 };
 
 const TAB_SCREEN_OPTIONS = ({ route }) => ({
@@ -150,9 +162,11 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppProvider>
-        <NavigationContainer>
-          <StatusBar style="light" backgroundColor={COLORS.bgRoot} />
-          <RootNavigator />
+        <NavigationContainer theme={APP_NAV_THEME}>
+          <StatusBar style="dark" backgroundColor={COLORS.bgRoot} />
+          <SafeAreaView style={styles.safeRoot} edges={['top']}>
+            <RootNavigator />
+          </SafeAreaView>
         </NavigationContainer>
       </AppProvider>
     </SafeAreaProvider>
@@ -161,4 +175,5 @@ export default function App() {
 
 const styles = StyleSheet.create({
   loader: { flex: 1, backgroundColor: COLORS.bgRoot, alignItems: 'center', justifyContent: 'center' },
+  safeRoot: { flex: 1, backgroundColor: COLORS.bgRoot },
 });

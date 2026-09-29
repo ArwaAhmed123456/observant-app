@@ -4,10 +4,11 @@ import {
   Modal, TextInput, Alert, Switch,
 } from 'react-native';
 import { useApp } from '../../context/AppContext';
-import { Plus, Trash2, X, MapPin, Navigation } from 'lucide-react-native';
+import { Plus, Trash2, X, MapPin, Navigation, Radio, ScanLine } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, input, btnPrimary } from '../../ds';
+import { readNfcTag } from '../../services/nfc';
 
 export function ManagerCheckpointScreen() {
   const { currentUser, sites, checkpoints, saveCheckpoints } = useApp();
@@ -17,6 +18,9 @@ export function ManagerCheckpointScreen() {
   const [addModal, setAddModal]         = useState(false);
   const [newName, setNewName]           = useState('');
   const [newRequired, setNewRequired]   = useState(true);
+  const [newNfcRequired, setNewNfcRequired] = useState(false);
+  const [newNfcTagId, setNewNfcTagId] = useState(null);
+  const [pairingId, setPairingId] = useState(null);
   const [saving, setSaving]             = useState(false);
 
   const siteCheckpoints = checkpoints
@@ -25,6 +29,7 @@ export function ManagerCheckpointScreen() {
 
   const handleAdd = async () => {
     if (!newName.trim()) { Alert.alert('Name required'); return; }
+    if (newNfcRequired && !newNfcTagId) { Alert.alert('Pair an NFC card', 'Scan the checkpoint card before making it required.'); return; }
     setSaving(true);
     const newCP = {
       id: `cp_${Date.now()}`,
@@ -32,12 +37,16 @@ export function ManagerCheckpointScreen() {
       name: newName.trim(),
       order: siteCheckpoints.length + 1,
       required: newRequired,
+      nfcRequired: newNfcRequired,
+      nfcTagId: newNfcTagId,
     };
     await saveCheckpoints([...checkpoints, newCP]);
     setSaving(false);
     setAddModal(false);
     setNewName('');
     setNewRequired(true);
+    setNewNfcRequired(false);
+    setNewNfcTagId(null);
   };
 
   const handleDelete = (cpId) => {
@@ -58,6 +67,17 @@ export function ManagerCheckpointScreen() {
   const toggleRequired = async (cpId) => {
     const updated = checkpoints.map(cp => cp.id === cpId ? { ...cp, required: !cp.required } : cp);
     await saveCheckpoints(updated);
+  };
+
+  const pairTag = async (checkpoint) => {
+    setPairingId(checkpoint.id);
+    try {
+      const nfcTagId = await readNfcTag();
+      const updated = checkpoints.map(cp => cp.id === checkpoint.id ? { ...cp, nfcTagId, nfcRequired: true } : cp);
+      await saveCheckpoints(updated);
+      Alert.alert('NFC checkpoint paired', `${checkpoint.name} will require this card during patrols.`);
+    } catch (error) { Alert.alert('NFC scan', error.message); }
+    finally { setPairingId(null); }
   };
 
   return (
@@ -137,6 +157,24 @@ export function ManagerCheckpointScreen() {
                       {cp.required ? 'On' : 'Off'}
                     </Text>
                   </View>
+                  <View style={styles.reqRow}>
+                    <Text style={styles.reqLabel}>NFC card</Text>
+                    <Switch
+                      value={Boolean(cp.nfcRequired)}
+                      disabled={!cp.nfcTagId}
+                      onValueChange={value => saveCheckpoints(checkpoints.map(item => item.id === cp.id ? { ...item, nfcRequired: value } : item))}
+                      trackColor={{ true: P.info, false: P.b3 }}
+                      thumbColor={P.white}
+                      style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
+                    />
+                    <Text style={[styles.reqState, { color: cp.nfcRequired ? P.info : P.t4 }]}>
+                      {cp.nfcTagId ? (cp.nfcRequired ? 'Required' : 'Paired') : 'Not paired'}
+                    </Text>
+                    <TouchableOpacity style={styles.pairBtn} onPress={() => pairTag(cp)} disabled={pairingId === cp.id}>
+                      {pairingId === cp.id ? <Radio size={14} color={P.info} /> : <ScanLine size={14} color={P.info} />}
+                      <Text style={styles.pairTxt}>{pairingId === cp.id ? 'Scan…' : 'Pair'}</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 <TouchableOpacity onPress={() => handleDelete(cp.id)} style={styles.deleteBtn}>
@@ -181,6 +219,21 @@ export function ManagerCheckpointScreen() {
                 />
               </View>
 
+              <View style={[styles.reqToggleRow, { marginTop: SP.px12 }]}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.fieldLabel}>Require NFC card</Text>
+                  <Text style={styles.nfcHint}>{newNfcTagId ? `Paired card · ${newNfcTagId.slice(-6)}` : 'Pair a tag at this checkpoint'}</Text>
+                </View>
+                <Switch value={newNfcRequired} onValueChange={setNewNfcRequired} disabled={!newNfcTagId} trackColor={{ true: P.info, false: P.b3 }} thumbColor={P.white} />
+              </View>
+              <TouchableOpacity style={styles.pairWideBtn} onPress={async () => {
+                try { setNewNfcTagId(await readNfcTag()); Alert.alert('NFC card paired', 'This tag will be assigned to the new checkpoint.'); }
+                catch (error) { Alert.alert('NFC scan', error.message); }
+              }}>
+                <ScanLine size={16} color={P.info} />
+                <Text style={styles.pairTxt}>{newNfcTagId ? 'Scan a different NFC card' : 'Pair NFC card'}</Text>
+              </TouchableOpacity>
+
               <TouchableOpacity
                 style={[btnPrimary, { marginTop: SP.px20, opacity: saving ? 0.6 : 1 }]}
                 onPress={handleAdd}
@@ -224,6 +277,10 @@ const styles = StyleSheet.create({
   reqRow:         { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
   reqLabel:       { color: P.t3, fontSize: 11 },
   reqState:       { fontSize: 11, fontWeight: '700' },
+  pairBtn:        { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7, paddingVertical: 5, borderRadius: BR.xs, backgroundColor: P.infoSubtle },
+  pairWideBtn:    { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: BR.sm, padding: 11, backgroundColor: P.infoSubtle, marginTop: SP.px8 },
+  pairTxt:        { color: P.info, fontSize: 11, fontWeight: '700' },
+  nfcHint:        { color: P.t3, fontSize: 11, marginTop: -SP.px4, marginBottom: SP.px8 },
   deleteBtn:      { padding: 6, backgroundColor: P.dangerSubtle, borderRadius: BR.xs },
 
   modalOverlay:   { flex: 1, backgroundColor: P.overlay, justifyContent: 'center', paddingHorizontal: SP.px20 },

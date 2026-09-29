@@ -7,8 +7,8 @@
  *    Royal Blue  #1B4FBE  (circular field)
  *    Crimson     #C8232C  (hexagon badge)
  *    Gold        #C9A84C  (laurel wreath)
- *    Near-black  #0B0E14  (outer ring / app background)
- *    White       #FFFFFF  (owl mark)
+ *    Porcelain   #F5F7FA  (app canvas)
+ *    White       #FFFFFF  (surface)
  * ═══════════════════════════════════════════════════════════════
  */
 
@@ -19,12 +19,12 @@ const { width: SW, height: SH } = Dimensions.get('window');
 // ─── 1. PALETTE ───────────────────────────────────────────────────────────────
 
 export const P = {
-  // ── Background scale (dark navy, not pure black)
-  bg0: '#111722',   // graphite navy — app canvas
-  bg1: '#151E2B',   // screen surface
-  bg2: '#1B2738',   // card
-  bg3: '#243349',   // elevated card / input
-  bg4: '#304460',   // active / pressed state
+  // ── Background scale (light, high-contrast operations UI)
+  bg0: '#F4F6FA',   // cool porcelain — app canvas
+  bg1: '#FFFFFF',   // screen surface
+  bg2: '#FFFFFF',   // card
+  bg3: '#F1F4F8',   // elevated card / input
+  bg4: '#E8EDF4',   // active / pressed state
 
   // ── Brand — Royal Blue (logo circular field)
   blue:       '#1B4FBE',
@@ -69,29 +69,29 @@ export const P = {
   dangerBorder:'rgba(239,68,68,0.40)',
   dangerSubtle:'rgba(239,68,68,0.12)',
 
-  info:       '#38BDF8',   // sky blue — informational
-  infoDark:   '#0284C7',
-  infoGlow:   'rgba(56,189,248,0.18)',
-  infoBorder: 'rgba(56,189,248,0.35)',
-  infoSubtle: 'rgba(56,189,248,0.10)',
+  info:       '#1B4FBE',   // logo blue — informational
+  infoDark:   '#143A92',
+  infoGlow:   'rgba(27,79,190,0.14)',
+  infoBorder: 'rgba(27,79,190,0.20)',
+  infoSubtle: 'rgba(27,79,190,0.08)',
 
   // ── Text scale
-  t1: '#F0F4FF',   // primary — near-white with blue tint
-  t2: '#8FA3C8',   // secondary — cool grey
-  t3: '#8291A8',   // muted
-  t4: '#586A83',   // disabled / placeholder
+  t1: '#142033',   // primary — deep blue-black
+  t2: '#46546A',   // secondary
+  t3: '#68768B',   // muted
+  t4: '#8A96A8',   // disabled / placeholder
 
   // ── Borders
-  b1: '#28364A',   // hairline
-  b2: '#34455E',   // subtle border
-  b3: '#435A78',   // visible border
+  b1: '#E9EDF3',   // hairline
+  b2: '#DCE3EC',   // subtle border
+  b3: '#C5CFDC',   // visible border
 
   // ── Utility
   white:       '#FFFFFF',
   black:       '#000000',
   transparent: 'transparent',
-  overlay:     'rgba(10,15,23,0.82)',
-  overlayLight:'rgba(17,23,34,0.58)',
+  overlay:     'rgba(15,23,42,0.50)',
+  overlayLight:'rgba(15,23,42,0.30)',
 };
 
 // ─── 2. SPACING (8px grid) ───────────────────────────────────────────────────
@@ -171,28 +171,28 @@ export const SH_TOKENS = {
   xs: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.35,
-    shadowRadius: 3,
+    shadowOpacity: 0.07,
+    shadowRadius: 4,
     elevation: 2,
   },
   sm: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.45,
-    shadowRadius: 8,
+    shadowOpacity: 0.09,
+    shadowRadius: 10,
     elevation: 4,
   },
   md: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.5,
-    shadowRadius: 14,
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
     elevation: 8,
   },
   lg: {
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.55,
+    shadowOpacity: 0.14,
     shadowRadius: 22,
     elevation: 14,
   },
@@ -238,15 +238,15 @@ export const SH_TOKENS = {
 
 export const GR = {
   // Screen background (subtle top-of-screen blue tint fading to pure dark)
-  screenBg:   ['#0D1526', '#0B0E14'],
+  screenBg:   ['#FFFFFF', '#F4F6FA'],
 
   // Card base
-  card:       ['#131C2E', '#0F1520'],
-  cardHover:  ['#1A2540', '#131C2E'],
+  card:       ['#FFFFFF', '#F8FAFC'],
+  cardHover:  ['#FFFFFF', '#F1F4F8'],
 
   // Blue brand
   blue:       [P.blueLight, P.blueDark],
-  blueSubtle: ['rgba(27,79,190,0.18)', 'rgba(27,79,190,0.04)'],
+  blueSubtle: ['rgba(27,79,190,0.10)', 'rgba(27,79,190,0.02)'],
 
   // Gold
   gold:       [P.goldLight, P.goldDark],
@@ -266,7 +266,7 @@ export const GR = {
   clockGlow:  ['rgba(27,79,190,0.0)', 'rgba(27,79,190,0.28)', 'rgba(27,79,190,0.0)'],
 
   // Header bar
-  header:     ['#0F1520', '#0B0E14'],
+  header:     ['#FFFFFF', '#F7F9FC'],
 };
 
 // ─── 7. ANIMATION CONFIGS ────────────────────────────────────────────────────
@@ -376,7 +376,7 @@ export const STATUS = {
   sos:      { color: P.red,    bg: P.redSubtle,    border: P.redBorder,    label: 'SOS',     dot: P.red    },
   info:     { color: P.info,   bg: P.infoSubtle,   border: P.infoBorder,   label: 'INFO',    dot: P.info   },
   gold:     { color: P.gold,   bg: P.goldSubtle,   border: P.goldBorder,   label: 'ACTIVE',  dot: P.gold   },
-  upcoming: { color: P.t3,     bg: 'rgba(15,21,32,0.6)', border: P.b2,    label: 'UPCOMING',dot: P.t4     },
+  upcoming: { color: P.t3,     bg: '#F1F4F8', border: P.b2,    label: 'UPCOMING',dot: P.t4     },
 };
 
 // Screen dimensions helper

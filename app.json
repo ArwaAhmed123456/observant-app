@@ -5,7 +5,12 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
+    "androidNavigationBar": {
+      "backgroundColor": "#F4F6FA",
+      "barStyle": "dark-content",
+      "enforceContrast": false
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.observant.app",
@@ -21,10 +26,11 @@
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
-      "backgroundColor": "#111722"
+      "backgroundColor": "#F4F6FA"
       },
       "permissions": [
         "CAMERA",
+        "NFC",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "VIBRATE",
@@ -49,6 +55,10 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Observant to use your location for security patrol verification."
         }
+      ],
+      [
+        "react-native-nfc-manager",
+        { "nfcPermission": "Allow Observant to verify assigned patrol checkpoint cards." }
       ]
     ],
     "extra": {

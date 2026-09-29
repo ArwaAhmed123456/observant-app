@@ -57,7 +57,7 @@ export function StatusTile({
       activeOpacity={0.88}
     >
       <LinearGradient
-        colors={active ? ['#141E32', '#0F1626'] : ['#111624', '#0D121D']}
+        colors={active ? ['#FFFFFF', '#F4F6FA'] : ['#FFFFFF', '#F4F6FA']}
         style={StyleSheet.absoluteFillObject}
       />
 

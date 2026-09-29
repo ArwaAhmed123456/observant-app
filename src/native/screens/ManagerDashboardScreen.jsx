@@ -325,7 +325,7 @@ const styles = StyleSheet.create({
   sosBannerTxt:  { color: COLORS.white, fontSize: 14, fontWeight: '800', flex: 1 },
   kpiRow:        { flexDirection: 'row', gap: S.sm, marginBottom: S.lg },
   kpiCard:       { flex: 1, padding: S.md, alignItems: 'center' },
-  kpiVal:        { color: COLORS.white, fontSize: 22, fontWeight: '800' },
+  kpiVal:        { color: COLORS.textPrimary, fontSize: 22, fontWeight: '800' },
   kpiLabel:      { color: COLORS.textMuted, fontSize: 10, marginTop: 2 },
   sectionTitle:  { ...TYPE.label, marginBottom: S.md },
   emptyHint:     { color: COLORS.textDisabled, fontSize: 13, textAlign: 'center', marginTop: S.xl },

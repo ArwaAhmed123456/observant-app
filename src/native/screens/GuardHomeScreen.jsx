@@ -9,6 +9,7 @@ import {
   Alert, Modal, Animated, Vibration, Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 import NetInfo from '@react-native-community/netinfo';
 import {
   AlertOctagon, PhoneCall, ShieldCheck, MapPin, Clock,
@@ -179,6 +180,7 @@ export function GuardHomeScreen({ navigation }) {
 
   return (
     <View style={s.root}>
+      <StatusBar style={showSosConfirm || sosSent ? 'light' : 'dark'} />
       <AppHeader
         right={
           !isOnline ? (
@@ -267,7 +269,7 @@ export function GuardHomeScreen({ navigation }) {
         {/* ── Shift status card ── */}
         {activeSession ? (
           <View style={s.shiftCard}>
-            <LinearGradient colors={['#14213A', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
             <View style={s.shiftCardInner}>
               <View style={s.shiftRow}>
                 <View style={[s.shiftAccent, { backgroundColor: P.ok }]} />
@@ -294,7 +296,7 @@ export function GuardHomeScreen({ navigation }) {
           </View>
         ) : (
           <View style={s.offDutyCard}>
-            <LinearGradient colors={['#141E32', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
             <Text style={s.offDutyLabel}>CURRENTLY OFF DUTY</Text>
             {shiftToday
               ? <Text style={s.offDutyTime}>Next shift: {shiftToday.start} – {shiftToday.end}</Text>
@@ -337,7 +339,7 @@ export function GuardHomeScreen({ navigation }) {
 
         {/* ── NEXT UP OPERATIONS CARD (always populated) ── */}
         <View style={s.nextUpCard}>
-          <LinearGradient colors={['#101C34', '#0B1324']} style={StyleSheet.absoluteFillObject} />
+          <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
           <View style={s.nextUpAccentLine} />
           {activeSession ? (
             <View style={s.nextUpContent}>
@@ -453,7 +455,7 @@ export function GuardHomeScreen({ navigation }) {
       <Modal visible={showSosConfirm} transparent={false} animationType="fade">
         <View style={s.sosFullscreen}>
           <LinearGradient
-            colors={['#4A080C', '#240406', '#0B0E14']}
+            colors={['#7F111B', '#5A0B12', '#3B070A']}
             style={StyleSheet.absoluteFillObject}
           />
 
@@ -527,7 +529,7 @@ export function GuardHomeScreen({ navigation }) {
       <Modal visible={sosSent} transparent={false} animationType="fade">
         <View style={s.sosFullscreen}>
           <LinearGradient
-            colors={['#3B070A', '#1C0305', '#0B0E14']}
+            colors={['#7F111B', '#5A0B12', '#3B070A']}
             style={StyleSheet.absoluteFillObject}
           />
 
@@ -591,7 +593,7 @@ export function GuardHomeScreen({ navigation }) {
       <Modal visible={showBookOff} transparent animationType="slide">
         <View style={s.sheetOverlay}>
           <View style={s.sheet}>
-            <LinearGradient colors={['#162040', '#0F1828']} style={StyleSheet.absoluteFillObject} />
+            <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
             <View style={s.sheetHandle} />
             <Text style={s.sheetTitle}>End Shift?</Text>
             <Text style={s.sheetSub}>
@@ -615,7 +617,7 @@ export function GuardHomeScreen({ navigation }) {
 function StatTile({ value, label, accent, sub }) {
   return (
     <View style={st.wrap}>
-      <LinearGradient colors={['#131C2E', '#0F1520']} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
       <View style={[st.accent, { backgroundColor: accent }]} />
       <Text style={st.value}>{value}</Text>
       <Text style={st.label}>{label}</Text>
@@ -744,7 +746,7 @@ const s = StyleSheet.create({
   sosFabTxt:       { color: P.white, fontSize: 9, fontWeight: '900', letterSpacing: 1.2 },
 
   // Fullscreen SOS Takeover
-  sosFullscreen:   { flex: 1, backgroundColor: '#0B0E14' },
+  sosFullscreen:   { flex: 1, backgroundColor: '#5A0B12' },
   sosTakeoverBody: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: SP.px24, paddingVertical: SP.px48 },
   sosHeroBeacon:   { width: 110, height: 110, borderRadius: 55, borderWidth: 2, borderColor: P.dangerBorder, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', marginBottom: SP.px24, ...SH_TOKENS.danger },
   sosTakeoverTitle:{ ...FONT.h1, color: P.white, textAlign: 'center', letterSpacing: 2, fontSize: 26 },

@@ -56,7 +56,7 @@ export function AppHeader({ right, title, subtitle, style }) {
 const styles = StyleSheet.create({
   wrap: {
     backgroundColor: P.bg1,
-    paddingTop: HEADER_PT,
+    paddingTop: SP.px8,
   },
   inner: {
     flexDirection: 'row',
