@@ -10,6 +10,9 @@
     },
     "preview": {
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://observant-api-zl49.onrender.com"
+      },
       "android": {
         "buildType": "apk"
       },
@@ -19,6 +22,9 @@
     },
     "preview-device": {
       "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://observant-api-zl49.onrender.com"
+      },
       "android": {
         "buildType": "apk"
       },
@@ -28,6 +34,9 @@
     },
     "production": {
       "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://observant-api-zl49.onrender.com"
+      },
       "android": {
         "buildType": "app-bundle"
       }
