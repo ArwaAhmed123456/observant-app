@@ -139,7 +139,11 @@ router.get('/',
       filter.guardId = req.user._id;
     } else {
       if (guardId) filter.guardId = guardId;
-      if (siteId)  filter.siteId  = siteId;
+      if (req.user.role === 'manager') {
+        const allowedSites = req.user.managedSiteIds.map(String);
+        if (siteId && !allowedSites.includes(String(siteId))) filter.siteId = null;
+        else filter.siteId = siteId || { $in: req.user.managedSiteIds };
+      } else if (siteId) filter.siteId = siteId;
     }
 
     if (from || to) {

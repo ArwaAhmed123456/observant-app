@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import logo from '../../assets/logo.png';
+import CheckCallLogPage from './CheckCallLogPage.jsx';
 
 const API = (import.meta.env.VITE_API_URL || 'https://observant-api-zl49.onrender.com').replace(/\/$/, '');
 const STORAGE_KEY = 'observant_admin_session';
@@ -100,6 +101,7 @@ function useProtectedImages(rows, includeImages, token) {
 }
 
 export default function App() {
+  const [activePage, setActivePage] = useState('reports');
   const [session, setSession] = useState(() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch { return null; }
   });
@@ -211,12 +213,13 @@ export default function App() {
   );
 
   return (
-    <div className="portal-shell min-h-screen md:flex">
+    <div className={`portal-shell min-h-screen md:flex ${activePage === 'checklog' ? 'checklog-active' : ''}`}>
       <aside className="sidebar hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white p-5 md:flex">
         <div className="flex items-center gap-3"><img src={logo} alt="" className="h-11 w-11 rounded-xl object-contain" /><div><div className="text-sm font-extrabold tracking-wide text-slate-900">OBSERVANT</div><div className="text-[10px] font-semibold tracking-[.16em] text-amber-700">SECURITY OPERATIONS</div></div></div>
         <div className="mt-10 text-[10px] font-bold uppercase tracking-[.16em] text-slate-400">Workspace</div>
         <div className="nav-item mt-3"><Icon name="grid" size={17} /> Overview</div>
-        <div className="nav-item nav-item-active mt-1"><Icon name="report" size={17} /> Shift & patrol reports</div>
+        <button className={`nav-item mt-1 ${activePage === 'reports' ? 'nav-item-active' : ''}`} type="button" onClick={() => setActivePage('reports')}><Icon name="report" size={17} /> Shift & patrol reports</button>
+        <button className={`nav-item mt-1 ${activePage === 'checklog' ? 'nav-item-active' : ''}`} type="button" onClick={() => setActivePage('checklog')}><Icon name="calendar" size={17} /> Check Call Log</button>
         <div className="nav-item mt-1"><Icon name="calendar" size={17} /> Schedules</div>
         <div className="mt-auto rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex items-center gap-2 text-xs font-bold text-slate-700"><span className="live-dot" /> LIVE OPERATIONS</div>
@@ -227,14 +230,14 @@ export default function App() {
       <main className="min-w-0 flex-1">
         <header className="topbar flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4 md:px-8">
           <div className="flex items-center gap-3 md:hidden"><img src={logo} alt="" className="h-9 w-9 object-contain" /><span className="text-sm font-extrabold tracking-wide">OBSERVANT</span></div>
-          <div className="hidden md:block"><div className="text-xs font-semibold uppercase tracking-[.14em] text-slate-400">Operations / Reporting</div><div className="mt-1 text-sm font-semibold text-slate-700">Shift & Patrol Reports</div></div>
+          <div className="hidden md:block"><div className="text-xs font-semibold uppercase tracking-[.14em] text-slate-400">Operations / Reporting</div><div className="mt-1 text-sm font-semibold text-slate-700">{activePage === 'checklog' ? 'Check Call Log' : 'Shift & Patrol Reports'}</div></div>
           <div className="flex items-center gap-3">
             <div className="hidden text-right sm:block"><div className="text-sm font-bold text-slate-800">{session.user?.name || 'Operations Admin'}</div><div className="text-xs capitalize text-slate-500">{session.user?.role || 'administrator'}</div></div>
             <button className="icon-button" onClick={signOut} title="Sign out" aria-label="Sign out"><Icon name="logout" /></button>
           </div>
         </header>
 
-        <div className="page-content mx-auto max-w-[1600px] px-4 py-6 md:px-8 md:py-8">
+        {activePage === 'checklog' ? <div className="page-content mx-auto max-w-[1600px] px-4 py-6 md:px-8 md:py-8"><CheckCallLogPage session={session} /></div> : <div className="page-content mx-auto max-w-[1600px] px-4 py-6 md:px-8 md:py-8">
           <section className="page-heading flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
             <div><p className="eyebrow">SECURITY OPERATIONS</p><h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">Shift call & patrol reports</h1><p className="mt-2 max-w-2xl text-sm text-slate-500">Review activity, tailor the report columns, and print an executive-ready site record.</p></div>
             <button className="primary-button print-trigger" onClick={printReport} disabled={!visibleRows.length || imagesLoading}><Icon name="print" size={17} /> {imagesLoading ? 'Preparing images…' : 'Print report'}</button>
@@ -292,7 +295,7 @@ export default function App() {
             )}
           </section>
           <footer className="screen-footer mt-5 flex flex-wrap justify-between gap-2 text-[11px] text-slate-400"><span>Observant Security · Confidential operational report</span><span>Generated {prettyDate(new Date())}</span></footer>
-        </div>
+        </div>}
       </main>
       {imagePreview && <div className="image-modal" role="dialog" aria-modal="true" onClick={() => setImagePreview(null)}><button className="modal-close" aria-label="Close image"><Icon name="close" /></button><img src={imagePreview.src} alt={imagePreview.name} onClick={event => event.stopPropagation()} /><p>{imagePreview.name}</p></div>}
     </div>
