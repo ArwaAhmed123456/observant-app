@@ -130,6 +130,7 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
 
     const rowsByKey = new Map();
     const sessionToRow = new Map();
+    const reportSessionIds = new Set(sessions.map(session => String(session._id)));
     const ensureRow = values => {
       const type = values.shiftType;
       if (requestedShiftType && type.toLowerCase() !== String(requestedShiftType).toLowerCase()) return null;
@@ -152,10 +153,12 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       if (row) sessionToRow.set(String(session._id), row);
     });
 
-    const windowMinutes = Math.max(0, Number(organisation?.settings?.checkCallWindowMinutes ?? 10));
+    const configuredWindow = Number(organisation?.settings?.checkCallWindowMinutes ?? 10);
+    const windowMinutes = Number.isFinite(configuredWindow) ? Math.max(0, configuredWindow) : 10;
     checkCalls.forEach(call => {
       if (!call.guardId || !call.siteId) return;
       let row = call.sessionId ? sessionToRow.get(String(call.sessionId)) : null;
+      if (call.sessionId && reportSessionIds.has(String(call.sessionId)) && !row) return;
       if (!row) {
         const activityTime = call.respondedAt || call.firedAt;
         const hour = activityTime.getUTCHours();
