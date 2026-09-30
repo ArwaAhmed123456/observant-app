@@ -14,7 +14,7 @@ import { readNfcTag } from '../../services/nfc';
 
 export function PatrolScreen() {
   const {
-    currentUser, sites, getGuardActiveSession, getSiteCheckpoints,
+    currentUser, sites, getGuardActiveSession, getSiteCheckpoints, getTodayRoster,
     activePatrol, startPatrol, captureCheckpoint, finishPatrol,
     getPatrolCaptures, getTodayPatrols,
   } = useApp();
@@ -26,7 +26,11 @@ export function PatrolScreen() {
 
   const activeSession = getGuardActiveSession(currentUser.id);
   const site          = sites.find(s => s.id === currentUser.siteId);
-  const checkpoints   = getSiteCheckpoints(currentUser.siteId);
+  const assignedIds = activePatrol?.assignedCheckpointIds?.length
+    ? activePatrol.assignedCheckpointIds
+    : getTodayRoster(currentUser.id)?.checkpointIds || [];
+  const siteCheckpoints = getSiteCheckpoints(currentUser.siteId);
+  const checkpoints = assignedIds.length ? siteCheckpoints.filter(checkpoint => assignedIds.includes(checkpoint.id)) : siteCheckpoints;
   const todayPatrols  = getTodayPatrols(currentUser.id);
   const captures      = activePatrol ? getPatrolCaptures(activePatrol.id) : [];
   const capturedIds   = captures.map(c => c.checkpointId);

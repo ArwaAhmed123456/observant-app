@@ -12,18 +12,26 @@ export function StatusTile({
   site,
   todayCheckCalls = [],
   todayPatrols = [],
+  latestCheckCall,
+  latestPatrol: latestPatrolRecord,
   onPress,
   onManualLog,
 }) {
   const missedCount = todayCheckCalls.filter(cc => cc.response === 'missed').length;
   const issueCount = todayCheckCalls.filter(cc => cc.response === 'no').length;
   const completedCount = todayCheckCalls.filter(cc => cc.response === 'yes').length;
-  const lastCC = [...todayCheckCalls].sort((a, b) => new Date(b.firedAt) - new Date(a.firedAt))[0];
+  const lastCC = latestCheckCall || [...todayCheckCalls].sort((a, b) => new Date(b.firedAt) - new Date(a.firedAt))[0];
+  const lastPatrol = latestPatrolRecord || [...todayPatrols].sort((a, b) => new Date(b.finishedAt || b.startedAt) - new Date(a.finishedAt || a.startedAt))[0];
+  const checkCallAt = lastCC?.respondedAt || lastCC?.firedAt;
+  const patrolAt = lastPatrol?.finishedAt || lastPatrol?.startedAt;
+  const lastActivity = checkCallAt && (!patrolAt || new Date(checkCallAt) >= new Date(patrolAt))
+    ? { label: 'Check call', at: checkCallAt, color: lastCC.response === 'yes' ? P.ok : lastCC.response === 'missed' ? P.danger : P.warn }
+    : patrolAt ? { label: 'Patrol', at: patrolAt, color: P.blueLight } : null;
   const finishedPatrols = todayPatrols.filter(p => p.finishedAt).length;
 
   // Determine accent color for the left-edge bar
   let accentColor = P.t4;
-  let statusLabel = 'OFF DUTY';
+  let statusLabel = 'BOOKED OFF';
   let badgeBg = 'rgba(255,255,255,0.04)';
   let badgeBorder = P.b2;
   let statusTextColor = P.t3;
@@ -43,7 +51,7 @@ export function StatusTile({
       statusTextColor = P.warn;
     } else {
       accentColor = P.ok;
-      statusLabel = 'ON DUTY';
+      statusLabel = 'BOOKED ON';
       badgeBg = P.okSubtle;
       badgeBorder = P.okBorder;
       statusTextColor = P.ok;
@@ -119,16 +127,13 @@ export function StatusTile({
             </Text>
           </View>
 
-          {lastCC && (
+          {lastActivity && (
             <>
               <View style={styles.metricDivider} />
               <View style={styles.metricItem}>
-                <Text style={styles.metricSub}>Last: </Text>
-                <Text style={[
-                  styles.metricVal,
-                  { color: lastCC.response === 'yes' ? P.ok : lastCC.response === 'missed' ? P.danger : P.warn }
-                ]}>
-                  {formatTime(lastCC.firedAt)}
+                <Text style={styles.metricSub}>Last {lastActivity.label.toLowerCase()}: </Text>
+                <Text style={[styles.metricVal, { color: lastActivity.color }]}>
+                  {formatTime(lastActivity.at)}
                 </Text>
               </View>
             </>

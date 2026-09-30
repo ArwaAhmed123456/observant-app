@@ -35,7 +35,7 @@ const DEFAULT_DAYS = { mon:null,tue:null,wed:null,thu:null,fri:null,sat:null,sun
 
 export function ManagerRosterScreen() {
   const {
-    currentUser, users, sites, publishRoster,
+    currentUser, users, sites, checkpoints, publishRoster,
     getWeekRosters, getGuardRoster,
     rosterTemplates, saveRosterTemplate, deleteRosterTemplate,
   } = useApp();
@@ -43,6 +43,7 @@ export function ManagerRosterScreen() {
   const [weekStart, setWeekStart]         = useState(getMondayOfWeek(new Date()));
   const [selectedGuard, setSelectedGuard] = useState(null);
   const [editDays, setEditDays]           = useState({ ...DEFAULT_DAYS });
+  const [editCheckpointIds, setEditCheckpointIds] = useState([]);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [timeModal, setTimeModal]         = useState(null);
   const [startTime, setStartTime]         = useState('18:00');
@@ -62,12 +63,18 @@ export function ManagerRosterScreen() {
     setSelectedGuard(guard);
     const existing = getGuardRoster(guard.id, weekKey);
     setEditDays(existing?.days ? { ...DEFAULT_DAYS, ...existing.days } : { ...DEFAULT_DAYS });
+    setEditCheckpointIds(existing?.checkpointIds || []);
     setEditModalVisible(true);
   };
 
   const confirmTime = () => {
     if (!timeModal) return;
-    if (!/^\d{2}:\d{2}$/.test(startTime) || !/^\d{2}:\d{2}$/.test(endTime)) {
+    const validTime = value => {
+      if (!/^\d{2}:\d{2}$/.test(value)) return false;
+      const [hours, minutes] = value.split(':').map(Number);
+      return hours < 24 && minutes < 60;
+    };
+    if (!validTime(startTime) || !validTime(endTime) || startTime === endTime) {
       Alert.alert('Invalid time', 'Use HH:MM format (e.g. 18:00)');
       return;
     }
@@ -77,28 +84,44 @@ export function ManagerRosterScreen() {
 
   const handleSaveRoster = async () => {
     if (!selectedGuard) return;
+    const workDays = DAY_KEYS.filter(key => editDays[key]);
+    if (!workDays.length) return Alert.alert('Add a shift first', 'Choose at least one working day before publishing this rota.');
     setPublishing(true);
-    await publishRoster({
-      guardId: selectedGuard.id,
-      siteId: selectedGuard.siteId,
-      weekStartDate: weekKey,
-      days: editDays,
-      publishedBy: currentUser.id,
-      publishedAt: new Date().toISOString(),
-    });
-    setPublishing(false);
-    setEditModalVisible(false);
-    Alert.alert('Published', `Schedule for ${selectedGuard.name} has been saved.`);
+    try {
+      const saved = await publishRoster({
+        guardId: selectedGuard.id,
+        siteId: selectedGuard.siteId,
+        weekStartDate: weekKey,
+        days: editDays,
+        checkpointIds: editCheckpointIds,
+        publishedBy: currentUser.id,
+        publishedAt: new Date().toISOString(),
+      });
+      setEditModalVisible(false);
+      const summary = workDays.map(key => `${DAY_LABELS[DAY_KEYS.indexOf(key)]} ${editDays[key].start}–${editDays[key].end}`).join(', ');
+      const notification = saved?.id?.startsWith('ro_')
+        ? `Demo notification preview for ${selectedGuard.name}: ${summary}.`
+        : saved?.notifiedAt
+          ? `${selectedGuard.name} was notified: ${summary}.`
+          : `The rota was saved, but no push was sent because the guard has no registered device: ${summary}.`;
+      Alert.alert('Rota published', `${notification}\n${editCheckpointIds.length} patrol checkpoint${editCheckpointIds.length === 1 ? '' : 's'} assigned.`);
+    } catch (error) {
+      Alert.alert('Could not publish rota', error.message || 'Check your connection and try again.');
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const handleLoadTemplate = (template) => {
     setEditDays({ ...DEFAULT_DAYS, ...template.days });
+    const siteCheckpointIds = new Set((checkpoints || []).filter(checkpoint => checkpoint.siteId === selectedGuard?.siteId).map(checkpoint => checkpoint.id));
+    setEditCheckpointIds((template.checkpointIds || []).filter(id => siteCheckpointIds.has(id)));
     setTemplateModal(false);
   };
 
   const handleSaveTemplate = async () => {
     if (!templateName.trim()) { Alert.alert('Name required'); return; }
-    await saveRosterTemplate({ name: templateName.trim(), guardId: selectedGuard?.id, days: editDays });
+    await saveRosterTemplate({ name: templateName.trim(), guardId: selectedGuard?.id, days: editDays, checkpointIds: editCheckpointIds });
     setTemplateName('');
     setSaveTemplateModal(false);
   };
@@ -107,7 +130,8 @@ export function ManagerRosterScreen() {
     <View style={styles.root}>
       <AppHeader />
       <View style={styles.content}>
-        <Text style={styles.screenTitle}>Weekly Roster</Text>
+        <Text style={styles.screenTitle}>Shift Scheduler</Text>
+        <Text style={styles.screenIntro}>Plan guard coverage, checkpoints, and notifications for the week.</Text>
 
         {/* Week nav */}
         <View style={styles.weekNav}>
@@ -149,17 +173,18 @@ export function ManagerRosterScreen() {
                     <Text style={styles.guardName}>{guard.name}</Text>
                     <Text style={styles.guardSite}>{site?.name}</Text>
                     {roster ? (
-                      <View style={styles.dayPills}>
-                        {DAY_KEYS.map((k, i) => (
-                          <View
-                            key={k}
-                            style={[styles.dayPill, roster.days?.[k] && styles.dayPillActive]}
-                          >
-                            <Text style={[styles.dayPillTxt, roster.days?.[k] && styles.dayPillTxtActive]}>
-                              {DAY_LABELS[i].charAt(0)}
-                            </Text>
-                          </View>
-                        ))}
+                      <View>
+                        <View style={styles.dayPills}>
+                          {DAY_KEYS.map((k, i) => (
+                            <View key={k} style={[styles.dayPill, roster.days?.[k] && styles.dayPillActive]}>
+                              <Text style={[styles.dayPillTxt, roster.days?.[k] && styles.dayPillTxtActive]}>{DAY_LABELS[i].charAt(0)}</Text>
+                            </View>
+                          ))}
+                        </View>
+                        <Text style={styles.rotaSummary} numberOfLines={2}>
+                          {DAY_KEYS.filter(key => roster.days?.[key]).map(key => `${DAY_LABELS[DAY_KEYS.indexOf(key)]} ${roster.days[key].start}–${roster.days[key].end}`).join('  ·  ')}
+                        </Text>
+                        {!!roster.checkpointIds?.length && <Text style={styles.rotaSummary}>{roster.checkpointIds.length} assigned checkpoint{roster.checkpointIds.length === 1 ? '' : 's'}</Text>}
                       </View>
                     ) : (
                       <Text style={styles.noRoster}>No schedule published</Text>
@@ -230,6 +255,33 @@ export function ManagerRosterScreen() {
                     </View>
                   );
                 })}
+                <View style={styles.checkpointSection}>
+                  <View style={styles.checkpointHeading}>
+                    <Text style={styles.modalSub}>SITE CHECKPOINTS</Text>
+                    <Text style={styles.checkpointCount}>{editCheckpointIds.length} selected</Text>
+                  </View>
+                  {(checkpoints || []).filter(checkpoint => checkpoint.siteId === selectedGuard?.siteId && checkpoint.active !== false).length === 0 ? (
+                    <Text style={styles.emptyHint}>No active checkpoints are configured for this guard’s site.</Text>
+                  ) : (checkpoints || []).filter(checkpoint => checkpoint.siteId === selectedGuard?.siteId && checkpoint.active !== false).map((checkpoint, index) => {
+                    const selected = editCheckpointIds.includes(checkpoint.id);
+                    return (
+                      <TouchableOpacity
+                        key={checkpoint.id}
+                        style={styles.checkpointRow}
+                        onPress={() => setEditCheckpointIds(previous => selected ? previous.filter(id => id !== checkpoint.id) : [...previous, checkpoint.id])}
+                      >
+                        <View style={[styles.checkpointMarker, selected && styles.checkpointMarkerSelected]}>
+                          <Text style={[styles.checkpointMarkerText, selected && styles.checkpointMarkerTextSelected]}>{selected ? '✓' : index + 1}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.checkpointName}>{checkpoint.name}</Text>
+                          <Text style={styles.checkpointMeta}>{checkpoint.nfcRequired ? 'NFC verification' : checkpoint.required ? 'Required photo' : 'Optional checkpoint'}</Text>
+                        </View>
+                        <Switch value={selected} onValueChange={() => setEditCheckpointIds(previous => selected ? previous.filter(id => id !== checkpoint.id) : [...previous, checkpoint.id])} />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
               </ScrollView>
 
               <TouchableOpacity
@@ -238,7 +290,7 @@ export function ManagerRosterScreen() {
                 disabled={publishing}
               >
                 <Send color={P.black} size={15} />
-                <Text style={styles.publishBtnTxt}>{publishing ? 'Saving...' : 'Save & Publish'}</Text>
+                <Text style={styles.publishBtnTxt}>{publishing ? 'Publishing…' : 'Publish & Notify Rota'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -332,18 +384,30 @@ const styles = StyleSheet.create({
   root:          { flex: 1, backgroundColor: P.bg0 },
   content:       { flex: 1, padding: SP.px20 },
   screenTitle:   { ...FONT.h2, marginBottom: SP.px16 },
+  screenIntro:   { color: P.t3, fontSize: 13, lineHeight: 18, marginTop: -SP.px12, marginBottom: SP.px16 },
 
   weekNav:       { flexDirection: 'row', alignItems: 'center', marginBottom: SP.px16 },
   navBtn:        { padding: 8, backgroundColor: P.bg2, borderRadius: BR.sm, borderWidth: 1, borderColor: P.b2 },
   weekLabel:     { flex: 1, color: P.t1, fontSize: 13, fontWeight: '600', textAlign: 'center' },
 
   emptyHint:     { color: P.t3, fontSize: 13, textAlign: 'center', marginTop: SP.px16 },
+  checkpointSection:{ marginTop: SP.px16, paddingTop: SP.px16, borderTopWidth: 1, borderTopColor: P.b1 },
+  checkpointHeading:{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SP.px8 },
+  checkpointCount:{ color: P.info, fontSize: 11, fontWeight: '700' },
+  checkpointRow:{ flexDirection: 'row', alignItems: 'center', gap: SP.px12, paddingVertical: SP.px10, borderBottomWidth: 1, borderBottomColor: P.b1 },
+  checkpointMarker:{ width: 30, height: 30, borderRadius: 15, backgroundColor: P.bg3, alignItems: 'center', justifyContent: 'center' },
+  checkpointMarkerSelected:{ backgroundColor: P.okSubtle, borderWidth: 1, borderColor: P.okBorder },
+  checkpointMarkerText:{ color: P.t3, fontSize: 12, fontWeight: '700' },
+  checkpointMarkerTextSelected:{ color: P.ok },
+  checkpointName:{ color: P.t1, fontSize: 13, fontWeight: '700' },
+  checkpointMeta:{ color: P.t3, fontSize: 11, marginTop: 2 },
 
   guardRow:      { ...card, flexDirection: 'row', alignItems: 'center', padding: SP.px16, marginBottom: SP.px8, overflow: 'hidden' },
   guardAccent:   { position: 'absolute', left: 0, top: 0, bottom: 0, width: 4, borderTopLeftRadius: BR.lg, borderBottomLeftRadius: BR.lg },
   guardName:     { color: P.t1, fontSize: 15, fontWeight: '700' },
   guardSite:     { color: P.t3, fontSize: 12, marginBottom: 8 },
   dayPills:      { flexDirection: 'row', gap: 4 },
+  rotaSummary:   { color: P.t3, fontSize: 10, marginTop: 5, fontVariant: ['tabular-nums'] },
   dayPill:       { width: 22, height: 22, borderRadius: 11, backgroundColor: P.bg3, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: P.b2 },
   dayPillActive: { backgroundColor: P.okSubtle, borderColor: P.okBorder },
   dayPillTxt:    { color: P.t4, fontSize: 9, fontWeight: '800' },

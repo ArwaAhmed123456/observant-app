@@ -114,11 +114,11 @@ export function normalizeCheckCall(value) {
 export function normalizePatrol(value) {
   const captures = (value.captures || []).map(capture => ({ ...capture, id: idOf(capture), patrolId: idOf(value), checkpointId: idOf(capture.checkpointId), photoUri: capture.photoUrl || capture.photoUri }));
   const captured = (value.capturedCheckpointIds || value.checkpointsCaptured || captures.map(capture => capture.checkpointId)).map(idOf);
-  return { ...value, id: idOf(value), sessionId: idOf(value.shiftSessionId || value.sessionId), guardId: idOf(value.guardId), siteId: idOf(value.siteId), finishedAt: value.finishedAt || null, checkpointsCaptured: captured, missingCheckpoints: (value.missingCheckpointIds || value.missingCheckpoints || []).map(idOf), captures };
+  return { ...value, id: idOf(value), sessionId: idOf(value.shiftSessionId || value.sessionId), guardId: idOf(value.guardId), siteId: idOf(value.siteId), assignedCheckpointIds: (value.assignedCheckpointIds || []).map(idOf), finishedAt: value.finishedAt || null, checkpointsCaptured: captured, missingCheckpoints: (value.missingCheckpointIds || value.missingCheckpoints || []).map(idOf), captures };
 }
 
 export function normalizeRoster(value) {
-  return { ...value, id: idOf(value), guardId: idOf(value.guardId), siteId: idOf(value.siteId), days: value.days || {} };
+  return { ...value, id: idOf(value), guardId: idOf(value.guardId), siteId: idOf(value.siteId), checkpointIds: (value.checkpointIds || []).map(idOf), days: value.days || {} };
 }
 
 export function normalizeAlert(value) {

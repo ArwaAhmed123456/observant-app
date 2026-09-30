@@ -13,7 +13,7 @@
  */
 const router = require('express').Router();
 const { body } = require('express-validator');
-const { ShiftRoster, RosterTemplate, User } = require('../models');
+const { ShiftRoster, RosterTemplate, User, PatrolCheckpoint } = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
 const validate     = require('../middleware/validate');
 const asyncHandler = require('../utils/asyncHandler');
@@ -49,16 +49,23 @@ router.post('/',
     body('siteId').isMongoId(),
     body('weekStartDate').matches(/^\d{4}-\d{2}-\d{2}$/).withMessage('weekStartDate must be YYYY-MM-DD'),
     body('days').isObject(),
+    body('checkpointIds').optional().isArray(),
+    body('checkpointIds.*').optional().isMongoId(),
   ],
   validate,
   asyncHandler(async (req, res) => {
     const { guardId, siteId, weekStartDate, days } = req.body;
+    const checkpointIds = [...new Set((Array.isArray(req.body.checkpointIds) ? req.body.checkpointIds : []).map(String))];
     const orgId = req.user.organisationId;
 
     const guard = await User.findOne({ _id: guardId, organisationId: orgId, role: 'guard', active: true }).select('name fcmToken siteId');
     if (!guard) return res.status(404).json({ error: 'Active guard not found in this organisation.' });
     if (String(guard.siteId) !== String(siteId)) return res.status(400).json({ error: 'Roster site must match the guard assigned site.' });
     if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(siteId))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
+    if (checkpointIds.length) {
+      const validCount = await PatrolCheckpoint.countDocuments({ _id: { $in: checkpointIds }, organisationId: orgId, siteId, active: true });
+      if (validCount !== checkpointIds.length) return res.status(400).json({ error: 'One or more selected checkpoints are not active at this site.' });
+    }
 
     const roster = await ShiftRoster.findOneAndUpdate(
       { organisationId: orgId, guardId, weekStartDate },
@@ -66,6 +73,7 @@ router.post('/',
         organisationId: orgId,
         guardId,
         siteId,
+        checkpointIds,
         publishedBy:    req.user._id,
         weekStartDate,
         days,
@@ -77,13 +85,13 @@ router.post('/',
     // Send FCM push to guard
     if (guard?.fcmToken) {
       const workedDays = Object.entries(days)
-        .filter(([, v]) => v)
-        .map(([k]) => k.charAt(0).toUpperCase() + k.slice(1))
+        .filter(([, shift]) => shift)
+        .map(([key, shift]) => `${key.charAt(0).toUpperCase() + key.slice(1)} ${shift.start}–${shift.end}`)
         .join(', ');
 
       await fcm.sendPush([guard.fcmToken], {
         title: '📅 Your schedule is ready',
-        body:  `Your shifts for the week of ${weekStartDate} have been published (${workedDays}).`,
+        body:  `Your shifts for the week of ${weekStartDate}: ${workedDays}.${checkpointIds.length ? ` ${checkpointIds.length} patrol checkpoints assigned.` : ''}`,
         data:  { type: 'roster_published', rosterId: roster._id.toString(), weekStartDate },
       });
       await ShiftRoster.findByIdAndUpdate(roster._id, { notifiedAt: new Date() });
@@ -139,15 +147,25 @@ router.post('/templates',
   [
     body('name').trim().notEmpty(),
     body('days').isObject(),
+    body('checkpointIds').optional().isArray(),
+    body('checkpointIds.*').optional().isMongoId(),
   ],
   validate,
   asyncHandler(async (req, res) => {
     const { name, days, guardId } = req.body;
+    const checkpointIds = [...new Set((Array.isArray(req.body.checkpointIds) ? req.body.checkpointIds : []).map(String))];
+    if (checkpointIds.length) {
+      const filter = { _id: { $in: checkpointIds }, organisationId: req.user.organisationId, active: true };
+      if (req.user.role === 'manager') filter.siteId = { $in: req.user.managedSiteIds };
+      const validCount = await PatrolCheckpoint.countDocuments(filter);
+      if (validCount !== checkpointIds.length) return res.status(400).json({ error: 'One or more template checkpoints are not active in this organisation.' });
+    }
     const template = await RosterTemplate.create({
       organisationId: req.user.organisationId,
       createdBy:      req.user._id,
       name,
       days,
+      checkpointIds,
       guardId:        guardId || null,
     });
     res.status(201).json({ template });

@@ -181,12 +181,13 @@ export function AppProvider({ children }) {
     if (!API_ENABLED || !currentUser) return undefined;
     const refreshOperations = async () => {
       try {
-        const [shifts, calls, patrols, alerts, prompts] = await Promise.all([
+        const [shifts, calls, patrols, alerts, prompts, rostersResult] = await Promise.all([
           apiGet('/api/shifts?limit=100'),
           apiGet('/api/check-calls?limit=100'),
           apiGet('/api/patrols?limit=100'),
           currentUser.role === 'guard' ? Promise.resolve({ alerts: [] }) : apiGet('/api/alerts?limit=100'),
           apiGet('/api/patrols/random-prompt?limit=100'),
+          apiGet('/api/rosters'),
         ]);
         setShiftSessions((shifts.sessions || []).map(normalizeSession));
         const activeShift = (shifts.sessions || []).find(session => idOf(session.guardId) === currentUser.id && !session.bookedOffAt);
@@ -197,6 +198,7 @@ export function AppProvider({ children }) {
         setActiveCheckCall(pending || null);
         const patrolList = (patrols.patrols || []).map(normalizePatrol);
         setPatrolSessions(patrolList);
+        setRosters((rostersResult.rosters || []).map(normalizeRoster));
         const active = patrolList.find(patrol => patrol.guardId === currentUser.id && patrol.status === 'in_progress');
         if (active && !activePatrol) {
           const detail = await apiGet(`/api/patrols/${active.id}`);
@@ -1122,7 +1124,9 @@ export function AppProvider({ children }) {
     const patrol = allPatrols.find(p => p.id === patrolId);
     if (!patrol) return;
 
-    const siteCheckpoints = checkpoints.filter(cp => cp.siteId === patrol.siteId && (cp.required || cp.nfcRequired));
+    const rosterCheckpointIds = getTodayRoster(patrol.guardId)?.checkpointIds || [];
+    const assignedIds = patrol.assignedCheckpointIds?.length ? patrol.assignedCheckpointIds : rosterCheckpointIds;
+    const siteCheckpoints = checkpoints.filter(cp => cp.siteId === patrol.siteId && (cp.required || cp.nfcRequired) && (!assignedIds.length || assignedIds.includes(cp.id)));
     const missing = siteCheckpoints
       .filter(cp => !(patrol.checkpointsCaptured || []).includes(cp.id))
       .map(cp => cp.id);
@@ -1169,7 +1173,7 @@ export function AppProvider({ children }) {
     }
 
     return { incomplete: false, patrol: updatedPatrols.find(p => p.id === patrolId) };
-  }, [checkpoints, users, sites, addAlert, scheduleNextPatrolTimer, activePatrol]);
+  }, [checkpoints, users, sites, addAlert, scheduleNextPatrolTimer, activePatrol, getTodayRoster]);
 
   // ─── Shift-end warning ────────────────────────────────────────────────────
   const startShiftEndTimer = useCallback((session) => {

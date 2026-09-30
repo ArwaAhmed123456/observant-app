@@ -10,6 +10,8 @@ const rosterTemplateSchema = new mongoose.Schema({
   name:    { type: String, required: true, trim: true },
   // Optionally linked to a guard (personal template) or null (generic)
   guardId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  checkpointIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'PatrolCheckpoint' }],
+  checkpointIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'PatrolCheckpoint' }],
 
   days: {
     mon: { start: String, end: String },

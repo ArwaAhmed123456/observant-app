@@ -26,6 +26,7 @@ const patrolSessionSchema = new mongoose.Schema({
 
   // IDs of checkpoints that were captured
   capturedCheckpointIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'PatrolCheckpoint' }],
+  assignedCheckpointIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'PatrolCheckpoint' }],
   // IDs of required checkpoints that were NOT captured on finish
   missingCheckpointIds:  [{ type: mongoose.Schema.Types.ObjectId, ref: 'PatrolCheckpoint' }],
 

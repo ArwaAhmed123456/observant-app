@@ -106,6 +106,11 @@ export function ManagerDashboardScreen({ navigation }) {
       return new Date(b.createdAt) - new Date(a.createdAt);
     });
 
+  const priorityAlerts = mgrAlerts.filter(alert =>
+    ['sos', 'check_call_missed', 'check_call_issue', 'geofence_warning', 'patrol_missing_checkpoints'].includes(alert.type)
+      && !alert.read
+  ).slice(0, 3);
+
   return (
     <View style={styles.root}>
       <AppHeader right={
@@ -116,6 +121,7 @@ export function ManagerDashboardScreen({ navigation }) {
               <Text style={styles.sosBadgeTxt}>SOS</Text>
             </View>
           )}
+
           <TouchableOpacity style={styles.alertIconBtn} onPress={() => setTab('alerts')}>
             <Bell color={unread.length > 0 ? COLORS.missed : COLORS.textMuted} size={22} />
             {unread.length > 0 && (
@@ -158,6 +164,34 @@ export function ManagerDashboardScreen({ navigation }) {
             </TouchableOpacity>
           )}
 
+          {priorityAlerts.length > 0 && (
+            <View style={styles.priorityAlerts}>
+              <View style={styles.priorityHeader}>
+                <AlertTriangle color={P.danger} size={16} />
+                <Text style={styles.priorityTitle}>Alert Center</Text>
+                <Text style={styles.priorityCount}>{priorityAlerts.length} active</Text>
+              </View>
+              {priorityAlerts.map(alert => {
+                const critical = alert.type === 'sos';
+                const accent = critical ? P.danger : alert.type === 'check_call_missed' || alert.type === 'check_call_issue' ? P.warn : P.info;
+                return (
+                  <TouchableOpacity
+                    key={alert.id || alert._id}
+                    style={[styles.priorityCard, { borderLeftColor: accent, backgroundColor: critical ? P.dangerSubtle : P.warnSubtle }]}
+                    onPress={() => setTab('alerts')}
+                    activeOpacity={0.82}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.priorityCardTitle, { color: accent }]} numberOfLines={1}>{alert.title || 'Security alert'}</Text>
+                      <Text style={styles.priorityCardDetail} numberOfLines={2}>{alert.message || 'Review this operational alert.'}</Text>
+                    </View>
+                    <Text style={styles.priorityCardTime}>{formatTime(alert.createdAt)}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
           {/* KPI row */}
           <View style={styles.kpiRow}>
             <KPICard value={todayStats.activeGuards}    label="On Duty"   />
@@ -166,7 +200,7 @@ export function ManagerDashboardScreen({ navigation }) {
             <KPICard value={todayStats.completedPatrols} label="Patrols"  />
           </View>
 
-          <Text style={styles.sectionTitle}>DEPLOYED OFFICERS ({guards.length})</Text>
+          <Text style={styles.sectionTitle}>LIVE GUARD STATUS ({guards.length})</Text>
           {guards.length === 0 ? (
             <EmptyState
               icon="shield"
@@ -180,6 +214,8 @@ export function ManagerDashboardScreen({ navigation }) {
               const site         = sites.find(s => s.id === guard.siteId || s._id === guard.siteId);
               const todayCC      = (checkCalls || []).filter(cc => (cc.guardId === guard.id || cc.guardId === guard._id) && cc.firedAt?.startsWith(todayStr));
               const todayPatrols = (patrolSessions || []).filter(ps => (ps.guardId === guard.id || ps.guardId === guard._id) && ps.startedAt?.startsWith(todayStr));
+              const latestCheckCall = (checkCalls || []).filter(cc => cc.guardId === (guard.id || guard._id)).sort((a, b) => new Date(b.respondedAt || b.firedAt) - new Date(a.respondedAt || a.firedAt))[0];
+              const latestPatrol = (patrolSessions || []).filter(ps => ps.guardId === (guard.id || guard._id)).sort((a, b) => new Date(b.finishedAt || b.startedAt) - new Date(a.finishedAt || a.startedAt))[0];
 
               return (
                 <StatusTile
@@ -190,6 +226,8 @@ export function ManagerDashboardScreen({ navigation }) {
                   site={site}
                   todayCheckCalls={todayCC}
                   todayPatrols={todayPatrols}
+                  latestCheckCall={latestCheckCall}
+                  latestPatrol={latestPatrol}
                   onPress={() => navigation?.navigate('GuardCheckCallPath', { guardId: guard.id || guard._id })}
                   onManualLog={(g) => setManualGuard(g)}
                 />
@@ -322,6 +360,14 @@ const styles = StyleSheet.create({
   scroll:        { flex: 1, paddingHorizontal: S.xl },
   greeting:      { color: COLORS.textPrimary, fontSize: 18, fontWeight: '800', marginTop: S.sm, marginBottom: S.sm },
   sosBanner:     { flexDirection: 'row', alignItems: 'center', gap: S.sm, backgroundColor: COLORS.sos, borderRadius: R.md, padding: S.lg, marginBottom: S.md, ...shadows.sos },
+  priorityAlerts:{ backgroundColor: COLORS.bgCard, borderColor: P.dangerBorder, borderWidth: 1, borderRadius: R.md, padding: S.md, marginBottom: S.md },
+  priorityHeader:{ flexDirection: 'row', alignItems: 'center', gap: S.xs, marginBottom: S.sm },
+  priorityTitle:{ color: COLORS.textPrimary, fontSize: 14, fontWeight: '800', flex: 1 },
+  priorityCount:{ color: P.danger, fontSize: 11, fontWeight: '700' },
+  priorityCard:{ flexDirection: 'row', alignItems: 'center', borderLeftWidth: 4, borderRadius: R.sm, padding: S.sm, marginTop: S.xs, gap: S.sm },
+  priorityCardTitle:{ fontSize: 12, fontWeight: '800' },
+  priorityCardDetail:{ color: COLORS.textSecondary, fontSize: 11, marginTop: 3 },
+  priorityCardTime:{ color: COLORS.textMuted, fontSize: 10, fontWeight: '700' },
   sosBannerTxt:  { color: COLORS.white, fontSize: 14, fontWeight: '800', flex: 1 },
   kpiRow:        { flexDirection: 'row', gap: S.sm, marginBottom: S.lg },
   kpiCard:       { flex: 1, padding: S.md, alignItems: 'center' },

@@ -20,13 +20,14 @@
 const router = require('express').Router();
 const { body } = require('express-validator');
 const {
-  PatrolSession, PatrolCheckpoint, RandomPromptLog, ShiftSession, User
+  PatrolSession, PatrolCheckpoint, RandomPromptLog, ShiftSession, ShiftRoster, User
 } = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
 const validate     = require('../middleware/validate');
 const asyncHandler = require('../utils/asyncHandler');
 const { createAlert } = require('../services/alertService');
 const { upload: uploadPhoto, saveImage } = require('../services/mediaStore');
+const { getMondayOfWeek, dayKey } = require('../utils/dateHelpers');
 
 // ════════════════════════════════════════════════════════════
 // CHECKPOINT CONFIG
@@ -131,6 +132,8 @@ router.post('/start',
 
     const session = await ShiftSession.findOne({ organisationId: orgId, guardId, bookedOffAt: null });
     if (!session) return res.status(400).json({ error: 'No active shift. Book on first.' });
+    const roster = await ShiftRoster.findOne({ organisationId: orgId, guardId, weekStartDate: getMondayOfWeek() }).select('days checkpointIds');
+    const assignedCheckpointIds = roster?.days?.[dayKey()] && roster.checkpointIds?.length ? roster.checkpointIds : [];
 
     // If already has an in-progress patrol, return it
     const existing = await PatrolSession.findOne({
@@ -148,6 +151,7 @@ router.post('/start',
       shiftSessionId:      session._id,
       guardId,
       siteId:              session.siteId,
+      assignedCheckpointIds,
       startedAt:           new Date(),
       triggeredByAntiIdle: req.body.triggeredByAntiIdle || false,
     });
@@ -179,6 +183,9 @@ router.post('/:id/capture',
 
     const checkpoint = await PatrolCheckpoint.findOne({ _id: checkpointId, organisationId: req.user.organisationId, siteId: patrol.siteId, active: true });
     if (!checkpoint) return res.status(400).json({ error: 'Checkpoint does not belong to this active patrol site.' });
+    if (patrol.assignedCheckpointIds?.length && !patrol.assignedCheckpointIds.map(String).includes(String(checkpoint._id))) {
+      return res.status(400).json({ error: 'This checkpoint is not assigned to your current rota.' });
+    }
 
     if (checkpoint.required && !req.file) return res.status(400).json({ error: 'Photo required for this checkpoint.' });
     if (checkpoint.nfcRequired && !nfcTagId) return res.status(400).json({ error: 'NFC card tap required for this checkpoint.' });
@@ -235,6 +242,7 @@ router.post('/:id/finish',
       organisationId: orgId,
       siteId: patrol.siteId,
       active: true,
+      ...(patrol.assignedCheckpointIds?.length ? { _id: { $in: patrol.assignedCheckpointIds } } : {}),
       $or: [{ required: true }, { nfcRequired: true }],
     }).select('_id required nfcRequired');
 

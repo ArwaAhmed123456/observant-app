@@ -14,6 +14,8 @@ const shiftRosterSchema = new mongoose.Schema({
   organisationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organisation', required: true, index: true },
   guardId:        { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   siteId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Site', required: true },
+  // Optional site checkpoints assigned to this guard for the roster week.
+  checkpointIds:  [{ type: mongoose.Schema.Types.ObjectId, ref: 'PatrolCheckpoint' }],
   publishedBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 
   weekStartDate:  { type: String, required: true }, // e.g. "2026-09-21"
