@@ -78,10 +78,11 @@ router.post('/:id/respond',
       return res.status(400).json({ error: 'Response window has expired' });
     }
 
-    if (req.body.latitude && req.body.longitude) {
+    if (req.body.latitude != null && req.body.longitude != null) {
+      cc.location = { latitude: Number(req.body.latitude), longitude: Number(req.body.longitude) };
       const site = await Site.findById(cc.siteId).select('location geofenceRadiusMetres');
       const [siteLon, siteLat] = site?.location?.coordinates || [];
-      if (siteLat && siteLon) {
+      if (siteLat != null && siteLon != null) {
         const rad = deg => deg * Math.PI / 180;
         const lat1 = Number(req.body.latitude), lon1 = Number(req.body.longitude);
         const dLat = rad(siteLat - lat1), dLon = rad(siteLon - lon1);

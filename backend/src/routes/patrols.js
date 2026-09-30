@@ -132,6 +132,11 @@ router.post('/start',
 
     const session = await ShiftSession.findOne({ organisationId: orgId, guardId, bookedOffAt: null });
     if (!session) return res.status(400).json({ error: 'No active shift. Book on first.' });
+    const activePrompt = await RandomPromptLog.findOne({
+      organisationId: orgId, guardId, shiftSessionId: session._id,
+      responded: false, managerAlerted: false, expiresAt: { $gt: new Date() },
+    }).sort({ triggeredAt: -1 });
+    if (req.body.triggeredByAntiIdle && !activePrompt) return res.status(410).json({ error: 'There is no active surprise patrol response window.' });
     const roster = await ShiftRoster.findOne({ organisationId: orgId, guardId, weekStartDate: getMondayOfWeek() }).select('days checkpointIds');
     const assignedCheckpointIds = roster?.days?.[dayKey()] && roster.checkpointIds?.length ? roster.checkpointIds : [];
 
@@ -139,10 +144,18 @@ router.post('/start',
     const existing = await PatrolSession.findOne({
       organisationId: orgId, guardId, status: 'in_progress'
     });
-    if (existing) return res.json({ patrol: existing, alreadyActive: true });
+    if (existing) {
+      if (activePrompt) {
+        activePrompt.responded = true;
+        activePrompt.respondedAt = new Date();
+        activePrompt.patrolSessionId = existing._id;
+        await activePrompt.save();
+      }
+      return res.json({ patrol: existing, alreadyActive: true });
+    }
 
     const latest = await PatrolSession.findOne({ organisationId: orgId, guardId, status: { $in: ['complete', 'incomplete'] } }).sort({ finishedAt: -1 });
-    if (latest?.finishedAt && Date.now() - new Date(latest.finishedAt).getTime() < 60 * 60 * 1000 && !req.body.triggeredByAntiIdle) {
+    if (latest?.finishedAt && Date.now() - new Date(latest.finishedAt).getTime() < 60 * 60 * 1000 && !activePrompt) {
       return res.status(429).json({ error: 'The next hourly patrol is not due yet. Complete a random patrol prompt if one is active.' });
     }
 
@@ -153,8 +166,15 @@ router.post('/start',
       siteId:              session.siteId,
       assignedCheckpointIds,
       startedAt:           new Date(),
-      triggeredByAntiIdle: req.body.triggeredByAntiIdle || false,
+      triggeredByAntiIdle: Boolean(activePrompt),
     });
+    await ShiftSession.findByIdAndUpdate(session._id, { $set: { nextRandomPromptAt: null } });
+    if (activePrompt) {
+      activePrompt.responded = true;
+      activePrompt.respondedAt = new Date();
+      activePrompt.patrolSessionId = patrol._id;
+      await activePrompt.save();
+    }
 
     res.status(201).json({ patrol });
   })
@@ -187,16 +207,13 @@ router.post('/:id/capture',
       return res.status(400).json({ error: 'This checkpoint is not assigned to your current rota.' });
     }
 
-    if (checkpoint.required && !req.file) return res.status(400).json({ error: 'Photo required for this checkpoint.' });
-    if (checkpoint.nfcRequired && !nfcTagId) return res.status(400).json({ error: 'NFC card tap required for this checkpoint.' });
     if (!checkpoint.required && !checkpoint.nfcRequired) return res.status(400).json({ error: 'This checkpoint has no required proof method.' });
-    if (checkpoint.nfcRequired && String(nfcTagId).toLowerCase() !== String(checkpoint.nfcTagId || '').toLowerCase()) {
+    if (!req.file && !nfcTagId) return res.status(400).json({ error: 'Capture a required photo or scan the assigned NFC card.' });
+    if (req.file && !checkpoint.required) return res.status(400).json({ error: 'A photo is not required for this checkpoint.' });
+    if (nfcTagId && !checkpoint.nfcRequired) return res.status(400).json({ error: 'An NFC scan is not required for this checkpoint.' });
+    const cleanTagId = value => String(value || '').replace(/[^a-f0-9]/gi, '').toLowerCase();
+    if (nfcTagId && checkpoint.nfcRequired && cleanTagId(nfcTagId) !== cleanTagId(checkpoint.nfcTagId)) {
       return res.status(400).json({ error: 'NFC card does not match the tag assigned to this checkpoint.' });
-    }
-
-    // Avoid duplicate capture for same checkpoint
-    if (patrol.capturedCheckpointIds.map(String).includes(checkpointId)) {
-      return res.status(409).json({ error: 'Checkpoint already captured' });
     }
 
     const fileId = req.file ? await saveImage(req.file, {
@@ -204,19 +221,23 @@ router.post('/:id/capture',
       guardId: req.user._id.toString(),
       patrolId: patrol._id.toString(),
     }) : null;
-    const capture = {
-      checkpointId,
-      photoUrl:   fileId ? `${req.protocol}://${req.get('host')}/api/media/${fileId}` : null,
-      publicId:   fileId,
-      nfcTagId:   checkpoint.nfcRequired ? nfcTagId : null,
-      nfcVerifiedAt: checkpoint.nfcRequired ? new Date() : null,
-      capturedAt: new Date(),
-      latitude:   latitude  ? parseFloat(latitude)  : null,
-      longitude:  longitude ? parseFloat(longitude) : null,
-    };
-
-    patrol.captures.push(capture);
-    patrol.capturedCheckpointIds.push(checkpointId);
+    let capture = patrol.captures.find(item => String(item.checkpointId) === String(checkpointId));
+    if (!capture) {
+      capture = { checkpointId, photoUrl: null, publicId: null, nfcTagId: null, nfcVerifiedAt: null, capturedAt: new Date() };
+      patrol.captures.push(capture);
+    }
+    if (fileId) {
+      capture.photoUrl = `${req.protocol}://${req.get('host')}/api/media/${fileId}`;
+      capture.publicId = fileId;
+    }
+    if (nfcTagId) {
+      capture.nfcTagId = nfcTagId;
+      capture.nfcVerifiedAt = new Date();
+    }
+    capture.capturedAt = new Date();
+    capture.latitude = latitude !== undefined && latitude !== '' ? parseFloat(latitude) : capture.latitude ?? null;
+    capture.longitude = longitude !== undefined && longitude !== '' ? parseFloat(longitude) : capture.longitude ?? null;
+    if (!patrol.capturedCheckpointIds.map(String).includes(String(checkpointId))) patrol.capturedCheckpointIds.push(checkpointId);
     await patrol.save();
 
     res.json({ patrol, capture });
@@ -274,7 +295,7 @@ router.post('/:id/finish',
 
     // Update session patrol counter
     await ShiftSession.findByIdAndUpdate(patrol.shiftSessionId, { $inc: { patrolCount: 1 } });
-    const nextRandomPromptAt = new Date(now.getTime() + (30 + Math.random() * 30) * 60 * 1000);
+    const nextRandomPromptAt = new Date(now.getTime() + (10 + Math.random() * 20) * 60 * 1000);
     await ShiftSession.findByIdAndUpdate(patrol.shiftSessionId, { nextRandomPromptAt });
 
     // Alert managers if incomplete
@@ -391,7 +412,7 @@ router.post('/random-prompt/:id/respond',
   [body('patrolSessionId').optional().isMongoId()],
   asyncHandler(async (req, res) => {
     const log = await RandomPromptLog.findOneAndUpdate(
-      { _id: req.params.id, organisationId: req.user.organisationId, guardId: req.user._id, responded: false },
+      { _id: req.params.id, organisationId: req.user.organisationId, guardId: req.user._id, responded: false, managerAlerted: false, expiresAt: { $gt: new Date() } },
       {
         responded:       true,
         respondedAt:     new Date(),
@@ -399,7 +420,7 @@ router.post('/random-prompt/:id/respond',
       },
       { new: true }
     );
-    if (!log) return res.status(404).json({ error: 'Prompt log not found or already responded' });
+    if (!log) return res.status(410).json({ error: 'The 10-minute surprise patrol response window has expired.' });
     res.json({ log });
   })
 );

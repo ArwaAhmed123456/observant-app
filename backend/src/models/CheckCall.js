@@ -18,6 +18,10 @@ const checkCallSchema = new mongoose.Schema({
   note:        { type: String, default: null, maxlength: 500 },
   category:    { type: String, default: null, maxlength: 100 },
   photoUrl:    { type: String, default: null },
+  location: {
+    latitude:  { type: Number, default: null },
+    longitude: { type: Number, default: null },
+  },
   isManualLog: { type: Boolean, default: false },
   manuallyLoggedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 

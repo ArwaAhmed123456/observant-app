@@ -79,6 +79,9 @@ export function ManagerDashboardScreen({ navigation }) {
     if (type === 'sos') {
       return { color: '#ff2d55', bg: 'rgba(255,45,85,0.18)', border: '#ff2d55', icon: '🚨', label: 'URGENT SOS', isUrgent: true };
     }
+    if (type === 'random_prompt_ignored') {
+      return { color: '#C8232C', bg: 'rgba(200,35,44,0.12)', border: '#C8232C', icon: '🚨', label: 'MISSED SURPRISE PATROL', isUrgent: true };
+    }
     if (type === 'check_call_missed') {
       return { color: '#f59e0b', bg: 'rgba(245,158,11,0.14)', border: '#f59e0b', icon: '✗',  label: 'MISSED CALL' };
     }
@@ -101,13 +104,13 @@ export function ManagerDashboardScreen({ navigation }) {
     })
     .sort((a, b) => {
       // SOS always first
-      if (a.type === 'sos' && b.type !== 'sos') return -1;
-      if (b.type === 'sos' && a.type !== 'sos') return 1;
+      if (['sos', 'random_prompt_ignored'].includes(a.type) && !['sos', 'random_prompt_ignored'].includes(b.type)) return -1;
+      if (['sos', 'random_prompt_ignored'].includes(b.type) && !['sos', 'random_prompt_ignored'].includes(a.type)) return 1;
       return new Date(b.createdAt) - new Date(a.createdAt);
     });
 
   const priorityAlerts = mgrAlerts.filter(alert =>
-    ['sos', 'check_call_missed', 'check_call_issue', 'geofence_warning', 'patrol_missing_checkpoints'].includes(alert.type)
+    ['sos', 'random_prompt_ignored', 'check_call_missed', 'check_call_issue', 'geofence_warning', 'patrol_missing_checkpoints'].includes(alert.type)
       && !alert.read
   ).slice(0, 3);
 

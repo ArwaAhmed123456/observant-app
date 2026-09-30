@@ -29,7 +29,7 @@ export function GuardHomeScreen({ navigation }) {
     getGuardActiveSession, bookOn, bookOff,
     getTodayCheckCalls, getTodayPatrols,
     activeCheckCall, shiftEndWarning, setShiftEndWarning,
-    antiIdlePrompt, dismissAntiIdlePrompt,
+    antiIdlePrompt,
     rosters, addAlert, checkCalls,
   } = useApp();
 
@@ -242,7 +242,7 @@ export function GuardHomeScreen({ navigation }) {
               <Text style={s.antiIdleTitle}>Surprise Patrol Check</Text>
               <Text style={s.antiIdleSub}>Start patrolling now to stay ahead of schedule.</Text>
             </View>
-            <TouchableOpacity style={s.antiIdleGoBtn} onPress={() => { dismissAntiIdlePrompt(); navigation.navigate('Patrol'); }}>
+            <TouchableOpacity style={s.antiIdleGoBtn} onPress={() => navigation.navigate('Patrol')}>
               <Text style={s.antiIdleGoBtnTxt}>GO →</Text>
             </TouchableOpacity>
           </View>

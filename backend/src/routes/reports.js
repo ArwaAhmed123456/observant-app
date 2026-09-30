@@ -36,6 +36,7 @@ function buildFilter(req) {
 router.get('/shift-calls', authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
     const { type = 'combined' } = req.query;
+    const includeImages = req.query.includeImages === 'true';
     const ccFilter = buildFilter(req);
     // Patrol uses startedAt, not firedAt
     const patrolFilter = { ...buildFilter(req) };
@@ -44,6 +45,15 @@ router.get('/shift-calls', authenticate, requireRole('manager','admin'),
       delete patrolFilter.firedAt;
     }
 
+    const patrolQuery = type !== 'check_calls'
+      ? PatrolSession.find(patrolFilter)
+          .sort({ startedAt: -1 })
+          .populate('guardId', 'name badgeNumber')
+          .populate('siteId',  'name')
+      : null;
+    if (patrolQuery && includeImages) patrolQuery.populate('captures.checkpointId', 'name order');
+    else if (patrolQuery) patrolQuery.select('-captures');
+
     const [checkCalls, patrols, sessions] = await Promise.all([
       type !== 'patrols'
         ? CheckCall.find(ccFilter)
@@ -51,13 +61,7 @@ router.get('/shift-calls', authenticate, requireRole('manager','admin'),
             .populate('guardId', 'name badgeNumber')
             .populate('siteId',  'name')
         : [],
-      type !== 'check_calls'
-        ? PatrolSession.find(patrolFilter)
-            .sort({ startedAt: -1 })
-            .populate('guardId', 'name badgeNumber')
-            .populate('siteId',  'name')
-            .select('-captures')
-        : [],
+      patrolQuery || [],
       ShiftSession.find({ organisationId: req.user.organisationId, ...(req.user.role === 'manager' ? { siteId: { $in: req.user.managedSiteIds } } : {}) })
         .select('_id bookedOnAt bookedOffAt'),
     ]);
@@ -68,6 +72,8 @@ router.get('/shift-calls', authenticate, requireRole('manager','admin'),
     const ccRows = checkCalls.map(cc => ({
       type:             'check_call',
       id:               cc._id,
+      guardId:          cc.guardId?._id,
+      siteId:           cc.siteId?._id,
       date:             cc.firedAt,
       guardName:        cc.guardId?.name,
       badgeNumber:      cc.guardId?.badgeNumber,
@@ -80,11 +86,16 @@ router.get('/shift-calls', authenticate, requireRole('manager','admin'),
       note:             cc.note,
       isRandom:         cc.isRandom,
       managerAlerted:   cc.managerAlerted,
+      gps:              cc.location?.latitude != null && cc.location?.longitude != null ? `${cc.location.latitude.toFixed(5)}, ${cc.location.longitude.toFixed(5)}` : null,
+      checkpointStatus: cc.response || 'Pending',
+      images:           includeImages && cc.photoUrl ? [{ url: cc.photoUrl, checkpointName: 'Check call evidence', capturedAt: cc.respondedAt || cc.firedAt }] : [],
     }));
 
     const patrolRows = patrols.map(p => ({
       type:               'patrol',
       id:                 p._id,
+      guardId:            p.guardId?._id,
+      siteId:             p.siteId?._id,
       date:               p.startedAt,
       guardName:          p.guardId?.name,
       badgeNumber:        p.guardId?.badgeNumber,
@@ -95,6 +106,17 @@ router.get('/shift-calls', authenticate, requireRole('manager','admin'),
       capturedCount:      p.capturedCheckpointIds?.length || 0,
       missingCount:       p.missingCheckpointIds?.length || 0,
       triggeredByAntiIdle:p.triggeredByAntiIdle,
+      gps: (p.captures || []).filter(capture => capture.latitude != null && capture.longitude != null).map(capture => `${capture.latitude.toFixed(5)}, ${capture.longitude.toFixed(5)}`).join(' · ') || null,
+      checkpointStatus:   `${p.capturedCheckpointIds?.length || 0} captured · ${p.missingCheckpointIds?.length || 0} missing`,
+      note:               p.managerNote || null,
+      images: includeImages ? (p.captures || []).filter(capture => capture.photoUrl).map(capture => ({
+        id: capture._id,
+        url: capture.photoUrl,
+        checkpointName: capture.checkpointId?.name || 'Checkpoint',
+        capturedAt: capture.capturedAt,
+        latitude: capture.latitude,
+        longitude: capture.longitude,
+      })) : [],
     }));
 
     const rows = [...ccRows, ...patrolRows].sort((a, b) => new Date(b.date) - new Date(a.date));

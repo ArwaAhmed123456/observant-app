@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, Alert } from 'react-native';
+import * as Location from 'expo-location';
 import { load, save, KEYS, seedIfEmpty } from '../data/store';
 import {
   API_ENABLED, apiGet, apiPost, apiPatch, apiDelete, restoreTokens, setTokens,
@@ -53,7 +54,8 @@ async function loadRemoteSnapshot(user) {
 const CHECK_CALL_INTERVAL_MS = 60 * 60 * 1000;   // 1 hour
 const CHECK_CALL_WINDOW_MS   = 10 * 60 * 1000;   // 10 min to respond
 const PATROL_INTERVAL_MS     = 60 * 60 * 1000;   // 1 hour between patrols
-const ANTI_IDLE_MIN_MS       = 30 * 60 * 1000;   // earliest random patrol prompt
+const ANTI_IDLE_MIN_MS       = 10 * 60 * 1000;   // earliest random patrol prompt
+const ANTI_IDLE_MAX_MS       = 30 * 60 * 1000;   // latest random patrol prompt
 const SHIFT_END_WARN_MS      = 10 * 60 * 1000;   // 10 min before shift end
 
 export function AppProvider({ children }) {
@@ -207,7 +209,10 @@ export function AppProvider({ children }) {
         setAlerts((alerts.alerts || []).map(alert => ({ ...normalizeAlert(alert), read: !!alert.isRead })));
         const promptList = prompts.logs || [];
         setRandomPromptLogs(promptList.map(prompt => ({ ...prompt, id: idOf(prompt), guardId: idOf(prompt.guardId), sessionId: idOf(prompt.shiftSessionId) })));
-        if (currentUser.role === 'guard' && promptList.some(prompt => !prompt.responded)) setAntiIdlePrompt(true);
+        if (currentUser.role === 'guard') setAntiIdlePrompt(promptList.some(prompt =>
+          idOf(prompt.guardId) === currentUser.id && !prompt.responded && !prompt.managerAlerted
+          && (!prompt.expiresAt || new Date(prompt.expiresAt).getTime() > Date.now())
+        ));
       } catch (error) {
         console.warn('[Observant] Operation refresh failed:', error.message);
       }
@@ -599,7 +604,6 @@ export function AppProvider({ children }) {
     // Start timers
     startCheckCallTimer(session);
     startShiftEndTimer(session);
-    scheduleNextPatrolTimer(session, null);
 
     return session;
   }, [getTodayRoster, shiftSessions, startCheckCallTimer, startShiftEndTimer, scheduleNextPatrolTimer]);
@@ -687,14 +691,26 @@ export function AppProvider({ children }) {
       checkCallExpireRef.current = null;
     }
 
+    let checkCallLocation = extra?.location || null;
+    if (!checkCallLocation) {
+      try {
+        let permission = await Location.getForegroundPermissionsAsync();
+        if (permission.status !== 'granted') permission = await Location.requestForegroundPermissionsAsync();
+        if (permission.status === 'granted') {
+          const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          checkCallLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude };
+        }
+      } catch { /* Check call response remains available without location access. */ }
+    }
+
     if (API_ENABLED) {
       const form = new FormData();
       form.append('response', response);
       if (note) form.append('note', note);
       if (extra?.photoUri) form.append('photo', { uri: extra.photoUri, name: 'check-call-issue.jpg', type: 'image/jpeg' });
       if (extra?.category) form.append('category', extra.category);
-      if (extra?.location?.latitude != null) form.append('latitude', String(extra.location.latitude));
-      if (extra?.location?.longitude != null) form.append('longitude', String(extra.location.longitude));
+      if (checkCallLocation?.latitude != null) form.append('latitude', String(checkCallLocation.latitude));
+      if (checkCallLocation?.longitude != null) form.append('longitude', String(checkCallLocation.longitude));
       const { checkCall } = await apiUpload(`/api/check-calls/${checkCallId}/respond`, form);
       const updatedCall = normalizeCheckCall(checkCall);
       setCheckCalls(previous => previous.map(item => item.id === checkCallId ? updatedCall : item));
@@ -713,10 +729,10 @@ export function AppProvider({ children }) {
     // Geofence verification
     let outsideGeofence = false;
     let distanceMeters = null;
-    if (extra?.location && site?.latitude && site?.longitude) {
+    if (checkCallLocation && site?.latitude && site?.longitude) {
       distanceMeters = getDistanceFromLatLonInMeters(
-        extra.location.latitude,
-        extra.location.longitude,
+        checkCallLocation.latitude,
+        checkCallLocation.longitude,
         site.latitude,
         site.longitude
       );
@@ -735,7 +751,7 @@ export function AppProvider({ children }) {
             note,
             category: extra?.category || null,
             photoUri: extra?.photoUri || null,
-            location: extra?.location || null,
+            location: checkCallLocation,
             outsideGeofence,
             distanceMeters,
             manuallyLogged: !!extra?.isManual,
@@ -973,12 +989,12 @@ export function AppProvider({ children }) {
 
     const base = lastPatrolEndTime ? new Date(lastPatrolEndTime) : new Date();
     const nextPatrolAt = new Date(base.getTime() + PATROL_INTERVAL_MS);
-    const antiIdleDelay = ANTI_IDLE_MIN_MS + Math.random() * (PATROL_INTERVAL_MS - ANTI_IDLE_MIN_MS);
+    const antiIdleDelay = ANTI_IDLE_MIN_MS + Math.random() * (ANTI_IDLE_MAX_MS - ANTI_IDLE_MIN_MS);
 
-    // Anti-idle: random prompt between 30-60 min after last patrol
+    // Anti-idle: random prompt between 10-30 min after the last patrol (or shift start).
     antiIdleTimerRef.current = setTimeout(() => {
       setAntiIdlePrompt(true);
-      logRandomPrompt(session.guardId, session.id);
+      logRandomPrompt(session.guardId, session.id, new Date(Date.now() + CHECK_CALL_WINDOW_MS).toISOString());
     }, antiIdleDelay);
 
     // Next full patrol due
@@ -992,7 +1008,7 @@ export function AppProvider({ children }) {
     }
   }, []);
 
-  const logRandomPrompt = useCallback(async (guardId, sessionId) => {
+  const logRandomPrompt = useCallback(async (guardId, sessionId, expiresAt) => {
     const log = {
       id: `rpl_${Date.now()}`,
       guardId,
@@ -1000,6 +1016,7 @@ export function AppProvider({ children }) {
       triggeredAt: new Date().toISOString(),
       responded: false,
       respondedAt: null,
+      expiresAt,
     };
     const all = await load(KEYS.RANDOM_PROMPT_LOGS) || [];
     const updated = [...all, log];
@@ -1013,15 +1030,13 @@ export function AppProvider({ children }) {
   // ─── Patrol: Start ────────────────────────────────────────────────────────
   const startPatrol = useCallback(async (guardId, siteId, sessionId) => {
     if (API_ENABLED) {
-      const pending = [...randomPromptLogs].reverse().find(log => !log.responded && log.sessionId === sessionId);
-      if (pending && antiIdlePrompt) await apiPost(`/api/patrols/random-prompt/${pending.id}/respond`, {});
+      const pending = [...randomPromptLogs].reverse().find(log => !log.responded && !log.managerAlerted && log.sessionId === sessionId && (!log.expiresAt || new Date(log.expiresAt).getTime() > Date.now()));
       const { patrol } = await apiPost('/api/patrols/start', { triggeredByAntiIdle: antiIdlePrompt });
       const saved = normalizePatrol(patrol);
       setPatrolSessions(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
       setActivePatrol(saved);
       setAntiIdlePrompt(false);
-      if (pending && !antiIdlePrompt) {
-        await apiPost(`/api/patrols/random-prompt/${pending.id}/respond`, { patrolSessionId: saved.id });
+      if (pending) {
         setRandomPromptLogs(previous => previous.map(log => log.id === pending.id ? { ...log, responded: true, respondedAt: new Date().toISOString() } : log));
       }
       return saved;
@@ -1061,12 +1076,14 @@ export function AppProvider({ children }) {
   }, [antiIdlePrompt, randomPromptLogs]);
 
   // ─── Patrol: Capture Checkpoint Photo ─────────────────────────────────────
-  const captureCheckpoint = useCallback(async (patrolId, checkpointId, photoUri, nfcTagId = null) => {
+  const captureCheckpoint = useCallback(async (patrolId, checkpointId, photoUri, nfcTagId = null, location = null) => {
     if (API_ENABLED) {
       const form = new FormData();
       form.append('checkpointId', checkpointId);
       if (photoUri) form.append('photo', { uri: photoUri, name: `checkpoint-${checkpointId}.jpg`, type: 'image/jpeg' });
       if (nfcTagId) form.append('nfcTagId', nfcTagId);
+      if (location?.latitude != null) form.append('latitude', String(location.latitude));
+      if (location?.longitude != null) form.append('longitude', String(location.longitude));
       const { patrol } = await apiUpload(`/api/patrols/${patrolId}/capture`, form);
       const saved = normalizePatrol(patrol);
       setPatrolSessions(previous => previous.map(item => item.id === saved.id ? saved : item));
@@ -1082,10 +1099,23 @@ export function AppProvider({ children }) {
       nfcTagId,
       nfcVerifiedAt: nfcTagId ? new Date().toISOString() : null,
       capturedAt: new Date().toISOString(),
+      latitude: location?.latitude ?? null,
+      longitude: location?.longitude ?? null,
     };
 
     const allCaptures = await load(KEYS.PATROL_CAPTURES) || [];
-    const updated = [...allCaptures, capture];
+    const existing = allCaptures.findIndex(item => item.patrolId === patrolId && item.checkpointId === checkpointId);
+    const updated = existing < 0
+      ? [...allCaptures, capture]
+      : allCaptures.map((item, index) => index === existing ? {
+          ...item,
+          photoUri: photoUri || item.photoUri || null,
+          nfcTagId: nfcTagId || item.nfcTagId || null,
+          nfcVerifiedAt: nfcTagId ? new Date().toISOString() : item.nfcVerifiedAt || null,
+          capturedAt: capture.capturedAt,
+          latitude: location?.latitude ?? item.latitude ?? null,
+          longitude: location?.longitude ?? item.longitude ?? null,
+        } : item);
     await save(KEYS.PATROL_CAPTURES, updated);
     setPatrolCaptures(updated);
 
@@ -1127,9 +1157,11 @@ export function AppProvider({ children }) {
     const rosterCheckpointIds = getTodayRoster(patrol.guardId)?.checkpointIds || [];
     const assignedIds = patrol.assignedCheckpointIds?.length ? patrol.assignedCheckpointIds : rosterCheckpointIds;
     const siteCheckpoints = checkpoints.filter(cp => cp.siteId === patrol.siteId && (cp.required || cp.nfcRequired) && (!assignedIds.length || assignedIds.includes(cp.id)));
-    const missing = siteCheckpoints
-      .filter(cp => !(patrol.checkpointsCaptured || []).includes(cp.id))
-      .map(cp => cp.id);
+    const capturesForPatrol = (await load(KEYS.PATROL_CAPTURES) || []).filter(capture => capture.patrolId === patrolId);
+    const missing = siteCheckpoints.filter(cp => {
+      const capture = capturesForPatrol.find(item => item.checkpointId === cp.id);
+      return !capture || (cp.required && !capture.photoUri) || (cp.nfcRequired && !capture.nfcVerifiedAt);
+    }).map(cp => cp.id);
 
     if (missing.length > 0 && !forceFinish) {
       return { incomplete: true, missing, patrol };
@@ -1202,7 +1234,7 @@ export function AppProvider({ children }) {
     const lastPatrol = [...patrolSessions]
       .filter(p => p.sessionId === active.id && p.finishedAt)
       .sort((a, b) => new Date(b.finishedAt) - new Date(a.finishedAt))[0];
-    scheduleNextPatrolTimer(active, lastPatrol?.finishedAt || null);
+    if (lastPatrol?.finishedAt) scheduleNextPatrolTimer(active, lastPatrol.finishedAt);
   }, [currentUser, patrolSessions, startCheckCallTimer, startShiftEndTimer, scheduleNextPatrolTimer]);
 
   // ─── Roster management ────────────────────────────────────────────────────

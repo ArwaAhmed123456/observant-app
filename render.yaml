@@ -18,3 +18,12 @@ services:
         generateValue: true
       - key: CORS_ORIGINS
         value: '*'
+  - type: web
+    name: observant-admin-portal
+    runtime: static
+    rootDir: admin-portal
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://observant-api-zl49.onrender.com

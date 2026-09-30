@@ -64,7 +64,7 @@ router.post('/book-on',
       scheduledEnd,
       scheduledEndAt: req.body.scheduledEndAt ? new Date(req.body.scheduledEndAt) : null,
       nextCheckCallAt: new Date(now.getTime() + 60 * 60 * 1000),
-      nextRandomPromptAt: new Date(now.getTime() + (30 + Math.random() * 30) * 60 * 1000),
+      nextRandomPromptAt: null,
       punctuality,
       punctualityMinutes: diffMins,
     });

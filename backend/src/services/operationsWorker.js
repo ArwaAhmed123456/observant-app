@@ -84,7 +84,7 @@ async function fireDueRandomPrompts(now = new Date()) {
       guardId: session.guardId,
       siteId: session.siteId,
       triggeredAt: now,
-      expiresAt: new Date(now.getTime() + 30 * 60 * 1000),
+      expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
     });
     const guard = await User.findById(session.guardId).select('fcmToken');
     if (guard?.fcmToken) await sendPush([guard.fcmToken], {
@@ -131,8 +131,8 @@ async function alertIgnoredPrompts(now = new Date()) {
       siteId: item.siteId,
       guardId: item.guardId,
       type: 'random_prompt_ignored',
-      title: 'Random patrol prompt not completed',
-      message: 'The guard did not start a patrol within 30 minutes of the random prompt.',
+      title: 'HIGH PRIORITY · Surprise patrol missed',
+      message: 'The guard did not acknowledge the surprise patrol within the 10-minute response window.',
       refModel: 'RandomPromptLog',
       refId: item._id,
     });
