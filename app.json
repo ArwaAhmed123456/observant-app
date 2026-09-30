@@ -4,11 +4,12 @@
     "slug": "observant-app",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "observant",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "androidNavigationBar": {
-      "backgroundColor": "#F4F6FA",
-      "barStyle": "dark-content",
+      "backgroundColor": "#0B192C",
+      "barStyle": "light-content",
       "enforceContrast": false
     },
     "ios": {

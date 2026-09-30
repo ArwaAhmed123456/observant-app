@@ -23,7 +23,7 @@ export const P = {
   bg0: '#F4F6FA',   // cool porcelain — app canvas
   bg1: '#FFFFFF',   // screen surface
   bg2: '#FFFFFF',   // card
-  bg3: '#F1F4F8',   // elevated card / input
+  bg3: '#F8FAFC',   // light card / input
   bg4: '#E8EDF4',   // active / pressed state
 
   // ── Brand — Royal Blue (logo circular field)
@@ -169,68 +169,68 @@ export const FONT = {
 export const SH_TOKENS = {
   none: {},
   xs: {
-    shadowColor: '#000',
+    shadowColor: '#0B192C',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOpacity: 0.035,
+    shadowRadius: 3,
+    elevation: 1,
   },
   sm: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.09,
-    shadowRadius: 10,
-    elevation: 4,
+    shadowColor: '#0B192C',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
   },
   md: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 8,
+    shadowColor: '#0B192C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.045,
+    shadowRadius: 6,
+    elevation: 1,
   },
   lg: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.14,
-    shadowRadius: 22,
-    elevation: 14,
+    shadowColor: '#0B192C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 7,
+    elevation: 1,
   },
   // Colored glows
   blue: {
     shadowColor: P.blue,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    elevation: 8,
+    shadowOpacity: 0.12,
+    shadowRadius: 5,
+    elevation: 1,
   },
   gold: {
     shadowColor: P.gold,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.40,
-    shadowRadius: 12,
-    elevation: 7,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 1,
   },
   ok: {
     shadowColor: P.ok,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 7,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 1,
   },
   danger: {
     shadowColor: P.danger,
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.55,
-    shadowRadius: 18,
-    elevation: 12,
+    shadowOpacity: 0.14,
+    shadowRadius: 5,
+    elevation: 1,
   },
   warn: {
     shadowColor: P.warn,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.40,
-    shadowRadius: 12,
-    elevation: 7,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 1,
   },
 };
 

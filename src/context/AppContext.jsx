@@ -1258,6 +1258,18 @@ export function AppProvider({ children }) {
     return updated;
   }, []);
 
+  const refreshRosters = useCallback(async () => {
+    if (API_ENABLED) {
+      const result = await apiGet('/api/rosters');
+      const refreshed = (result.rosters || []).map(normalizeRoster);
+      setRosters(refreshed);
+      return refreshed;
+    }
+    const refreshed = await load(KEYS.SHIFT_ROSTERS) || [];
+    setRosters(refreshed);
+    return refreshed;
+  }, []);
+
   const saveRosterTemplate = useCallback(async (template) => {
     if (API_ENABLED) {
       const { template: saved } = await apiPost('/api/rosters/templates', template);
@@ -1429,7 +1441,7 @@ export function AppProvider({ children }) {
     // Alerts
     alerts, getUnreadAlerts, markAlertRead, markAllAlertsRead, addAlert,
     // Rosters
-    rosters, rosterTemplates, publishRoster, saveRosterTemplate,
+    rosters, rosterTemplates, publishRoster, refreshRosters, saveRosterTemplate,
     deleteRosterTemplate, getWeekRosters, getGuardRoster, getTodayRoster,
     // Checkpoints
     saveCheckpoints,

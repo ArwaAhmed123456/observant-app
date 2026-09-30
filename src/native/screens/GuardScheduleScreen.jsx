@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useApp, formatDate } from '../../context/AppContext';
 import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
@@ -29,8 +30,12 @@ function toWeekKey(date) {
 }
 
 export function GuardScheduleScreen() {
-  const { currentUser, sites, getGuardRoster, shiftSessions } = useApp();
+  const { currentUser, sites, getGuardRoster, shiftSessions, refreshRosters } = useApp();
   const [weekStart, setWeekStart] = useState(getMondayOfWeek(new Date()));
+
+  useFocusEffect(useCallback(() => {
+    refreshRosters?.().catch(error => console.warn('[Observant] Could not refresh guard rota:', error.message));
+  }, [refreshRosters]));
 
   const site          = sites.find(s => s.id === currentUser.siteId);
   const weekKey       = toWeekKey(weekStart);

@@ -4,7 +4,7 @@ import {
   Modal, TextInput, Alert, Switch,
 } from 'react-native';
 import { useApp, formatDate } from '../../context/AppContext';
-import { ChevronLeft, ChevronRight, Save, Bookmark, Trash2, Send, Clock } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, ChevronDown, Save, Bookmark, Trash2, Send, Clock, UserRound } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, input, btnPrimary, btnGold } from '../../ds';
@@ -52,8 +52,10 @@ export function ManagerRosterScreen() {
   const [saveTemplateModal, setSaveTemplateModal] = useState(false);
   const [templateModal, setTemplateModal] = useState(false);
   const [publishing, setPublishing]       = useState(false);
+  const [guardPickerVisible, setGuardPickerVisible] = useState(false);
+  const [timePickerOpen, setTimePickerOpen] = useState(null);
 
-  const guards  = users.filter(u => u.role === 'guard' && currentUser.siteIds?.includes(u.siteId));
+  const guards  = users.filter(u => u.role === 'guard' && (currentUser.role === 'superadmin' || currentUser.role === 'admin' || currentUser.siteIds?.includes(u.siteId)));
   const weekKey = toWeekKey(weekStart);
 
   const prevWeek = () => setWeekStart(prev => addDays(prev, -7));
@@ -64,8 +66,14 @@ export function ManagerRosterScreen() {
     const existing = getGuardRoster(guard.id, weekKey);
     setEditDays(existing?.days ? { ...DEFAULT_DAYS, ...existing.days } : { ...DEFAULT_DAYS });
     setEditCheckpointIds(existing?.checkpointIds || []);
+    setGuardPickerVisible(false);
     setEditModalVisible(true);
   };
+
+  const toggleDay = (key) => setEditDays(previous => ({
+    ...previous,
+    [key]: previous[key] ? null : { start: '07:00', end: '19:00' },
+  }));
 
   const confirmTime = () => {
     if (!timeModal) return;
@@ -80,6 +88,7 @@ export function ManagerRosterScreen() {
     }
     setEditDays(prev => ({ ...prev, [timeModal.dayKey]: { start: startTime, end: endTime } }));
     setTimeModal(null);
+    setTimePickerOpen(null);
   };
 
   const handleSaveRoster = async () => {
@@ -131,7 +140,17 @@ export function ManagerRosterScreen() {
       <AppHeader />
       <View style={styles.content}>
         <Text style={styles.screenTitle}>Shift Scheduler</Text>
-        <Text style={styles.screenIntro}>Plan guard coverage, checkpoints, and notifications for the week.</Text>
+        <Text style={styles.screenIntro}>Assign weekly coverage and publish shift details directly to each guard.</Text>
+
+        <Text style={styles.fieldLabel}>GUARD SELECTION</Text>
+        <TouchableOpacity style={styles.guardDropdown} onPress={() => setGuardPickerVisible(true)} activeOpacity={0.78}>
+          <View style={styles.guardDropdownIcon}><UserRound size={17} color={P.blue} /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.guardDropdownName}>{selectedGuard?.name || 'Choose a security officer'}</Text>
+            <Text style={styles.guardDropdownMeta}>{selectedGuard ? (sites.find(site => site.id === selectedGuard.siteId)?.name || 'Assigned site') : `${guards.length} guard${guards.length === 1 ? '' : 's'} available`}</Text>
+          </View>
+          <ChevronDown size={19} color={P.t3} />
+        </TouchableOpacity>
 
         {/* Week nav */}
         <View style={styles.weekNav}>
@@ -227,6 +246,15 @@ export function ManagerRosterScreen() {
                 </TouchableOpacity>
               </View>
 
+              <Text style={styles.fieldLabel}>SELECT WORKING DAYS</Text>
+              <View style={styles.daySelector}>
+                {DAY_KEYS.map((key, index) => (
+                  <TouchableOpacity key={key} style={[styles.daySelectorPill, editDays[key] && styles.daySelectorPillActive]} onPress={() => toggleDay(key)}>
+                    <Text style={[styles.daySelectorText, editDays[key] && styles.daySelectorTextActive]}>{DAY_LABELS[index]}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
               <ScrollView style={{ maxHeight: 360 }}>
                 {DAY_KEYS.map((key, i) => {
                   const shift = editDays[key];
@@ -237,7 +265,7 @@ export function ManagerRosterScreen() {
                         <View style={styles.shiftSet}>
                           <Clock size={12} color={P.ok} />
                           <Text style={styles.shiftTime}>{shift.start} – {shift.end}</Text>
-                          <TouchableOpacity onPress={() => { setStartTime(shift.start); setEndTime(shift.end); setTimeModal({ dayKey: key, editing: true }); }}>
+                          <TouchableOpacity onPress={() => { setStartTime(shift.start); setEndTime(shift.end); setTimePickerOpen(null); setTimeModal({ dayKey: key, editing: true }); }}>
                             <Text style={styles.editTimeBtn}>Edit</Text>
                           </TouchableOpacity>
                           <TouchableOpacity onPress={() => setEditDays(prev => ({ ...prev, [key]: null }))}>
@@ -247,7 +275,7 @@ export function ManagerRosterScreen() {
                       ) : (
                         <TouchableOpacity
                           style={styles.addDayBtn}
-                          onPress={() => { setStartTime('18:00'); setEndTime('06:00'); setTimeModal({ dayKey: key }); }}
+                          onPress={() => { setStartTime('07:00'); setEndTime('19:00'); setTimePickerOpen(null); setTimeModal({ dayKey: key }); }}
                         >
                           <Text style={styles.addDayTxt}>+ Add Shift</Text>
                         </TouchableOpacity>
@@ -290,7 +318,7 @@ export function ManagerRosterScreen() {
                 disabled={publishing}
               >
                 <Send color={P.black} size={15} />
-                <Text style={styles.publishBtnTxt}>{publishing ? 'Publishing…' : 'Publish & Notify Rota'}</Text>
+                <Text style={styles.publishBtnTxt}>{publishing ? 'Saving…' : 'Save & Assign Shift'}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -301,26 +329,41 @@ export function ManagerRosterScreen() {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalCard, { paddingBottom: SP.px24 }]}>
               <Text style={styles.modalTitle}>Set Shift Times</Text>
-              <Text style={styles.fieldLabel}>Start Time (HH:MM)</Text>
-              <TextInput
-                style={[input, { color: P.t1, marginBottom: SP.px12 }]}
-                value={startTime} onChangeText={setStartTime}
-                placeholder="e.g. 18:00" placeholderTextColor={P.t4}
-                keyboardType="numbers-and-punctuation"
-              />
-              <Text style={styles.fieldLabel}>End Time (HH:MM)</Text>
-              <TextInput
-                style={[input, { color: P.t1, marginBottom: SP.px16 }]}
-                value={endTime} onChangeText={setEndTime}
-                placeholder="e.g. 06:00" placeholderTextColor={P.t4}
-                keyboardType="numbers-and-punctuation"
-              />
+              <Text style={styles.fieldLabel}>START TIME</Text>
+              <TouchableOpacity style={styles.timePickerButton} onPress={() => setTimePickerOpen(timePickerOpen === 'start' ? null : 'start')}>
+                <Clock size={16} color={P.blue} /><Text style={styles.timePickerValue}>{startTime}</Text><Text style={styles.timePickerHint}>SELECT TIME</Text>
+              </TouchableOpacity>
+              {timePickerOpen === 'start' && <TimeWheel value={startTime} onChange={setStartTime} />}
+              <Text style={[styles.fieldLabel, { marginTop: SP.px16 }]}>END TIME</Text>
+              <TouchableOpacity style={styles.timePickerButton} onPress={() => setTimePickerOpen(timePickerOpen === 'end' ? null : 'end')}>
+                <Clock size={16} color={P.blue} /><Text style={styles.timePickerValue}>{endTime}</Text><Text style={styles.timePickerHint}>SELECT TIME</Text>
+              </TouchableOpacity>
+              {timePickerOpen === 'end' && <TimeWheel value={endTime} onChange={setEndTime} />}
               <TouchableOpacity style={btnPrimary} onPress={confirmTime}>
                 <Text style={{ color: P.white, fontSize: 15, fontWeight: '800' }}>Confirm</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setTimeModal(null)}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setTimeModal(null); setTimePickerOpen(null); }}>
                 <Text style={styles.cancelBtnTxt}>Cancel</Text>
               </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={guardPickerVisible} transparent animationType="fade" onRequestClose={() => setGuardPickerVisible(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.guardPickerCard}>
+              <Text style={styles.modalTitle}>Choose a guard</Text>
+              <Text style={styles.modalSub}>Select an officer to assign this week’s shifts.</Text>
+              <ScrollView style={{ maxHeight: 420 }}>
+                {guards.length ? guards.map(guard => (
+                  <TouchableOpacity key={guard.id} style={styles.guardOption} onPress={() => openEditForGuard(guard)}>
+                    <View style={styles.guardDropdownIcon}><UserRound size={17} color={P.blue} /></View>
+                    <View style={{ flex: 1 }}><Text style={styles.guardDropdownName}>{guard.name}</Text><Text style={styles.guardDropdownMeta}>{sites.find(site => site.id === guard.siteId)?.name || 'Assigned site'}</Text></View>
+                    <ChevronRight size={17} color={P.t3} />
+                  </TouchableOpacity>
+                )) : <Text style={styles.emptyHint}>No active guards are assigned to your sites.</Text>}
+              </ScrollView>
+              <TouchableOpacity style={styles.cancelBtn} onPress={() => setGuardPickerVisible(false)}><Text style={styles.cancelBtnTxt}>Close</Text></TouchableOpacity>
             </View>
           </View>
         </Modal>
@@ -380,11 +423,41 @@ export function ManagerRosterScreen() {
   );
 }
 
+function TimeWheel({ value, onChange }) {
+  const [hourText, minuteText] = (value || '07:00').split(':');
+  const select = (hour, minute) => onChange(`${String(hour).padStart(2, '0')}:${minute}`);
+  return (
+    <View style={styles.timeWheel}>
+      <Text style={styles.timeWheelLabel}>HOUR</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.timeWheelRow}>
+        {Array.from({ length: 24 }, (_, hour) => {
+          const selected = Number(hourText) === hour;
+          return <TouchableOpacity key={hour} style={[styles.timeWheelItem, selected && styles.timeWheelItemSelected]} onPress={() => select(hour, minuteText || '00')}><Text style={[styles.timeWheelText, selected && styles.timeWheelTextSelected]}>{String(hour).padStart(2, '0')}</Text></TouchableOpacity>;
+        })}
+      </ScrollView>
+      <Text style={styles.timeWheelLabel}>MINUTES</Text>
+      <View style={styles.timeWheelRow}>
+        {['00','15','30','45'].map(minute => {
+          const selected = (minuteText || '00') === minute;
+          return <TouchableOpacity key={minute} style={[styles.minuteWheelItem, selected && styles.timeWheelItemSelected]} onPress={() => select(hourText || '07', minute)}><Text style={[styles.timeWheelText, selected && styles.timeWheelTextSelected]}>{minute}</Text></TouchableOpacity>;
+        })}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root:          { flex: 1, backgroundColor: P.bg0 },
   content:       { flex: 1, padding: SP.px20 },
   screenTitle:   { ...FONT.h2, marginBottom: SP.px16 },
   screenIntro:   { color: P.t3, fontSize: 13, lineHeight: 18, marginTop: -SP.px12, marginBottom: SP.px16 },
+
+  guardDropdown: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: SP.px12, paddingHorizontal: SP.px12, marginBottom: SP.px16, borderRadius: BR.md, backgroundColor: P.bg1, borderWidth: 1, borderColor: P.b2 },
+  guardDropdownIcon:{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: BR.sm, backgroundColor: P.blueSubtle },
+  guardDropdownName:{ color: P.t1, fontSize: 14, fontWeight: '700' },
+  guardDropdownMeta:{ color: P.t3, fontSize: 11, marginTop: 2 },
+  guardPickerCard:{ backgroundColor: P.bg1, borderTopLeftRadius: BR.xl, borderTopRightRadius: BR.xl, padding: SP.px24, borderWidth: 1, borderColor: P.b2 },
+  guardOption:    { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: SP.px12, borderBottomWidth: 1, borderBottomColor: P.b1 },
 
   weekNav:       { flexDirection: 'row', alignItems: 'center', marginBottom: SP.px16 },
   navBtn:        { padding: 8, backgroundColor: P.bg2, borderRadius: BR.sm, borderWidth: 1, borderColor: P.b2 },
@@ -427,6 +500,11 @@ const styles = StyleSheet.create({
   templateRow:   { flexDirection: 'row', gap: SP.px8, marginBottom: SP.px16 },
   templateBtn:   { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.bg3, borderRadius: BR.sm, paddingHorizontal: SP.px12, paddingVertical: 9, justifyContent: 'center', borderWidth: 1, borderColor: P.b2 },
   templateBtnTxt:{ color: P.t2, fontSize: 12, fontWeight: '600' },
+  daySelector:  { flexDirection: 'row', gap: SP.px4, marginTop: SP.px8, marginBottom: SP.px8 },
+  daySelectorPill:{ flex: 1, minHeight: 34, alignItems: 'center', justifyContent: 'center', borderRadius: BR.full, backgroundColor: P.bg3, borderWidth: 1, borderColor: P.b2 },
+  daySelectorPillActive:{ backgroundColor: P.blueSubtle, borderColor: P.blueBorder },
+  daySelectorText:{ color: P.t3, fontSize: 9, fontWeight: '800' },
+  daySelectorTextActive:{ color: P.blueDark },
 
   dayRow:        { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: P.b1 },
   dayLabel:      { color: P.t2, fontSize: 13, width: 44, fontWeight: '700' },
@@ -440,6 +518,17 @@ const styles = StyleSheet.create({
   cancelBtn:     { backgroundColor: P.bg3, borderRadius: BR.md, paddingVertical: 13, alignItems: 'center', marginTop: SP.px8, borderWidth: 1, borderColor: P.b2 },
   cancelBtnTxt:  { color: P.t2, fontSize: 14 },
   fieldLabel:    { color: P.t2, fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: SP.px8 },
+  timePickerButton:{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: SP.px12, paddingHorizontal: SP.px12, borderRadius: BR.sm, backgroundColor: P.bg3, borderWidth: 1, borderColor: P.b2 },
+  timePickerValue:{ flex: 1, color: P.t1, fontSize: 17, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  timePickerHint:{ color: P.blue, fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  timeWheel:     { marginTop: SP.px8, padding: SP.px8, borderRadius: BR.sm, backgroundColor: P.bg3 },
+  timeWheelLabel:{ color: P.t3, fontSize: 9, fontWeight: '800', letterSpacing: 0.8, marginTop: SP.px4, marginBottom: SP.px4 },
+  timeWheelRow:  { flexDirection: 'row', alignItems: 'center', gap: SP.px4 },
+  timeWheelItem: { minWidth: 36, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: BR.xs, backgroundColor: P.bg1, borderWidth: 1, borderColor: P.b1 },
+  minuteWheelItem:{ flex: 1, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: BR.xs, backgroundColor: P.bg1, borderWidth: 1, borderColor: P.b1 },
+  timeWheelItemSelected:{ backgroundColor: P.blue, borderColor: P.blue },
+  timeWheelText:{ color: P.t2, fontSize: 11, fontWeight: '700' },
+  timeWheelTextSelected:{ color: P.white },
 
   templateItem:      { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: P.b1, gap: 10 },
   templateItemName:  { color: P.t1, fontSize: 14, fontWeight: '700' },

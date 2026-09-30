@@ -52,8 +52,6 @@ export function GuardHomeScreen({ navigation }) {
   const site          = sites.find(s => s.id === currentUser?.siteId || s._id === currentUser?.siteId);
   const todayCC       = getTodayCheckCalls(gId);
   const todayPatrols  = getTodayPatrols(gId);
-  const completedCC   = todayCC.filter(c => c.response === 'yes').length;
-  const missedCC      = todayCC.filter(c => c.response === 'missed').length;
   const donePatrols   = todayPatrols.filter(p => p.finishedAt).length;
 
   // Today's roster shift
@@ -305,21 +303,12 @@ export function GuardHomeScreen({ navigation }) {
           </View>
         )}
 
-        {/* ── Stats row ── */}
-        <View style={s.statsRow}>
-          <StatTile
-            value={`${completedCC}/${todayCC.length}`}
-            label="Check Calls"
-            accent={missedCC > 0 ? P.danger : P.ok}
-            sub={missedCC > 0 ? `${missedCC} missed` : 'All clear'}
-          />
-          <StatTile value={donePatrols} label="Patrols Done" accent={P.blue} />
-          <StatTile
-            value={todayCC.filter(c => c.response === 'no').length}
-            label="Issues"
-            accent={todayCC.filter(c => c.response === 'no').length > 0 ? P.warn : P.t3}
-          />
-        </View>
+        <CheckCallTimeline
+          calls={todayCC}
+          activeSession={activeSession}
+          now={now}
+          onPress={() => navigation.navigate('Check Call')}
+        />
 
         {/* ── Book On / Book Off CTA ── */}
         <TouchableOpacity
@@ -614,25 +603,97 @@ export function GuardHomeScreen({ navigation }) {
   );
 }
 
-function StatTile({ value, label, accent, sub }) {
+function CheckCallTimeline({ calls, activeSession, now, onPress }) {
+  const pulse = useRef(new Animated.Value(1)).current;
+  const shiftStart = activeSession?.scheduledStart || activeSession?.scheduledStartTime || '';
+  const startHour = /^\d{2}:\d{2}$/.test(shiftStart) ? Number(shiftStart.slice(0, 2)) : now.getHours();
+  const firstHour = startHour >= 7 && startHour < 19 ? 7 : 19;
+  const baseDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (firstHour === 19 && now.getHours() < 7) baseDate.setDate(baseDate.getDate() - 1);
+  const slots = Array.from({ length: 13 }, (_, index) => {
+    const hour = (firstHour + index) % 24;
+    const date = new Date(baseDate);
+    if (hour < firstHour) date.setDate(date.getDate() + 1);
+    date.setHours(hour, 0, 0, 0);
+    const matchingCall = calls.find(call => {
+      if (call.response !== 'yes') return false;
+      const completedAt = new Date(call.respondedAt || call.responseTime || call.firedAt);
+      return !Number.isNaN(completedAt.getTime()) && completedAt.getHours() === hour
+        && completedAt.getDate() === date.getDate()
+        && completedAt.getMonth() === date.getMonth()
+        && completedAt.getFullYear() === date.getFullYear();
+    });
+    const isCurrent = date.getHours() === now.getHours()
+      && date.getDate() === now.getDate()
+      && date.getMonth() === now.getMonth()
+      && date.getFullYear() === now.getFullYear();
+    const shiftBookedAt = activeSession?.bookedOnAt ? new Date(activeSession.bookedOnAt) : null;
+    const isBeforeShift = shiftBookedAt && date.getTime() + 60 * 60 * 1000 <= shiftBookedAt.getTime();
+    return {
+      key: `${date.toISOString()}-${index}`,
+      hour,
+      date,
+      done: Boolean(matchingCall),
+      active: Boolean(activeSession && isCurrent && !matchingCall),
+      missed: Boolean(activeSession && !isBeforeShift && date.getTime() < now.getTime() && !matchingCall && !isCurrent),
+      locked: Boolean(isBeforeShift || !activeSession || date.getTime() > now.getTime() && !isCurrent),
+    };
+  });
+  const completed = slots.filter(slot => slot.done).length;
+
+  useEffect(() => {
+    const activeSlot = slots.some(slot => slot.active);
+    if (!activeSlot) { pulse.setValue(1); return undefined; }
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(pulse, { toValue: 1.12, duration: 850, useNativeDriver: true }),
+      Animated.timing(pulse, { toValue: 1, duration: 850, useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, [slots.some(slot => slot.active)]);
+
+  const openTimeline = () => slots.some(slot => slot.active) && onPress?.();
   return (
-    <View style={st.wrap}>
-      <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
-      <View style={[st.accent, { backgroundColor: accent }]} />
-      <Text style={st.value}>{value}</Text>
-      <Text style={st.label}>{label}</Text>
-      {sub && <Text style={[st.sub, { color: accent }]}>{sub}</Text>}
+    <View style={s.timelineCard}>
+      <View style={s.timelineHeader}>
+        <View>
+          <Text style={s.timelineTitle}>SHIFT CHECK CALL PATH</Text>
+          <Text style={s.timelineSub}>{completed} of 13 check calls completed</Text>
+        </View>
+        <View style={s.timelineCount}><Text style={s.timelineCountText}>{completed}/13</Text></View>
+      </View>
+      <View style={s.timelineList}>
+        {slots.map((slot, index) => {
+          const state = slot.done ? 'done' : slot.active ? 'active' : slot.missed ? 'missed' : 'locked';
+          const content = (
+            <>
+              <View style={s.timelineRail}>
+                {index < slots.length - 1 && <View style={[s.timelineLine, slot.done && s.timelineLineDone]} />}
+                {slot.active ? (
+                  <Animated.View style={[s.timelineNode, s.timelineNodeActive, { transform: [{ scale: pulse }] }]}><View style={s.timelineNodeDot} /></Animated.View>
+                ) : (
+                  <View style={[s.timelineNode, state === 'done' && s.timelineNodeDone, state === 'missed' && s.timelineNodeMissed, state === 'locked' && s.timelineNodeLocked]}>
+                    <Text style={[s.timelineNodeMark, state === 'done' && s.timelineMarkDone, state === 'missed' && s.timelineMarkMissed]}>{state === 'done' ? '✓' : state === 'missed' ? '!' : ''}</Text>
+                  </View>
+                )}
+              </View>
+              <View style={s.timelineCopy}>
+                <Text style={[s.timelineHour, state === 'active' && s.timelineHourActive, state === 'done' && s.timelineHourDone, state === 'missed' && s.timelineHourMissed]}>{`${String(slot.hour).padStart(2, '0')}:00`}</Text>
+                <Text style={[s.timelineLabel, state === 'active' && s.timelineLabelActive, state === 'done' && s.timelineLabelDone, state === 'missed' && s.timelineLabelMissed]}>
+                  {state === 'done' ? 'Check call completed' : state === 'active' ? 'Tap to Check Call' : state === 'missed' ? 'Check call overdue' : 'Upcoming check call'}
+                </Text>
+              </View>
+              {slot.active && <Text style={s.timelineAction}>OPEN</Text>}
+            </>
+          );
+          return slot.active
+            ? <TouchableOpacity key={slot.key} style={s.timelineRow} onPress={openTimeline} activeOpacity={0.76}>{content}</TouchableOpacity>
+            : <View key={slot.key} style={s.timelineRow}>{content}</View>;
+        })}
+      </View>
     </View>
   );
 }
-
-const st = StyleSheet.create({
-  wrap:   { flex: 1, borderRadius: BR.lg, borderWidth: 1, borderColor: P.b2, overflow: 'hidden', paddingTop: SP.px8, paddingHorizontal: SP.px12, paddingBottom: SP.px12, ...SH_TOKENS.xs, position: 'relative' },
-  accent: { position: 'absolute', top: 0, left: 0, right: 0, height: 2, borderRadius: 1 },
-  value:  { fontSize: 24, fontWeight: '800', color: P.t1, marginTop: SP.px8, fontVariant: ['tabular-nums'] },
-  label:  { fontSize: 10, fontWeight: '700', color: P.t3, textTransform: 'uppercase', letterSpacing: 0.7, marginTop: 2 },
-  sub:    { fontSize: 10, fontWeight: '600', marginTop: 2 },
-});
 
 function getShiftDuration(bookedOnAt) {
   const diff = Date.now() - new Date(bookedOnAt).getTime();
@@ -698,7 +759,36 @@ const s = StyleSheet.create({
   offDutyTime:     { fontSize: 14, color: P.t2, marginTop: SP.px4 },
 
   // Stats
-  statsRow:        { flexDirection: 'row', gap: SP.px8, marginBottom: SP.px12 },
+  timelineCard:    { marginBottom: SP.px16, padding: SP.px16, borderRadius: BR.lg, borderWidth: 1, borderColor: P.b2, backgroundColor: P.bg1 },
+  timelineHeader:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: SP.px12, borderBottomWidth: 1, borderBottomColor: P.b1 },
+  timelineTitle:   { color: P.t2, fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
+  timelineSub:     { color: P.t3, fontSize: 11, marginTop: 4 },
+  timelineCount:   { borderRadius: BR.full, paddingHorizontal: SP.px12, paddingVertical: SP.px8, backgroundColor: P.blueSubtle },
+  timelineCountText:{ color: P.blue, fontSize: 11, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  timelineList:    { paddingTop: SP.px8 },
+  timelineRow:     { minHeight: 48, flexDirection: 'row', alignItems: 'center' },
+  timelineRail:    { width: 38, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center' },
+  timelineLine:    { position: 'absolute', top: '50%', bottom: -1, width: 2, backgroundColor: P.b2 },
+  timelineLineDone:{ backgroundColor: P.ok },
+  timelineNode:    { width: 22, height: 22, alignItems: 'center', justifyContent: 'center', borderRadius: 11, borderWidth: 1.5, zIndex: 1 },
+  timelineNodeDone:{ backgroundColor: P.ok, borderColor: P.ok },
+  timelineNodeActive:{ width: 24, height: 24, backgroundColor: P.white, borderColor: P.blue, borderWidth: 2 },
+  timelineNodeLocked:{ backgroundColor: P.bg3, borderColor: P.b2 },
+  timelineNodeMissed:{ backgroundColor: P.dangerSubtle, borderColor: P.danger },
+  timelineNodeDot:  { width: 8, height: 8, borderRadius: 4, backgroundColor: P.blue },
+  timelineNodeMark: { color: P.white, fontSize: 12, fontWeight: '900' },
+  timelineMarkDone:{ color: P.white },
+  timelineMarkMissed:{ color: P.danger },
+  timelineCopy:    { flex: 1, paddingVertical: SP.px8 },
+  timelineHour:    { color: P.t3, fontSize: 12, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  timelineHourActive:{ color: P.blue },
+  timelineHourDone:{ color: P.okDark },
+  timelineHourMissed:{ color: P.danger },
+  timelineLabel:   { color: P.t4, fontSize: 11, marginTop: 2 },
+  timelineLabelActive:{ color: P.blue, fontWeight: '800' },
+  timelineLabelDone:{ color: P.okDark },
+  timelineLabelMissed:{ color: P.dangerDark },
+  timelineAction:  { color: P.blue, fontSize: 9, fontWeight: '900', letterSpacing: 0.7, paddingHorizontal: SP.px8 },
 
   // Next up operations card
   nextUpCard:      { borderRadius: BR.lg, borderWidth: 1, borderColor: P.blueBorder, overflow: 'hidden', marginBottom: SP.px16, ...SH_TOKENS.blue, position: 'relative' },

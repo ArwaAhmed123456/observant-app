@@ -4,11 +4,11 @@ import { ActivityIndicator, View, StyleSheet } from 'react-native';
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import {
   Home, Phone, MapPin, Calendar,
-  LayoutDashboard, Users, FileText, Settings, Route, User
+  LayoutDashboard, FileText, Settings, Route, User
 } from 'lucide-react-native';
 import { COLORS } from './src/theme';
 
@@ -43,20 +43,18 @@ const APP_NAV_THEME = {
   },
 };
 
-const TAB_BAR = {
-  backgroundColor: COLORS.bgCard,
-  borderTopColor:  COLORS.borderSubtle,
-  borderTopWidth:  1,
-  paddingBottom:   6,
-  paddingTop:      6,
-  height:          64,
-};
-
-const TAB_SCREEN_OPTIONS = ({ route }) => ({
+const tabScreenOptions = insets => ({ route }) => ({
   headerShown: false,
-  tabBarActiveTintColor:   COLORS.brand,
-  tabBarInactiveTintColor: COLORS.textDisabled,
-  tabBarStyle: TAB_BAR,
+  tabBarActiveTintColor:   '#D97706',
+  tabBarInactiveTintColor: '#FFFFFF',
+  tabBarStyle: {
+    backgroundColor: '#0B192C',
+    borderTopColor: '#23344C',
+    borderTopWidth: 1,
+    paddingBottom: Math.max(insets.bottom, 16),
+    paddingTop: 8,
+    height: 58 + Math.max(insets.bottom, 16),
+  },
   tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
   tabBarIcon: ({ color, size }) => {
     const icons = {
@@ -67,7 +65,7 @@ const TAB_SCREEN_OPTIONS = ({ route }) => ({
       Shifts:      <Calendar         color={color} size={size} />,
       Profile:     <User             color={color} size={size} />,
       Dashboard:   <LayoutDashboard  color={color} size={size} />,
-      Roster:      <Users            color={color} size={size} />,
+      Schedule:    <Calendar         color={color} size={size} />,
       Reports:     <FileText         color={color} size={size} />,
       Checkpoints: <Settings         color={color} size={size} />,
     };
@@ -78,8 +76,9 @@ const TAB_SCREEN_OPTIONS = ({ route }) => ({
 // ── Guard Tabs ────────────────────────────────────────────────────────────────
 function GuardTabs() {
   const { activeCheckCall } = useApp();
+  const insets = useSafeAreaInsets();
   return (
-    <Tab.Navigator screenOptions={TAB_SCREEN_OPTIONS}>
+    <Tab.Navigator screenOptions={tabScreenOptions(insets)}>
       <Tab.Screen name="Home"        component={GuardHomeScreen} />
       <Tab.Screen
         name="Check Call"
@@ -100,7 +99,7 @@ function GuardTabs() {
 // ── Manager Stack (tabs + guard path drill-down) ──────────────────────────────
 function ManagerStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+    <Stack.Navigator initialRouteName="ManagerTabs" screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
       <Stack.Screen name="ManagerTabs"       component={ManagerTabs} />
       <Stack.Screen
         name="GuardCheckCallPath"
@@ -113,9 +112,10 @@ function ManagerStack() {
 
 function ManagerTabs() {
   const { getUnreadAlerts, currentUser } = useApp();
+  const insets = useSafeAreaInsets();
   const unreadCount = getUnreadAlerts(currentUser?.id || currentUser?._id)?.length || 0;
   return (
-    <Tab.Navigator screenOptions={TAB_SCREEN_OPTIONS}>
+    <Tab.Navigator initialRouteName="Dashboard" screenOptions={tabScreenOptions(insets)}>
       <Tab.Screen
         name="Dashboard"
         component={ManagerDashboardScreen}
@@ -124,7 +124,7 @@ function ManagerTabs() {
           tabBarBadgeStyle: { backgroundColor: COLORS.missed, color: '#fff', fontSize: 10 },
         }}
       />
-      <Tab.Screen name="Roster"      component={ManagerRosterScreen} />
+      <Tab.Screen name="Schedule"    component={ManagerRosterScreen} />
       <Tab.Screen name="Reports"     component={ManagerReportsScreen} />
       <Tab.Screen name="Checkpoints" component={ManagerCheckpointScreen} />
     </Tab.Navigator>
@@ -134,6 +134,7 @@ function ManagerTabs() {
 // ── Root Navigator ────────────────────────────────────────────────────────────
 function RootNavigator() {
   const { currentUser, authLoading } = useApp();
+  const role = String(currentUser?.role || '').toLowerCase();
 
   if (authLoading) {
     return (
@@ -147,12 +148,14 @@ function RootNavigator() {
     <Stack.Navigator screenOptions={{ headerShown: false, animation: 'fade' }}>
       {!currentUser ? (
         <Stack.Screen name="Login"         component={LoginScreen} />
-      ) : currentUser.role === 'guard' ? (
+      ) : role === 'guard' ? (
         <Stack.Screen name="GuardApp"      component={GuardTabs} />
-      ) : currentUser.role === 'superadmin' || currentUser.role === 'admin' ? (
+      ) : role === 'superadmin' || role === 'admin' ? (
         <Stack.Screen name="SuperAdminApp" component={SuperAdminScreen} />
-      ) : (
+      ) : role === 'manager' ? (
         <Stack.Screen name="ManagerApp"    component={ManagerStack} />
+      ) : (
+        <Stack.Screen name="Login"         component={LoginScreen} />
       )}
     </Stack.Navigator>
   );
@@ -162,7 +165,31 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <AppProvider>
-        <NavigationContainer theme={APP_NAV_THEME}>
+        <NavigationContainer
+          theme={APP_NAV_THEME}
+          linking={{
+            prefixes: ['observant://'],
+            config: { screens: {
+              Login: 'login',
+              ManagerApp: { screens: {
+                ManagerTabs: { screens: {
+                  Dashboard: 'manager/dashboard',
+                  Schedule: 'manager/schedule',
+                  Reports: 'manager/reports',
+                  Checkpoints: 'manager/checkpoints',
+                } },
+                GuardCheckCallPath: 'manager/guards/:guardId/check-call-path',
+              } },
+              GuardApp: { screens: {
+                Home: 'guard/home',
+                'Check Call': 'guard/check-call',
+                Patrol: 'guard/patrol',
+                Shifts: 'guard/schedule',
+                Profile: 'guard/profile',
+              } },
+            } },
+          }}
+        >
           <StatusBar style="dark" backgroundColor={COLORS.bgRoot} />
           <SafeAreaView style={styles.safeRoot} edges={['top']}>
             <RootNavigator />
