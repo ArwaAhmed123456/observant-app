@@ -191,8 +191,11 @@ The seed uses `BOOTSTRAP_ADMIN_PASSWORD` from your environment and never prints 
 | GET | `/reports/shift-calls` | manager | Full JSON report |
 | GET | `/reports/shift-calls/csv` | manager | CSV download |
 | GET | `/reports/summary` | manager | KPI summary |
+| GET | `/reports/check-call-log` | manager/admin | 13-hour Day/Night check-call matrix |
 
 **Query params for reports:** `from`, `to`, `guardId`, `siteId`, `type` (combined/check_calls/patrols)
+
+**Check Call Log query params:** `startDate` and `endDate` are required (`YYYY-MM-DD`); optional `siteId`, `officerId`, and `shiftType` (`Day` or `Night`). Manager access is limited to assigned sites. The response includes company metadata, the date range, and rows grouped by site, officer, shift date, and shift type. Each `hourlyChecks` item contains the hour label, scheduled timestamp, check entries, and an `isLate` flag. Times and date boundaries are UTC; late entries use the organisation's configured check-call response window (10 minutes by default).
 
 ---
 
