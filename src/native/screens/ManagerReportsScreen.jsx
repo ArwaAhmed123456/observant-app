@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Modal, TextInput, Switch, Share,
+  Modal, TextInput, Switch, Share, Alert,
 } from 'react-native';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { FileText, Download, Filter, X, ChevronDown } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, input as inputStyle, btnPrimary } from '../../ds';
+import { API_ENABLED, apiGet } from '../../services/api';
 
 const REPORT_TYPES = ['combined', 'check_calls', 'patrols'];
 const DATE_RANGES  = ['today', 'this_week', 'this_month', 'custom'];
@@ -66,6 +67,7 @@ export function ManagerReportsScreen() {
   const [colModal, setColModal]           = useState(false);
   const [guardPickerModal, setGuardPickerModal] = useState(false);
   const [sitePickerModal, setSitePickerModal]   = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
 
   // Build report rows
   const rows = useMemo(() => {
@@ -139,12 +141,53 @@ export function ManagerReportsScreen() {
   }, [reportType, guardFilter, siteFilter, dateRange, customStart, customEnd,
       checkCalls, patrolSessions, patrolCaptures, users, sites, shiftSessions, checkpoints, currentUser]);
 
-  const generateCSV = () => {
+  const generateCSV = async () => {
+    if (exportBusy) return;
+    setExportBusy(true);
+    try {
     const dayHours = Array.from({ length: 13 }, (_, i) => `${String(7 + i).padStart(2, '0')}00`);
     const nightHours = Array.from({ length: 13 }, (_, i) => `${String((19 + i) % 24).padStart(2, '0')}00`);
     const headers = ['Date','Site Name','Security Officer','ID No','Shift Times (DAY/Night)','Record Type',...dayHours,...nightHours,'Incident Log / Notes'];
     const groups = new Map();
-    (reportType === 'combined' || reportType === 'check_calls' ? checkCalls : []).filter(cc => isInRange(cc.firedAt, dateRange, customStart, customEnd))
+    let matrixRows = [];
+    if (API_ENABLED && (reportType === 'combined' || reportType === 'check_calls')) {
+      const asLocalDay = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+      const end = new Date(); end.setHours(0, 0, 0, 0);
+      const start = new Date(end);
+      if (dateRange === 'this_week') { const weekday = start.getDay() || 7; start.setDate(start.getDate() - weekday + 1); }
+      else if (dateRange === 'this_month') start.setDate(1);
+      else if (dateRange === 'custom') {
+        if (!customStart || !customEnd) throw new Error('Choose both a start date and an end date to export a custom report.');
+        const parsedStart = new Date(`${customStart}T00:00:00`);
+        const parsedEnd = new Date(`${customEnd}T00:00:00`);
+        if (Number.isNaN(parsedStart.getTime()) || Number.isNaN(parsedEnd.getTime()) || parsedStart > parsedEnd) throw new Error('Enter valid custom dates, with the start date on or before the end date.');
+        start.setTime(parsedStart.getTime()); end.setTime(parsedEnd.getTime());
+      }
+      const params = new URLSearchParams({ startDate: asLocalDay(start), endDate: asLocalDay(end) });
+      if (siteFilter !== 'all') params.set('siteId', siteFilter);
+      if (guardFilter !== 'all') params.set('officerId', guardFilter);
+      const report = await apiGet(`/api/reports/check-call-log?${params}`);
+      matrixRows = report.rows || [];
+    }
+    matrixRows
+      .forEach(row => {
+        const slots = {};
+        const notes = [];
+        (row.hourlyChecks || []).forEach(slot => {
+          const values = (slot.checks || []).map(check => {
+            if (check.note) notes.push(check.note);
+            const value = check.time || (check.response === 'missed' ? 'MISSED' : '');
+            return `${value}${check.isLate ? ' LATE' : ''}`;
+          }).filter(Boolean);
+          if (values.length) slots[slot.hour] = values.join('; ');
+        });
+        groups.set([row.shiftDate, row.siteId, row.officerId, row.shiftType].join('|'), {
+          date: row.shiftDate, site: row.siteName || '—', guard: row.officerName || '—', badge: row.badgeNumber || '—',
+          shift: `${row.shiftType} ${row.shiftStart ? formatTime(row.shiftStart) : ''}${row.shiftEnd ? `–${formatTime(row.shiftEnd)}` : ''}`,
+          type: 'Check Call Log', slots, notes,
+        });
+      });
+    if (!API_ENABLED) (reportType === 'combined' || reportType === 'check_calls' ? checkCalls : []).filter(cc => isInRange(cc.firedAt, dateRange, customStart, customEnd))
       .filter(cc => currentUser.siteIds?.includes(cc.siteId))
       .filter(cc => guardFilter === 'all' || cc.guardId === guardFilter)
       .filter(cc => siteFilter === 'all' || cc.siteId === siteFilter)
@@ -176,14 +219,21 @@ export function ManagerReportsScreen() {
     }));
     const allRows = [...checklistRows, ...patrolRows];
     const escape = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
-    const lines = [headers, ...allRows.map(row => [row.date,row.site,row.guard,row.badge,row.shift,row.type,
-      ...dayHours.map(hour => row.slots[hour] || ''), ...nightHours.map(hour => row.slots[hour] || ''), row.notes.join('; ')])]
+    const lines = [headers, ...allRows.map(row => {
+      const hours = row.shift?.startsWith('Night') ? [...dayHours.map(() => ''), ...nightHours.map(hour => row.slots[hour] || '')] : [...dayHours.map(hour => row.slots[hour] || ''), ...nightHours.map(() => '')];
+      return [row.date,row.site,row.guard,row.badge,row.shift,row.type, ...hours, row.notes.join('; ')];
+    })]
       .map(line => line.map(escape).join(','));
     const csv = lines.join('\n');
-    Share.share({
+    await Share.share({
       title: 'Observant Shift Report',
       message: csv,
     });
+    } catch (error) {
+      Alert.alert('Report export failed', error.message || 'Could not generate this report. Check your connection and try again.');
+    } finally {
+      setExportBusy(false);
+    }
   };
 
   const guardName = guardFilter !== 'all' ? users.find(u => u.id === guardFilter)?.name : 'All Guards';
@@ -201,9 +251,9 @@ export function ManagerReportsScreen() {
           <TouchableOpacity style={styles.iconBtn} onPress={() => setFilterModal(true)}>
             <Filter color={P.t2} size={20} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.exportBtn} onPress={generateCSV}>
+          <TouchableOpacity style={[styles.exportBtn, exportBusy && { opacity: 0.65 }]} onPress={generateCSV} disabled={exportBusy}>
             <Download color={P.white} size={15} />
-            <Text style={styles.exportBtnTxt}>Export CSV</Text>
+            <Text style={styles.exportBtnTxt}>{exportBusy ? 'Generating…' : 'Export CSV'}</Text>
           </TouchableOpacity>
         </View>
       </View>

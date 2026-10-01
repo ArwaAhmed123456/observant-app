@@ -46,8 +46,8 @@ export function ManagerRosterScreen() {
   const [editCheckpointIds, setEditCheckpointIds] = useState([]);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [timeModal, setTimeModal]         = useState(null);
-  const [startTime, setStartTime]         = useState('18:00');
-  const [endTime, setEndTime]             = useState('06:00');
+  const [startTime, setStartTime]         = useState('07:00');
+  const [endTime, setEndTime]             = useState('19:00');
   const [templateName, setTemplateName]   = useState('');
   const [saveTemplateModal, setSaveTemplateModal] = useState(false);
   const [templateModal, setTemplateModal] = useState(false);
@@ -55,7 +55,7 @@ export function ManagerRosterScreen() {
   const [guardPickerVisible, setGuardPickerVisible] = useState(false);
   const [timePickerOpen, setTimePickerOpen] = useState(null);
 
-  const guards  = users.filter(u => u.role === 'guard' && (currentUser.role === 'superadmin' || currentUser.role === 'admin' || currentUser.siteIds?.includes(u.siteId)));
+  const guards  = users.filter(u => u.role === 'guard' && (currentUser.role === 'superadmin' || currentUser.role === 'admin' || currentUser.siteIds?.some(siteId => String(siteId) === String(u.siteId))));
   const weekKey = toWeekKey(weekStart);
 
   const prevWeek = () => setWeekStart(prev => addDays(prev, -7));
@@ -83,7 +83,7 @@ export function ManagerRosterScreen() {
       return hours < 24 && minutes < 60;
     };
     if (!validTime(startTime) || !validTime(endTime) || startTime === endTime) {
-      Alert.alert('Invalid time', 'Use HH:MM format (e.g. 18:00)');
+      Alert.alert('Invalid time', 'Use HH:MM format (for example, 07:00).');
       return;
     }
     setEditDays(prev => ({ ...prev, [timeModal.dayKey]: { start: startTime, end: endTime } }));

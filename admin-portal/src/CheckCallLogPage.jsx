@@ -24,24 +24,6 @@ const getDateRange = preset => {
   if (preset === 'yearly') start.setMonth(0, 1);
   return { from: isoDay(start), to: isoDay(end) };
 };
-const getShiftType = session => {
-  const start = session.scheduledStart || session.bookedOnAt;
-  const hour = typeof start === 'string' && /^\d{2}:\d{2}$/.test(start) ? Number(start.slice(0, 2)) : new Date(start).getHours();
-  return hour >= 7 && hour < 19 ? 'Day' : 'Night';
-};
-const slotDates = (session, shiftType) => {
-  const base = new Date(session.bookedOnAt);
-  const startText = session.scheduledStart;
-  let anchor = startText && /^\d{2}:\d{2}$/.test(startText)
-    ? new Date(base.getFullYear(), base.getMonth(), base.getDate(), Number(startText.slice(0, 2)), Number(startText.slice(3, 5)))
-    : base;
-  if (shiftType === 'Night' && anchor.getHours() < 12) anchor.setDate(anchor.getDate() - 1);
-  const firstHour = shiftType === 'Day' ? 7 : 19;
-  const start = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate(), firstHour, 0, 0, 0);
-  if (anchor.getTime() < start.getTime() - 12 * 60 * 60 * 1000) start.setDate(start.getDate() - 1);
-  return Array.from({ length: 13 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate(), start.getHours() + index));
-};
-
 async function request(path, token, signal) {
   const response = await fetch(`${API}${path}`, { headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }, signal });
   const payload = await response.json().catch(() => ({}));
@@ -57,8 +39,7 @@ export default function CheckCallLogPage({ session }) {
   const [filters, setFilters] = useState({ range: getDateRange('weekly'), site: '', guard: '', shift: 'all' });
   const [sites, setSites] = useState([]);
   const [guards, setGuards] = useState([]);
-  const [sessions, setSessions] = useState([]);
-  const [calls, setCalls] = useState([]);
+  const [matrix, setMatrix] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [generatedAt, setGeneratedAt] = useState(new Date());
@@ -79,19 +60,16 @@ export default function CheckCallLogPage({ session }) {
   async function generate(next = filters) {
     if (next.range.from > next.range.to) { setError('Start date must be on or before finish date.'); return; }
     setLoading(true); setError('');
-    const params = new URLSearchParams({ from: `${next.range.from}T00:00:00`, to: `${next.range.to}T23:59:59`, limit: '1000' });
-    if (next.site) params.set('siteId', next.site);
-    if (next.guard) params.set('guardId', next.guard);
     try {
-      const [shiftData, callData] = await Promise.all([
-        request(`/api/shifts?${params}`, session.accessToken),
-        request(`/api/check-calls?${params}`, session.accessToken),
-      ]);
-      setSessions(shiftData.sessions || []);
-      setCalls(callData.checkCalls || []);
+      const reportParams = new URLSearchParams({ startDate: next.range.from, endDate: next.range.to });
+      if (next.site) reportParams.set('siteId', next.site);
+      if (next.guard) reportParams.set('officerId', next.guard);
+      if (next.shift !== 'all') reportParams.set('shiftType', next.shift);
+      const report = await request(`/api/reports/check-call-log?${reportParams}`, session.accessToken);
+      setMatrix(report.rows || []);
       setFilters(next);
       setGeneratedAt(new Date());
-    } catch (reason) { setError(reason.message || 'Could not load check call records.'); }
+    } catch (reason) { setMatrix([]); setError(reason.message || 'Could not load check call records.'); }
     finally { setLoading(false); }
   }
 
@@ -101,37 +79,18 @@ export default function CheckCallLogPage({ session }) {
   }
 
   const reportRows = useMemo(() => {
-    const sessionsById = new Map(sessions.map(item => [idOf(item), item]));
-    const callsBySession = new Map();
-    calls.forEach(call => {
-      const key = idOf(call.sessionId);
-      if (!key) return;
-      if (!callsBySession.has(key)) callsBySession.set(key, []);
-      callsBySession.get(key).push(call);
-    });
-    const sessionsForReport = sessions.filter(item => filters.shift === 'all' || getShiftType(item) === filters.shift);
-    return sessionsForReport.map(item => {
-      const type = getShiftType(item);
-      const slots = slotDates(item, type);
-      const shiftCalls = callsBySession.get(idOf(item)) || [];
-      const entries = slots.map(slot => {
-        const end = new Date(slot.getTime() + 60 * 60 * 1000);
-        const candidates = shiftCalls.filter(call => {
-          const timestamp = call.respondedAt ? new Date(call.respondedAt) : null;
-          return timestamp && timestamp >= slot && timestamp < end;
-        }).sort((a, b) => new Date(a.respondedAt) - new Date(b.respondedAt));
-        const call = candidates[0];
-        if (!call) return { value: '-', late: false };
-        const timestamp = new Date(call.respondedAt);
-        return { value: timeLabel(timestamp), late: timestamp.getTime() > slot.getTime() + 10 * 60 * 1000 };
-      });
-      return {
-        key: idOf(item), site: item.siteId?.name || '—', guard: item.guardId?.name || '—', badge: item.guardId?.badgeNumber || '—',
-        shift: `${type.toUpperCase()} ${item.scheduledStart || timeLabel(item.bookedOnAt).replace(/(\d{2})(\d{2})/, '$1:$2')}–${item.scheduledEnd || (item.bookedOffAt ? timeLabel(item.bookedOffAt).replace(/(\d{2})(\d{2})/, '$1:$2') : '—')}`,
-        slots, entries,
-      };
-    }).sort((a, b) => a.site.localeCompare(b.site) || a.guard.localeCompare(b.guard));
-  }, [sessions, calls, filters.shift]);
+    return matrix.map(item => ({
+      ...item,
+      key: [item.siteId, item.officerId, item.shiftDate, item.shiftType].join(':'),
+      site: item.siteName || '—', guard: item.officerName || '—', badge: item.badgeNumber || '—',
+      shift: `${item.shiftType.toUpperCase()} ${item.shiftStart ? timeLabel(item.shiftStart).replace(/(\d{2})(\d{2})/, '$1:$2') : '—'}–${item.shiftEnd ? timeLabel(item.shiftEnd).replace(/(\d{2})(\d{2})/, '$1:$2') : '—'}`,
+      slots: (item.hourlyChecks || []).map(slot => new Date(slot.scheduledAt)),
+      entries: (item.hourlyChecks || []).map(slot => ({
+        value: (slot.checks || []).map(check => `${check.time || (check.response === 'missed' ? 'MISSED' : '—')}${check.isLate ? ' LATE' : ''}`).join(', ') || '-',
+        late: Boolean(slot.isLate),
+      })),
+    })).sort((a, b) => a.site.localeCompare(b.site) || a.guard.localeCompare(b.guard));
+  }, [matrix]);
 
   if (!allowed) return <section className="unauthorized-card"><div className="empty-mark">!</div><h1>Manager access required</h1><p>This Check Call Log contains sensitive operational records. Sign in with a Manager or Admin account to continue.</p></section>;
 
@@ -157,7 +116,7 @@ export default function CheckCallLogPage({ session }) {
       <h2>Check Call Log</h2>
       <div className="checklog-rules"><strong>IMPORTANT INSTRUCTIONS</strong><p>The precise time must be recorded. Late CALLS must be recorded in RED ink and a brief explanation in the Logbook.</p><p>Missed calls (Security Officer not responding to your call after 15 minutes) must be reported &amp; fully explained in the Incident Log Book.</p></div>
       {loading ? <div className="checklog-empty screen-only">Generating the report…</div> : reportRows.length ? (filters.shift === 'all' ? ['Day','Night'] : [filters.shift]).map(type => {
-        const group = reportRows.filter(row => row.slots[0].getHours() === (type === 'Day' ? 7 : 19));
+        const group = reportRows.filter(row => row.shiftType === type);
         if (!group.length) return null;
         return <CheckCallTable key={type} rows={group} shiftType={type} />;
       }) : <div className="checklog-empty"><div className="empty-mark">◷</div><strong>No shift records for this range</strong><span>Choose another date range or adjust the site and officer filters.</span></div>}

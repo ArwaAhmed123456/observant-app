@@ -15,7 +15,7 @@ const TABS = ['overview', 'alerts'];
 
 export function ManagerDashboardScreen({ navigation }) {
   const {
-    currentUser, users, sites, logout,
+    currentUser, users, sites, logout, createUser,
     shiftSessions, checkCalls, patrolSessions,
     alerts, markAlertRead, markAllAlertsRead, getUnreadAlerts,
     addAlert, addManualCheckCall, addManualPatrol,
@@ -30,7 +30,15 @@ export function ManagerDashboardScreen({ navigation }) {
   const [manualNote, setManualNote]     = useState('');
   const [manualLoading, setManualLoading] = useState(false);
 
-  const guards   = (users || []).filter(u => u.role === 'guard' && currentUser?.siteIds?.includes(u.siteId));
+  // Manager-created guard account
+  const [createGuardVisible, setCreateGuardVisible] = useState(false);
+  const [createGuardBusy, setCreateGuardBusy] = useState(false);
+  const [guardDraft, setGuardDraft] = useState({ name: '', email: '', password: '', badgeNumber: '', phone: '', siteId: '' });
+
+  const managerSiteIds = (currentUser?.siteIds || []).map(String);
+  const canSeeSite = siteId => currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || managerSiteIds.includes(String(siteId || ''));
+  const availableSites = (sites || []).filter(site => canSeeSite(site.id || site._id));
+  const guards   = (users || []).filter(u => u.role === 'guard' && canSeeSite(u.siteId));
   const unread   = getUnreadAlerts(currentUser?.id || currentUser?._id);
   const todayStr = new Date().toISOString().slice(0,10);
 
@@ -45,6 +53,36 @@ export function ManagerDashboardScreen({ navigation }) {
   const getGuardStatus = g => {
     const session = (shiftSessions || []).find(s => (s.guardId === g.id || s.guardId === g._id) && !s.bookedOffAt);
     return { active: !!session, session };
+  };
+
+  const handleCreateGuard = async () => {
+    const { name, email, password, badgeNumber, phone, siteId } = guardDraft;
+    if (!name.trim() || !email.trim() || !siteId) {
+      Alert.alert('Complete guard details', 'Enter the guard name and work email, then assign a site.');
+      return;
+    }
+    if (password.length < 12) {
+      Alert.alert('Password too short', 'Set a temporary password with at least 12 characters.');
+      return;
+    }
+    setCreateGuardBusy(true);
+    try {
+      const result = await createUser({
+        name: name.trim(), email: email.trim().toLowerCase(), password,
+        role: 'guard', badgeNumber: badgeNumber.trim(), phone: phone.trim(), siteId,
+      });
+      if (!result?.success) throw new Error(result?.error || 'The guard account could not be created.');
+      setCreateGuardVisible(false);
+      setGuardDraft({ name: '', email: '', password: '', badgeNumber: '', phone: '', siteId: '' });
+      Alert.alert('Guard account created', `${result.user?.name || name} is assigned to ${availableSites.find(site => String(site.id || site._id) === String(siteId))?.name || 'the selected site'}. Assign their shifts next.`, [
+        { text: 'Assign schedule', onPress: () => navigation?.navigate('Schedule') },
+        { text: 'Done' },
+      ]);
+    } catch (error) {
+      Alert.alert('Could not create guard', error.message || 'Check the details and try again.');
+    } finally {
+      setCreateGuardBusy(false);
+    }
   };
 
   // ── Manual Log ─────────────────────────────────────────────────────────────
@@ -203,7 +241,19 @@ export function ManagerDashboardScreen({ navigation }) {
             <KPICard value={todayStats.completedPatrols} label="Patrols"  />
           </View>
 
-          <Text style={styles.sectionTitle}>LIVE GUARD STATUS ({guards.length})</Text>
+          <View style={styles.guardSectionHeader}>
+            <Text style={[styles.sectionTitle, { flex: 1, marginBottom: 0 }]}>LIVE GUARD STATUS ({guards.length})</Text>
+            <TouchableOpacity style={styles.addGuardButton} onPress={() => {
+              if (!availableSites.length) {
+                Alert.alert('No site assigned', 'Ask an administrator to assign a site to your manager account before creating guards.');
+                return;
+              }
+              setGuardDraft(previous => ({ ...previous, siteId: previous.siteId || String(availableSites[0].id || availableSites[0]._id) }));
+              setCreateGuardVisible(true);
+            }}>
+              <Text style={styles.addGuardButtonText}>+ Add guard</Text>
+            </TouchableOpacity>
+          </View>
           {guards.length === 0 ? (
             <EmptyState
               icon="shield"
@@ -284,6 +334,37 @@ export function ManagerDashboardScreen({ navigation }) {
       )}
 
       {/* Manual Log Modal */}
+      <Modal visible={createGuardVisible} transparent animationType="slide" onRequestClose={() => setCreateGuardVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: S.xl }} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalTitle}>Create guard account</Text>
+            <Text style={styles.modalSub}>Create a sign-in for an officer at one of your assigned sites. You can publish their rota immediately after.</Text>
+            <Text style={styles.fieldLabel}>Full name</Text>
+            <TextInput style={styles.accountInput} value={guardDraft.name} onChangeText={name => setGuardDraft(value => ({ ...value, name }))} placeholder="Guard name" placeholderTextColor={COLORS.textDisabled} autoCapitalize="words" />
+            <Text style={styles.fieldLabel}>Work email</Text>
+            <TextInput style={styles.accountInput} value={guardDraft.email} onChangeText={email => setGuardDraft(value => ({ ...value, email }))} placeholder="guard@company.com" placeholderTextColor={COLORS.textDisabled} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
+            <Text style={styles.fieldLabel}>Temporary password (12+ characters)</Text>
+            <TextInput style={styles.accountInput} value={guardDraft.password} onChangeText={password => setGuardDraft(value => ({ ...value, password }))} placeholder="Set a secure temporary password" placeholderTextColor={COLORS.textDisabled} secureTextEntry autoCapitalize="none" />
+            <View style={styles.guardFieldsRow}>
+              <View style={{ flex: 1 }}><Text style={styles.fieldLabel}>Badge ID</Text><TextInput style={styles.accountInput} value={guardDraft.badgeNumber} onChangeText={badgeNumber => setGuardDraft(value => ({ ...value, badgeNumber }))} placeholder="Optional" placeholderTextColor={COLORS.textDisabled} /></View>
+              <View style={{ flex: 1 }}><Text style={styles.fieldLabel}>Phone</Text><TextInput style={styles.accountInput} value={guardDraft.phone} onChangeText={phone => setGuardDraft(value => ({ ...value, phone }))} placeholder="Optional" placeholderTextColor={COLORS.textDisabled} keyboardType="phone-pad" /></View>
+            </View>
+            <Text style={styles.fieldLabel}>Assign site</Text>
+            <View style={styles.typeRow}>
+              {availableSites.map(site => {
+                const id = String(site.id || site._id);
+                const active = String(guardDraft.siteId) === id;
+                return <TouchableOpacity key={id} style={[styles.typePill, active && styles.typePillActive]} onPress={() => setGuardDraft(value => ({ ...value, siteId: id }))}><Text style={[styles.typePillTxt, active && styles.typePillTxtActive]}>{site.name}</Text></TouchableOpacity>;
+              })}
+            </View>
+            <TouchableOpacity style={[styles.submitBtn, createGuardBusy && styles.btnDisabled]} onPress={handleCreateGuard} disabled={createGuardBusy}>
+              <Text style={styles.submitBtnTxt}>{createGuardBusy ? 'Creating account…' : 'Create guard & assign site'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setCreateGuardVisible(false)}><Text style={styles.cancelBtnTxt}>Cancel</Text></TouchableOpacity>
+          </ScrollView>
+        </View>
+      </Modal>
+
       <Modal visible={!!manualGuard} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
@@ -377,6 +458,9 @@ const styles = StyleSheet.create({
   kpiVal:        { color: COLORS.textPrimary, fontSize: 22, fontWeight: '800' },
   kpiLabel:      { color: COLORS.textMuted, fontSize: 10, marginTop: 2 },
   sectionTitle:  { ...TYPE.label, marginBottom: S.md },
+  guardSectionHeader:{ flexDirection: 'row', alignItems: 'center', gap: S.sm, marginBottom: S.md },
+  addGuardButton:{ backgroundColor: COLORS.brand, borderRadius: R.md, paddingHorizontal: S.md, paddingVertical: S.sm },
+  addGuardButtonText:{ color: COLORS.white, fontSize: 12, fontWeight: '800' },
   emptyHint:     { color: COLORS.textDisabled, fontSize: 13, textAlign: 'center', marginTop: S.xl },
   guardCard:     { marginBottom: S.md },
   guardCardActive:{ borderColor: COLORS.brand },
@@ -420,6 +504,9 @@ const styles = StyleSheet.create({
   badgeText:     { color: COLORS.white, fontSize: 9, fontWeight: '800' },
   modalOverlay:  { flex: 1, backgroundColor: COLORS.bgOverlay, justifyContent: 'flex-end' },
   modalCard:     { backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.borderSubtle, ...shadows.lg },
+  createGuardSheet:{ width: '100%', maxHeight: '92%', backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderTopWidth: 0.5, borderColor: COLORS.borderSubtle },
+  guardFieldsRow:{ flexDirection: 'row', gap: S.md, marginBottom: S.md },
+  accountInput:  { backgroundColor: COLORS.bgInput, borderWidth: 0.5, borderColor: COLORS.borderSubtle, borderRadius: R.md, paddingHorizontal: S.md, paddingVertical: 11, color: COLORS.textPrimary, fontSize: 14, marginBottom: S.md },
   modalTitle:    { ...TYPE.subtitle, marginBottom: S.xs },
   modalSub:      { color: COLORS.textMuted, fontSize: 13, lineHeight: 20, marginBottom: S.lg },
   fieldLabel:    { color: COLORS.textSecondary, fontSize: 12, fontWeight: '600', marginBottom: S.sm, textTransform: 'uppercase', letterSpacing: 0.5 },

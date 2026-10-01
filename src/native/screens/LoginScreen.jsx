@@ -388,11 +388,15 @@ const styles = StyleSheet.create({
   // Card
   card: {
     borderRadius: BR.xl,
-    borderWidth: 1,
-    borderColor: P.b3,
+    borderWidth: 0.5,
+    borderColor: P.b1,
     padding: SP.px24,
     overflow: 'hidden',
-    ...SH_TOKENS.lg,
+    shadowColor: '#0B192C',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.035,
+    shadowRadius: 4,
+    elevation: 0,
     marginBottom: SP.px24,
   },
   cardGradient: {
