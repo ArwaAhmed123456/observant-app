@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
-  Modal, TextInput
+  Modal, TextInput, KeyboardAvoidingView, Platform
 } from 'react-native';
 import { useApp, formatTime } from '../../context/AppContext';
-import { LogOut, Bell, MapPin, CheckCircle, AlertTriangle, Clock, Users, Zap, ClipboardList, Shield } from 'lucide-react-native';
+import { LogOut, Bell, MapPin, CheckCircle, AlertTriangle, Clock, Users, Zap, ClipboardList, Shield, PlusCircle, ChevronRight, X } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { StatusTile } from '../components/StatusTile';
 import { EmptyState } from '../components/EmptyState';
@@ -15,13 +15,16 @@ const TABS = ['overview', 'alerts'];
 
 export function ManagerDashboardScreen({ navigation }) {
   const {
-    currentUser, users, sites, logout, createUser,
+    currentUser, users, sites, logout, createUser, createSite,
     shiftSessions, checkCalls, patrolSessions,
     alerts, markAlertRead, markAllAlertsRead, getUnreadAlerts,
     addAlert, addManualCheckCall, addManualPatrol,
   } = useApp();
 
   const [tab, setTab] = useState('overview');
+
+  // Alert detail modal
+  const [selectedAlert, setSelectedAlert] = useState(null);
 
   // Manual log modal
   const [manualGuard, setManualGuard]   = useState(null);
@@ -34,6 +37,11 @@ export function ManagerDashboardScreen({ navigation }) {
   const [createGuardVisible, setCreateGuardVisible] = useState(false);
   const [createGuardBusy, setCreateGuardBusy] = useState(false);
   const [guardDraft, setGuardDraft] = useState({ name: '', email: '', password: '', badgeNumber: '', phone: '', siteId: '' });
+
+  // Manager-created site
+  const [createSiteVisible, setCreateSiteVisible] = useState(false);
+  const [createSiteBusy, setCreateSiteBusy] = useState(false);
+  const [siteDraft, setSiteDraft] = useState({ name: '', address: '', geofenceRadius: '250' });
 
   const managerSiteIds = (currentUser?.siteIds || []).map(String);
   const canSeeSite = siteId => currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || managerSiteIds.includes(String(siteId || ''));
@@ -82,6 +90,35 @@ export function ManagerDashboardScreen({ navigation }) {
       Alert.alert('Could not create guard', error.message || 'Check the details and try again.');
     } finally {
       setCreateGuardBusy(false);
+    }
+  };
+
+  const handleCreateSite = async () => {
+    const { name, address, geofenceRadius } = siteDraft;
+    if (!name.trim()) {
+      Alert.alert('Site Name Required', 'Please enter a name for the new site.');
+      return;
+    }
+    setCreateSiteBusy(true);
+    try {
+      const result = await createSite({
+        name: name.trim(),
+        address: address.trim(),
+        managerId: currentUser?.id || currentUser?._id,
+        geofenceRadiusMetres: Math.max(50, Number(geofenceRadius) || 250),
+      });
+      if (!result?.success) throw new Error(result?.error || 'Site creation failed.');
+      setCreateSiteVisible(false);
+      setSiteDraft({ name: '', address: '', geofenceRadius: '250' });
+      const newId = String(result.site?.id || result.site?._id);
+      if (newId) {
+        setGuardDraft(prev => ({ ...prev, siteId: newId }));
+      }
+      Alert.alert('Site Created', `${result.site?.name || name} has been registered and is now available to assign to security officers.`);
+    } catch (error) {
+      Alert.alert('Could not create site', error.message || 'Please try again.');
+    } finally {
+      setCreateSiteBusy(false);
     }
   };
 
@@ -315,7 +352,11 @@ export function ManagerDashboardScreen({ navigation }) {
               <TouchableOpacity
                 key={alert.id || alert._id}
                 style={[styles.alertCard, { borderColor: sev.border, backgroundColor: sev.bg }]}
-                onPress={() => markAlertRead(alert.id || alert._id)}
+                onPress={() => {
+                  markAlertRead(alert.id || alert._id);
+                  setSelectedAlert(alert);
+                }}
+                activeOpacity={0.8}
               >
                 <View style={[styles.alertSevBadge, { backgroundColor: sev.color }]}>
                   <Text style={styles.alertSevTxt}>{sev.label}</Text>
@@ -327,15 +368,157 @@ export function ManagerDashboardScreen({ navigation }) {
                   <Text style={styles.alertTime}>{formatTime(alert.createdAt)}</Text>
                 </View>
                 {isUnread && <View style={[styles.unreadDot, { backgroundColor: sev.color }]} />}
+                <ChevronRight size={16} color={sev.color} style={{ alignSelf: 'center', marginLeft: 4 }} />
               </TouchableOpacity>
             );
           })}
         </ScrollView>
       )}
 
-      {/* Manual Log Modal */}
-      <Modal visible={createGuardVisible} transparent animationType="slide" onRequestClose={() => setCreateGuardVisible(false)}>
+      {/* ── Alert Detail Modal ── */}
+      <Modal visible={!!selectedAlert} transparent animationType="fade" onRequestClose={() => setSelectedAlert(null)}>
         <View style={styles.modalOverlay}>
+          <View style={styles.alertDetailCard}>
+            {selectedAlert && (() => {
+              const sev = alertSeverity(selectedAlert.type);
+              const targetGuard = (users || []).find(u => u.id === selectedAlert.guardId || u._id === selectedAlert.guardId);
+              const targetSite = (sites || []).find(s => s.id === selectedAlert.siteId || s._id === selectedAlert.siteId);
+              const guardName = selectedAlert.guardName || targetGuard?.name || 'Officer';
+              const badgeNum = selectedAlert.badgeNumber || targetGuard?.badgeNumber || '—';
+              const siteName = selectedAlert.siteName || targetSite?.name || 'Assigned Site';
+
+              return (
+                <ScrollView contentContainerStyle={{ paddingBottom: 16 }} showsVerticalScrollIndicator={false}>
+                  <View style={styles.alertDetailHeader}>
+                    <View style={[styles.alertSevBadge, { backgroundColor: sev.color }]}>
+                      <Text style={styles.alertSevTxt}>{sev.label}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => setSelectedAlert(null)} style={{ padding: 4 }}>
+                      <X size={20} color={P.t3} />
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={[styles.alertDetailTitle, { color: sev.color }]}>
+                    {selectedAlert.title || 'Security Exception Alert'}
+                  </Text>
+                  <Text style={styles.alertDetailTime}>{formatTime(selectedAlert.createdAt)} · {new Date(selectedAlert.createdAt).toLocaleDateString()}</Text>
+
+                  {/* Officer & Site Telemetry Card */}
+                  <View style={styles.telemetryCard}>
+                    <View style={styles.telemetryRow}>
+                      <Text style={styles.telemetryLabel}>SECURITY OFFICER:</Text>
+                      <Text style={styles.telemetryVal}>{guardName} ({badgeNum})</Text>
+                    </View>
+                    <View style={styles.telemetryRow}>
+                      <Text style={styles.telemetryLabel}>OPERATIONAL SITE:</Text>
+                      <Text style={styles.telemetryVal}>{siteName}</Text>
+                    </View>
+                    {selectedAlert.category && (
+                      <View style={styles.telemetryRow}>
+                        <Text style={styles.telemetryLabel}>ISSUE CATEGORY:</Text>
+                        <Text style={[styles.telemetryVal, { color: P.warn }]}>{selectedAlert.category}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Message description */}
+                  <View style={styles.alertMessageBox}>
+                    <Text style={styles.alertMessageTxt}>{selectedAlert.message}</Text>
+                  </View>
+
+                  {selectedAlert.note && (
+                    <View style={styles.alertNoteBox}>
+                      <Text style={styles.alertNoteLabel}>OFFICER NOTE / EXPLANATION:</Text>
+                      <Text style={styles.alertNoteContent}>"{selectedAlert.note}"</Text>
+                    </View>
+                  )}
+
+                  {/* Action Buttons */}
+                  <View style={{ gap: 10, marginTop: 16 }}>
+                    {selectedAlert.guardId && (
+                      <TouchableOpacity
+                        style={styles.actionPrimaryBtn}
+                        onPress={() => {
+                          const gId = selectedAlert.guardId;
+                          setSelectedAlert(null);
+                          navigation?.navigate('GuardCheckCallPath', { guardId: gId });
+                        }}
+                      >
+                        <Text style={styles.actionPrimaryTxt}>View Guard Check-Call Path →</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    {targetGuard && (
+                      <TouchableOpacity
+                        style={styles.actionSecondaryBtn}
+                        onPress={() => {
+                          setManualGuard(targetGuard);
+                          setSelectedAlert(null);
+                        }}
+                      >
+                        <Text style={styles.actionSecondaryTxt}>Log Manual Check Call on Behalf</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    <TouchableOpacity style={styles.cancelBtn} onPress={() => setSelectedAlert(null)}>
+                      <Text style={styles.cancelBtnTxt}>Dismiss & Close</Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
+              );
+            })()}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Create Site Modal */}
+      <Modal visible={createSiteVisible} transparent animationType="slide" onRequestClose={() => setCreateSiteVisible(false)}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: S.xl }} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalTitle}>Register New Security Site</Text>
+            <Text style={styles.modalSub}>Add a new site or client facility to your management portfolio. You can assign security officers and check-calls immediately.</Text>
+
+            <Text style={styles.fieldLabel}>Site Name *</Text>
+            <TextInput
+              style={styles.accountInput}
+              value={siteDraft.name}
+              onChangeText={name => setSiteDraft(v => ({ ...v, name }))}
+              placeholder="e.g. Metro Data Center, North Gate"
+              placeholderTextColor={COLORS.textDisabled}
+            />
+
+            <Text style={styles.fieldLabel}>Site Address / Location</Text>
+            <TextInput
+              style={styles.accountInput}
+              value={siteDraft.address}
+              onChangeText={address => setSiteDraft(v => ({ ...v, address }))}
+              placeholder="e.g. 100 Commercial Road, London"
+              placeholderTextColor={COLORS.textDisabled}
+            />
+
+            <Text style={styles.fieldLabel}>Geofence Perimeter Radius (Metres)</Text>
+            <TextInput
+              style={styles.accountInput}
+              value={siteDraft.geofenceRadius}
+              onChangeText={geofenceRadius => setSiteDraft(v => ({ ...v, geofenceRadius }))}
+              placeholder="250"
+              placeholderTextColor={COLORS.textDisabled}
+              keyboardType="numeric"
+            />
+
+            <TouchableOpacity style={[styles.submitBtn, createSiteBusy && styles.btnDisabled]} onPress={handleCreateSite} disabled={createSiteBusy}>
+              <Text style={styles.submitBtnTxt}>{createSiteBusy ? 'Registering Site…' : 'Register & Enable Site'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setCreateSiteVisible(false)}>
+              <Text style={styles.cancelBtnTxt}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Create Guard Modal */}
+      <Modal visible={createGuardVisible} transparent animationType="slide" onRequestClose={() => setCreateGuardVisible(false)}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: S.xl }} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitle}>Create guard account</Text>
             <Text style={styles.modalSub}>Create a sign-in for an officer at one of your assigned sites. You can publish their rota immediately after.</Text>
@@ -349,7 +532,12 @@ export function ManagerDashboardScreen({ navigation }) {
               <View style={{ flex: 1 }}><Text style={styles.fieldLabel}>Badge ID</Text><TextInput style={styles.accountInput} value={guardDraft.badgeNumber} onChangeText={badgeNumber => setGuardDraft(value => ({ ...value, badgeNumber }))} placeholder="Optional" placeholderTextColor={COLORS.textDisabled} /></View>
               <View style={{ flex: 1 }}><Text style={styles.fieldLabel}>Phone</Text><TextInput style={styles.accountInput} value={guardDraft.phone} onChangeText={phone => setGuardDraft(value => ({ ...value, phone }))} placeholder="Optional" placeholderTextColor={COLORS.textDisabled} keyboardType="phone-pad" /></View>
             </View>
-            <Text style={styles.fieldLabel}>Assign site</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+              <Text style={styles.fieldLabel}>Assign site</Text>
+              <TouchableOpacity onPress={() => setCreateSiteVisible(true)}>
+                <Text style={{ color: COLORS.brand, fontSize: 11, fontWeight: '700' }}>+ Add new site</Text>
+              </TouchableOpacity>
+            </View>
             <View style={styles.typeRow}>
               {availableSites.map(site => {
                 const id = String(site.id || site._id);
@@ -362,11 +550,11 @@ export function ManagerDashboardScreen({ navigation }) {
             </TouchableOpacity>
             <TouchableOpacity style={styles.cancelBtn} onPress={() => setCreateGuardVisible(false)}><Text style={styles.cancelBtnTxt}>Cancel</Text></TouchableOpacity>
           </ScrollView>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={!!manualGuard} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Manual Log</Text>
             <Text style={styles.modalSub}>
@@ -419,7 +607,7 @@ export function ManagerDashboardScreen({ navigation }) {
               <Text style={styles.cancelBtnTxt}>Cancel</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -521,4 +709,21 @@ const styles = StyleSheet.create({
   cancelBtn:     { backgroundColor: COLORS.bgInput, borderRadius: R.md, paddingVertical: 12, alignItems: 'center', marginTop: S.sm },
   cancelBtnTxt:  { color: COLORS.textSecondary, fontSize: 14 },
   btnDisabled:   { opacity: 0.6 },
+  alertDetailCard: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.borderSubtle, maxHeight: '90%', ...shadows.lg },
+  alertDetailHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.sm },
+  alertDetailTitle: { fontSize: 17, fontWeight: '800', lineHeight: 22, marginTop: 4 },
+  alertDetailTime: { fontSize: 12, color: COLORS.textMuted, marginTop: 2, marginBottom: S.md },
+  telemetryCard: { backgroundColor: COLORS.bgInput, borderRadius: R.md, padding: S.md, borderWidth: 1, borderColor: COLORS.borderSubtle, gap: 6, marginBottom: S.md },
+  telemetryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  telemetryLabel: { fontSize: 11, fontWeight: '800', color: COLORS.textMuted, letterSpacing: 0.5 },
+  telemetryVal: { fontSize: 13, fontWeight: '700', color: COLORS.textPrimary },
+  alertMessageBox: { backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: R.md, padding: S.md, borderWidth: 1, borderColor: COLORS.borderSubtle, marginBottom: S.md },
+  alertMessageTxt: { color: COLORS.textPrimary, fontSize: 13, lineHeight: 20 },
+  alertNoteBox: { backgroundColor: 'rgba(245,158,11,0.08)', borderRadius: R.md, padding: S.md, borderWidth: 1, borderColor: 'rgba(245,158,11,0.25)', marginBottom: S.md },
+  alertNoteLabel: { fontSize: 10, fontWeight: '800', color: COLORS.warn, letterSpacing: 0.5, marginBottom: 4 },
+  alertNoteContent: { fontSize: 13, color: COLORS.textPrimary, fontStyle: 'italic', lineHeight: 19 },
+  actionPrimaryBtn: { backgroundColor: COLORS.brand, borderRadius: R.md, paddingVertical: 14, alignItems: 'center' },
+  actionPrimaryTxt: { color: COLORS.white, fontSize: 14, fontWeight: '800' },
+  actionSecondaryBtn: { backgroundColor: COLORS.bgInput, borderRadius: R.md, paddingVertical: 13, alignItems: 'center', borderWidth: 1, borderColor: COLORS.brand },
+  actionSecondaryTxt: { color: COLORS.brand, fontSize: 13, fontWeight: '700' },
 });

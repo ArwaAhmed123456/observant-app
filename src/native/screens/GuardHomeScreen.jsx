@@ -616,7 +616,9 @@ function CheckCallTimeline({ calls, activeSession, now, onPress }) {
     if (hour < firstHour) date.setDate(date.getDate() + 1);
     date.setHours(hour, 0, 0, 0);
     const matchingCall = calls.find(call => {
-      if (call.response !== 'yes') return false;
+      // Count any responded call (yes, no/issue, or manually submitted) as done for this hour slot
+      const isResponded = call.response === 'yes' || call.response === 'no' || call.isManualLog;
+      if (!isResponded) return false;
       const completedAt = new Date(call.respondedAt || call.responseTime || call.firedAt);
       return !Number.isNaN(completedAt.getTime()) && completedAt.getHours() === hour
         && completedAt.getDate() === date.getDate()

@@ -4,7 +4,7 @@
  */
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, TextInput,
+  View, Text, TouchableOpacity, StyleSheet, TextInput, KeyboardAvoidingView,
   ScrollView, Alert, Modal, Image, Animated, Platform,
 } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
@@ -22,7 +22,7 @@ const RING_R       = 54;
 const RING_CIRC    = 2 * Math.PI * RING_R;
 
 export function CheckCallScreen() {
-  const { currentUser, activeCheckCall, respondToCheckCall, checkCalls } = useApp();
+  const { currentUser, activeCheckCall, respondToCheckCall, recordManualGuardCheckCall, checkCalls, shiftSessions } = useApp();
 
   const [timeLeft, setTimeLeft]           = useState(WINDOW_SECS);
   const [responding, setResponding]       = useState(false);
@@ -35,6 +35,7 @@ export function CheckCallScreen() {
   const [issuePhoto, setIssuePhoto]       = useState(null);
   const [detailCC, setDetailCC]           = useState(null);
   const [successAnim, setSuccessAnim]     = useState(false);
+  const [manualSaving, setManualSaving] = useState(false);
 
   const successScale  = useRef(new Animated.Value(0)).current;
   const successOpacity= useRef(new Animated.Value(0)).current;
@@ -81,7 +82,13 @@ export function CheckCallScreen() {
 
   // ── Respond YES ────────────────────────────────────────────────────────────
   const handleYes = async () => {
-    if (!activeCheckCall) return;
+    if (!activeCheckCall) {
+      setManualSaving(true);
+      try { await recordManualGuardCheckCall('yes'); showSuccess(); }
+      catch (error) { Alert.alert('Check call not recorded', error.message || 'Please try again.'); }
+      finally { setManualSaving(false); }
+      return;
+    }
     setResponding(true);
     const ccId = activeCheckCall.id || activeCheckCall._id;
 
@@ -100,10 +107,23 @@ export function CheckCallScreen() {
   // ── Submit issue ──────────────────────────────────────────────────────────
   const handleSubmitIssue = async () => {
     if (!category) { Alert.alert('Select Category', 'Please choose an issue category before submitting.'); return; }
-    if (!activeCheckCall) return;
-    setResponding(true);
-    const ccId = activeCheckCall.id || activeCheckCall._id;
+    // Build note text early so it's available for both manual and automated paths
     const noteText = `[${category}]${note ? ' ' + note : ''}`;
+    setResponding(true);
+    if (!activeCheckCall) {
+      try {
+        await recordManualGuardCheckCall('no', noteText, category);
+        setShowIssueForm(false);
+        resetForm();
+        showSuccess();
+      } catch (error) {
+        Alert.alert('Issue not recorded', error.message || 'Please try again.');
+      } finally {
+        setResponding(false);
+      }
+      return;
+    }
+    const ccId = activeCheckCall.id || activeCheckCall._id;
 
     if (!isOnline) {
       await enqueue({ url: `/api/check-calls/${ccId}/respond`, method: 'POST', body: { response: 'no', note: noteText }, label: 'Check call issue' });
@@ -216,7 +236,19 @@ export function CheckCallScreen() {
               <Text style={s.noActiveIcon}>✓</Text>
             </View>
             <Text style={s.noActiveTitle}>No Active Check Call</Text>
-            <Text style={s.noActiveSub}>Check calls fire automatically every hour while you are booked on. Respond within 10 minutes.</Text>
+            <Text style={s.noActiveSub}>{shiftSessions.some(session => session.guardId === gId && !session.bookedOffAt)
+              ? 'No call is waiting. You can submit this hour’s check call now; otherwise your next automatic call arrives on the hour.'
+              : 'Book on to your shift to submit check calls and receive hourly reminders.'}</Text>
+            {shiftSessions.some(session => session.guardId === gId && !session.bookedOffAt) && (
+              <View style={s.manualActions}>
+                <TouchableOpacity style={s.manualOkayBtn} onPress={handleYes} disabled={manualSaving}>
+                  <Text style={s.manualOkayTxt}>{manualSaving ? 'RECORDING…' : '✓  EVERYTHING OK'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.manualIssueBtn} onPress={() => setShowIssueForm(true)}>
+                  <Text style={s.manualIssueTxt}>REPORT ISSUE</Text>
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         )}
 
@@ -254,7 +286,7 @@ export function CheckCallScreen() {
 
       {/* ── Success overlay ── */}
       {successAnim && (
-        <Animated.View style={[s.successOverlay, { opacity: successOpacity }]}>
+        <Animated.View pointerEvents="none" style={[s.successOverlay, { opacity: successOpacity }]}>
           <Animated.View style={[s.successBadge, { transform: [{ scale: successScale }] }]}>
             <LinearGradient colors={[P.ok, P.okDark]} style={s.successGrad}>
               <Text style={s.successIcon}>✓</Text>
@@ -267,8 +299,8 @@ export function CheckCallScreen() {
 
       {/* ── Issue Form Modal ── */}
       <Modal visible={showIssueForm} transparent animationType="slide">
-        <View style={s.sheetOverlay}>
-          <View style={s.sheet}>
+        <KeyboardAvoidingView style={s.sheetOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <ScrollView style={s.sheet} contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
             <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
             <View style={s.sheetHandle} />
             <View style={s.sheetTitleRow}>
@@ -304,7 +336,11 @@ export function CheckCallScreen() {
             <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
               <Text style={s.photoBtnTxt}>{issuePhoto ? '📷  Retake photo' : '📷  Take photo'}</Text>
             </TouchableOpacity>
-            {issuePhoto && <Image source={{ uri: issuePhoto }} style={s.photoPreview} />}
+            {issuePhoto && (
+              <View style={s.photoPreviewWrap}>
+                <Image source={{ uri: issuePhoto }} style={s.photoPreview} resizeMode="cover" />
+              </View>
+            )}
 
             {/* Submit */}
             <TouchableOpacity
@@ -319,8 +355,8 @@ export function CheckCallScreen() {
             <TouchableOpacity style={s.cancelBtn} onPress={() => { setShowIssueForm(false); resetForm(); }}>
               <Text style={s.cancelTxt}>Cancel</Text>
             </TouchableOpacity>
-          </View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* ── Category Picker ── */}
@@ -347,34 +383,51 @@ export function CheckCallScreen() {
         </View>
       </Modal>
 
-      {/* ── Detail Modal ── */}
+      {/* ── Detail Modal (Tactical Centered HUD) ── */}
       <Modal visible={!!detailCC} transparent animationType="fade" onRequestClose={() => setDetailCC(null)}>
-        <View style={s.sheetOverlay}>
-          <View style={s.sheet}>
-            <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
-            <View style={s.sheetHandle} />
+        <View style={s.modalBackdrop}>
+          <View style={s.detailCard}>
             {detailCC && (() => {
               const tok = statusToken(detailCC.response || 'upcoming');
               return (
                 <>
-                  <View style={s.detailHeader}>
-                    <View style={[s.detailDot, { backgroundColor: tok.color }]} />
-                    <Text style={s.sheetTitle}>Check Call Detail</Text>
+                  <View style={s.detailCardHeader}>
+                    <View style={s.detailHeaderLeft}>
+                      <View style={[s.detailDot, { backgroundColor: tok.color }]} />
+                      <Text style={s.detailCardTitle}>Check Call Summary</Text>
+                    </View>
+                    <View style={[s.histPill, { backgroundColor: tok.bg, borderColor: tok.border }]}>
+                      <Text style={[s.histPillTxt, { color: tok.color }]}>
+                        {detailCC.response === 'yes' ? 'VERIFIED SAFE' : detailCC.response === 'missed' ? 'MISSED SLA' : detailCC.response === 'no' ? 'ISSUE LOGGED' : 'PENDING'}
+                      </Text>
+                    </View>
                   </View>
-                  <DetailRow label="Fired at"     value={formatTime(detailCC.firedAt)} />
-                  {detailCC.respondedAt && <DetailRow label="Responded"  value={formatTime(detailCC.respondedAt)} />}
-                  <DetailRow label="Outcome"
-                    value={detailCC.response === 'yes' ? 'All okay' : detailCC.response === 'missed' ? 'Missed — manager notified' : detailCC.response === 'no' ? 'Issue reported' : 'Pending'}
-                    valueColor={tok.color}
-                  />
+
+                  <View style={s.detailTelemetryBox}>
+                    <DetailRow label="Scheduled / Fired" value={formatTime(detailCC.firedAt || detailCC.scheduledFor)} />
+                    {detailCC.respondedAt && <DetailRow label="Officer Responded" value={formatTime(detailCC.respondedAt)} />}
+                    <DetailRow
+                      label="Response Status"
+                      value={detailCC.response === 'yes' ? '✓ All okay on site' : detailCC.response === 'missed' ? '✗ Response window expired' : detailCC.response === 'no' ? '⚠️ Issue reported' : 'Awaiting officer response'}
+                      valueColor={tok.color}
+                    />
+                    {detailCC.isManualLog && (
+                      <DetailRow label="Submission Mode" value="Direct Officer Check-In" />
+                    )}
+                  </View>
+
                   {detailCC.note && (
                     <View style={s.detailNoteBox}>
                       <View style={[s.detailNoteStripe, { backgroundColor: tok.color }]} />
-                      <Text style={s.detailNoteTxt}>{detailCC.note}</Text>
+                      <View style={{ flex: 1, padding: SP.px12 }}>
+                        <Text style={s.detailNoteLabel}>OFFICER NOTE</Text>
+                        <Text style={s.detailNoteTxt}>{detailCC.note}</Text>
+                      </View>
                     </View>
                   )}
-                  <TouchableOpacity style={s.cancelBtn} onPress={() => setDetailCC(null)}>
-                    <Text style={s.cancelTxt}>Close</Text>
+
+                  <TouchableOpacity style={s.detailCloseBtn} onPress={() => setDetailCC(null)} activeOpacity={0.85}>
+                    <Text style={s.detailCloseBtnTxt}>Close Details</Text>
                   </TouchableOpacity>
                 </>
               );
@@ -430,6 +483,11 @@ const s = StyleSheet.create({
   noActiveIcon:    { fontSize: 28, color: P.ok },
   noActiveTitle:   { fontSize: 17, fontWeight: '700', color: P.t1, marginBottom: SP.px8 },
   noActiveSub:     { fontSize: 13, color: P.t3, textAlign: 'center', lineHeight: 20 },
+  manualActions:   { flexDirection: 'row', gap: SP.px8, width: '100%', marginTop: SP.px20 },
+  manualOkayBtn:   { flex: 1, backgroundColor: P.ok, borderRadius: BR.md, paddingVertical: SP.px14, alignItems: 'center' },
+  manualOkayTxt:   { color: P.white, fontSize: 12, fontWeight: '800' },
+  manualIssueBtn:  { flex: 1, backgroundColor: P.danger, borderRadius: BR.md, paddingVertical: SP.px14, alignItems: 'center' },
+  manualIssueTxt:  { color: P.white, fontSize: 12, fontWeight: '800' },
 
   // History
   historyTitle:    { fontSize: 9, fontWeight: '800', color: P.t4, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: SP.px12 },
@@ -447,9 +505,9 @@ const s = StyleSheet.create({
   histArrow:       { color: P.t4, fontSize: 18, paddingRight: SP.px16 },
 
   // Success overlay
-  successOverlay:  { ...StyleSheet.absoluteFillObject, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 100 },
+  successOverlay:  { position: 'absolute', top: 82, left: 18, right: 18, alignItems: 'center', zIndex: 100 },
   successBadge:    { borderRadius: BR.xxl, overflow: 'hidden', ...SH_TOKENS.ok },
-  successGrad:     { paddingHorizontal: SP.px40, paddingVertical: SP.px32, alignItems: 'center' },
+  successGrad:     { paddingHorizontal: SP.px24, paddingVertical: SP.px16, alignItems: 'center' },
   successIcon:     { fontSize: 48, color: P.white, marginBottom: SP.px12 },
   successTxt:      { fontSize: 16, fontWeight: '800', color: P.white, letterSpacing: 1 },
   successSub:      { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: SP.px8 },
@@ -472,7 +530,8 @@ const s = StyleSheet.create({
   noteInput:       { backgroundColor: P.bg3, borderWidth: 1, borderColor: P.b2, borderRadius: BR.sm, padding: SP.px16, color: P.t1, fontSize: 14, minHeight: 80 },
   photoBtn:        { backgroundColor: P.infoSubtle, borderWidth: 1, borderColor: P.infoBorder, borderRadius: BR.sm, padding: SP.px16, alignItems: 'center' },
   photoBtnTxt:     { color: P.info, fontSize: 14, fontWeight: '600' },
-  photoPreview:    { width: '100%', height: 140, borderRadius: BR.sm, marginTop: SP.px8, resizeMode: 'cover' },
+  photoPreviewWrap:{ marginTop: SP.px8, borderRadius: BR.sm, overflow: 'hidden', borderWidth: 1, borderColor: P.b2 },
+  photoPreview:    { width: '100%', height: 160 },
 
   submitBtn:       { borderRadius: BR.md, overflow: 'hidden', marginTop: SP.px20, ...SH_TOKENS.warn },
   submitTxt:       { color: P.bg0, fontSize: 14, fontWeight: '800', letterSpacing: 0.8 },
@@ -485,12 +544,20 @@ const s = StyleSheet.create({
   catOptionTxt:    { color: P.t1, fontSize: 14, flex: 1 },
 
   // Detail modal
-  detailHeader:    { flexDirection: 'row', alignItems: 'center', gap: SP.px12, marginBottom: SP.px16 },
-  detailDot:       { width: 12, height: 12, borderRadius: 6 },
-  detailRow:       { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: SP.px12, borderBottomWidth: 1, borderBottomColor: P.b1 },
+  modalBackdrop:   { flex: 1, backgroundColor: P.overlay, justifyContent: 'center', alignItems: 'center', padding: SP.px20 },
+  detailCard:      { width: '100%', maxWidth: 380, backgroundColor: P.bg2, borderRadius: BR.xl, borderWidth: 1.5, borderColor: P.b3, padding: SP.px20, ...SH_TOKENS.lg },
+  detailCardHeader:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px16 },
+  detailHeaderLeft:{ flexDirection: 'row', alignItems: 'center', gap: SP.px8 },
+  detailDot:       { width: 10, height: 10, borderRadius: 5 },
+  detailCardTitle: { fontSize: 16, fontWeight: '800', color: P.t1 },
+  detailTelemetryBox:{ backgroundColor: P.bg3, borderRadius: BR.md, borderWidth: 1, borderColor: P.b2, paddingHorizontal: SP.px12, paddingVertical: SP.px4, marginBottom: SP.px12 },
+  detailRow:       { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: SP.px8, borderBottomWidth: 1, borderBottomColor: P.b1 },
   detailLabel:     { fontSize: 12, color: P.t3, fontWeight: '600' },
   detailValue:     { fontSize: 13, color: P.t1, fontWeight: '700' },
-  detailNoteBox:   { flexDirection: 'row', backgroundColor: P.warnSubtle, borderRadius: BR.sm, marginTop: SP.px16, overflow: 'hidden', marginBottom: SP.px4 },
+  detailNoteBox:   { flexDirection: 'row', backgroundColor: P.warnSubtle, borderRadius: BR.sm, borderWidth: 1, borderColor: P.warnBorder, overflow: 'hidden', marginBottom: SP.px16 },
   detailNoteStripe:{ width: 4 },
-  detailNoteTxt:   { flex: 1, padding: SP.px12, color: P.warn, fontSize: 13, lineHeight: 20 },
+  detailNoteLabel: { fontSize: 9, fontWeight: '800', color: P.warn, letterSpacing: 0.8, marginBottom: 2 },
+  detailNoteTxt:   { color: P.t1, fontSize: 13, lineHeight: 18, fontStyle: 'italic' },
+  detailCloseBtn:  { backgroundColor: P.bg3, borderRadius: BR.md, paddingVertical: 13, alignItems: 'center', borderWidth: 1, borderColor: P.b2 },
+  detailCloseBtnTxt:{ color: P.t1, fontSize: 14, fontWeight: '700' },
 });

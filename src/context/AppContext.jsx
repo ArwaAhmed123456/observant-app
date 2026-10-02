@@ -957,13 +957,21 @@ export function AppProvider({ children }) {
     setCheckCalls(updated);
     setActiveCheckCall(null);
 
-    const guard = users.find(u => u.id === cc.guardId);
-    const site  = sites.find(s => s.id === cc.siteId);
+    const guard = users.find(u => u.id === cc.guardId || u._id === cc.guardId);
+    const site  = sites.find(s => s.id === cc.siteId || s._id === cc.siteId);
+    const guardName = guard ? `${guard.name} (${guard.badgeNumber || 'SG-900'})` : 'Officer';
+    const siteName = site ? site.name : 'Assigned Site';
+
     await addAlert({
       type: 'check_call_missed',
+      severity: 'urgent',
       guardId: cc.guardId,
+      guardName: guard?.name,
+      badgeNumber: guard?.badgeNumber,
       siteId: cc.siteId,
-      message: `🚨 ${guard?.name || 'Guard'} did not respond to check call at ${formatTime(new Date())} — ${site?.name || 'site'}`,
+      siteName: site?.name,
+      title: `🚨 Missed Check Call — ${guardName}`,
+      message: `${guardName} did not respond to the hourly check call at ${siteName} (${formatTime(new Date())}). Immediate supervisor welfare follow-up recommended.`,
     });
 
     // Update missed count
@@ -976,11 +984,78 @@ export function AppProvider({ children }) {
     await save(KEYS.SHIFT_SESSIONS, sessionUpdated);
     setShiftSessions(sessionUpdated);
 
-    // Still schedule next check call
+    // Still schedule next check call for the next hour
     if (!session.bookedOffAt) {
       startCheckCallTimer(session);
     }
   }, [users, sites, addAlert, startCheckCallTimer]);
+
+  const recordManualGuardCheckCall = useCallback(async (response, note = null, category = null) => {
+    // Clear any active pending call timer and active banner
+    if (checkCallExpireRef.current) {
+      clearTimeout(checkCallExpireRef.current);
+      checkCallExpireRef.current = null;
+    }
+    setActiveCheckCall(null);
+
+    if (API_ENABLED) {
+      const { checkCall } = await apiPost('/api/check-calls/manual', { response, note, category });
+      const saved = normalizeCheckCall(checkCall);
+      setCheckCalls(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
+      const session = shiftSessions.find(item => item.id === saved.sessionId || item.guardId === currentUser?.id && !item.bookedOffAt);
+      if (session && !session.bookedOffAt) {
+        startCheckCallTimer(session);
+      }
+      return saved;
+    }
+    const session = shiftSessions.find(item => item.guardId === currentUser?.id && !item.bookedOffAt);
+    if (!session) throw new Error('Book on before recording a check call.');
+    const now = new Date().toISOString();
+    const guard = users.find(u => u.id === currentUser?.id) || currentUser;
+    const site = sites.find(s => s.id === session.siteId);
+
+    const saved = {
+      id: `cc_${Date.now()}`,
+      sessionId: session.id,
+      guardId: currentUser.id,
+      guardName: guard?.name,
+      siteId: session.siteId,
+      siteName: site?.name,
+      firedAt: now,
+      scheduledFor: now,
+      respondedAt: now,
+      expiresAt: now,
+      response,
+      note,
+      category,
+      isManualLog: true,
+      manuallyLogged: false,
+    };
+    const all = await load(KEYS.CHECK_CALLS) || [];
+    await save(KEYS.CHECK_CALLS, [saved, ...all]);
+    setCheckCalls(previous => [saved, ...previous]);
+
+    if (response === 'no') {
+      const guardLabel = guard?.name ? `${guard.name} (${guard.badgeNumber || 'SG-900'})` : 'Guard';
+      await addAlert({
+        type: 'check_call_issue',
+        severity: 'issue',
+        title: `⚠️ Check Call Issue — ${guardLabel}`,
+        message: `${guardLabel} reported an issue at ${site?.name || 'Site'}: ${note || category || 'No details provided'}.`,
+        note,
+        category,
+        siteId: session.siteId,
+        guardId: currentUser?.id,
+        guardName: guard?.name,
+        badgeNumber: guard?.badgeNumber,
+        siteName: site?.name,
+      });
+    }
+
+    // Schedule next automatic check call for 1 hour from now
+    startCheckCallTimer(session);
+    return saved;
+  }, [currentUser, users, sites, shiftSessions, addAlert, startCheckCallTimer]);
 
   // ─── Patrol Timers ────────────────────────────────────────────────────────
   const scheduleNextPatrolTimer = useCallback((session, lastPatrolEndTime) => {
@@ -1427,7 +1502,7 @@ export function AppProvider({ children }) {
     // Sessions
     shiftSessions, getGuardActiveSession, bookOn, bookOff,
     // Check calls
-    checkCalls, activeCheckCall, respondToCheckCall,
+    checkCalls, activeCheckCall, respondToCheckCall, recordManualGuardCheckCall,
     getTodayCheckCalls, addManualCheckCall,
     // Patrol
     patrolSessions, activePatrol, antiIdlePrompt, dismissAntiIdlePrompt,

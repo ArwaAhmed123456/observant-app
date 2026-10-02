@@ -45,7 +45,10 @@ function isInRange(dateStr, range, customStart, customEnd) {
 export function ManagerReportsScreen() {
   const { currentUser, users, sites, shiftSessions, checkCalls, patrolSessions, patrolCaptures, checkpoints } = useApp();
 
-  const guards = users.filter(u => u.role === 'guard' && currentUser.siteIds?.includes(u.siteId));
+  const managerSiteIds = (currentUser?.siteIds || [currentUser?.siteId]).filter(Boolean).map(String);
+  const canSeeSite = siteId => currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || managerSiteIds.includes(String(siteId || ''));
+
+  const guards = (users || []).filter(u => u.role === 'guard' && (canSeeSite(u.siteId) || !u.siteId));
 
   // Filters
   const [dateRange, setDateRange]         = useState('today');
@@ -74,61 +77,62 @@ export function ManagerReportsScreen() {
     const result = [];
 
     if (reportType === 'combined' || reportType === 'check_calls') {
-      checkCalls
+      (checkCalls || [])
         .filter(cc => {
-          const guard = users.find(u => u.id === cc.guardId);
-          if (!guard) return false;
-          if (!currentUser.siteIds?.includes(cc.siteId)) return false;
+          const guard = (users || []).find(u => u.id === cc.guardId || u._id === cc.guardId);
+          if (!guard && !cc.guardName) return false;
+          if (!canSeeSite(cc.siteId)) return false;
           if (guardFilter !== 'all' && cc.guardId !== guardFilter) return false;
           if (siteFilter !== 'all' && cc.siteId !== siteFilter) return false;
-          return isInRange(cc.firedAt, dateRange, customStart, customEnd);
+          return isInRange(cc.firedAt || cc.respondedAt || cc.scheduledFor, dateRange, customStart, customEnd);
         })
         .forEach(cc => {
-          const guard = users.find(u => u.id === cc.guardId);
-          const site  = sites.find(s => s.id === cc.siteId);
-          const session = shiftSessions.find(s => s.id === cc.sessionId);
+          const guard = (users || []).find(u => u.id === cc.guardId || u._id === cc.guardId);
+          const site  = (sites || []).find(s => s.id === cc.siteId || s._id === cc.siteId);
+          const session = (shiftSessions || []).find(s => s.id === cc.sessionId);
+          const timeVal = cc.firedAt || cc.respondedAt || cc.scheduledFor || new Date().toISOString();
           result.push({
             type: 'check_call',
-            id: cc.id,
-            guardName: guard?.name || '—',
-            badgeNumber: guard?.badgeNumber || '—',
-            site: site?.name || '—',
+            id: cc.id || cc._id,
+            guardName: guard?.name || cc.guardName || 'Officer',
+            badgeNumber: guard?.badgeNumber || cc.badgeNumber || '—',
+            site: site?.name || cc.siteName || '—',
             shiftTime: session ? `${formatTime(session.bookedOnAt)}${session.bookedOffAt ? ' – ' + formatTime(session.bookedOffAt) : ''}` : '—',
-            checkCallTime: formatTime(cc.firedAt),
-            checkCallResult: cc.response === 'yes' ? '✓ Yes' : cc.response === 'missed' ? '✗ Missed' : cc.response === 'no' ? '⚠ Issue' : '—',
-            note: cc.note || '',
-            date: formatDate(cc.firedAt),
-            manuallyLogged: !!cc.manuallyLogged,
-            loggedBy: cc.loggedBy,
+            checkCallTime: formatTime(timeVal),
+            checkCallResult: cc.response === 'yes' ? '✓ Yes (Safe)' : cc.response === 'missed' ? '✗ Missed SLA' : cc.response === 'no' ? '⚠ Issue Reported' : '— Pending',
+            note: cc.note || (cc.category ? `Category: ${cc.category}` : ''),
+            date: formatDate(timeVal),
+            manuallyLogged: !!cc.manuallyLogged || !!cc.isManualLog,
+            loggedBy: cc.loggedBy || (cc.isManualLog ? 'Officer Direct' : undefined),
           });
         });
     }
 
     if (reportType === 'combined' || reportType === 'patrols') {
-      patrolSessions
+      (patrolSessions || [])
         .filter(ps => {
-          if (!currentUser.siteIds?.includes(ps.siteId)) return false;
+          if (!canSeeSite(ps.siteId)) return false;
           if (guardFilter !== 'all' && ps.guardId !== guardFilter) return false;
           if (siteFilter !== 'all' && ps.siteId !== siteFilter) return false;
           return isInRange(ps.startedAt, dateRange, customStart, customEnd);
         })
         .forEach(ps => {
-          const guard = users.find(u => u.id === ps.guardId);
-          const site  = sites.find(s => s.id === ps.siteId);
-          const session = shiftSessions.find(s => s.id === ps.sessionId);
-          const captures = patrolCaptures.filter(c => c.patrolId === ps.id);
-          const siteCP = checkpoints.filter(cp => cp.siteId === ps.siteId);
+          const guard = (users || []).find(u => u.id === ps.guardId || u._id === ps.guardId);
+          const site  = (sites || []).find(s => s.id === ps.siteId || s._id === ps.siteId);
+          const session = (shiftSessions || []).find(s => s.id === ps.sessionId);
+          const captures = (patrolCaptures || []).filter(c => c.patrolId === ps.id || c.patrolId === ps._id);
+          const siteCP = (checkpoints || []).filter(cp => cp.siteId === ps.siteId);
           result.push({
             type: 'patrol',
-            id: ps.id,
-            guardName: guard?.name || '—',
+            id: ps.id || ps._id,
+            guardName: guard?.name || 'Officer',
             badgeNumber: guard?.badgeNumber || '—',
             site: site?.name || '—',
             shiftTime: session ? `${formatTime(session.bookedOnAt)}${session.bookedOffAt ? ' – '+formatTime(session.bookedOffAt) : ''}` : '—',
             patrolTime: `${formatTime(ps.startedAt)}${ps.finishedAt ? ' – '+formatTime(ps.finishedAt) : ' (ongoing)'}`,
             patrolStatus: ps.status || 'in_progress',
-            checkpointsCapt: `${captures.length}/${siteCP.length}`,
-            missingCheckpoints: (ps.missingCheckpoints || []).map(id => checkpoints.find(cp => cp.id === id)?.name || id).join(', '),
+            checkpointsCapt: `${captures.length}/${siteCP.length || 0}`,
+            missingCheckpoints: (ps.missingCheckpoints || []).map(id => (checkpoints || []).find(cp => cp.id === id)?.name || id).join(', '),
             photos: captures,
             date: formatDate(ps.startedAt),
             manuallyLogged: !!ps.manuallyLogged,
@@ -145,92 +149,53 @@ export function ManagerReportsScreen() {
     if (exportBusy) return;
     setExportBusy(true);
     try {
-    const dayHours = Array.from({ length: 13 }, (_, i) => `${String(7 + i).padStart(2, '0')}00`);
-    const nightHours = Array.from({ length: 13 }, (_, i) => `${String((19 + i) % 24).padStart(2, '0')}00`);
-    const headers = ['Date','Site Name','Security Officer','ID No','Shift Times (DAY/Night)','Record Type',...dayHours,...nightHours,'Incident Log / Notes'];
-    const groups = new Map();
-    let matrixRows = [];
-    if (API_ENABLED && (reportType === 'combined' || reportType === 'check_calls')) {
-      const asLocalDay = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      const end = new Date(); end.setHours(0, 0, 0, 0);
-      const start = new Date(end);
-      if (dateRange === 'this_week') { const weekday = start.getDay() || 7; start.setDate(start.getDate() - weekday + 1); }
-      else if (dateRange === 'this_month') start.setDate(1);
-      else if (dateRange === 'custom') {
-        if (!customStart || !customEnd) throw new Error('Choose both a start date and an end date to export a custom report.');
-        const parsedStart = new Date(`${customStart}T00:00:00`);
-        const parsedEnd = new Date(`${customEnd}T00:00:00`);
-        if (Number.isNaN(parsedStart.getTime()) || Number.isNaN(parsedEnd.getTime()) || parsedStart > parsedEnd) throw new Error('Enter valid custom dates, with the start date on or before the end date.');
-        start.setTime(parsedStart.getTime()); end.setTime(parsedEnd.getTime());
+      if (!rows || rows.length === 0) {
+        Alert.alert('No Records', 'No security check-calls or patrols match the selected filters.');
+        return;
       }
-      const params = new URLSearchParams({ startDate: asLocalDay(start), endDate: asLocalDay(end) });
-      if (siteFilter !== 'all') params.set('siteId', siteFilter);
-      if (guardFilter !== 'all') params.set('officerId', guardFilter);
-      const report = await apiGet(`/api/reports/check-call-log?${params}`);
-      matrixRows = report.rows || [];
-    }
-    matrixRows
-      .forEach(row => {
-        const slots = {};
-        const notes = [];
-        (row.hourlyChecks || []).forEach(slot => {
-          const values = (slot.checks || []).map(check => {
-            if (check.note) notes.push(check.note);
-            const value = check.time || (check.response === 'missed' ? 'MISSED' : '');
-            return `${value}${check.isLate ? ' LATE' : ''}`;
-          }).filter(Boolean);
-          if (values.length) slots[slot.hour] = values.join('; ');
-        });
-        groups.set([row.shiftDate, row.siteId, row.officerId, row.shiftType].join('|'), {
-          date: row.shiftDate, site: row.siteName || '—', guard: row.officerName || '—', badge: row.badgeNumber || '—',
-          shift: `${row.shiftType} ${row.shiftStart ? formatTime(row.shiftStart) : ''}${row.shiftEnd ? `–${formatTime(row.shiftEnd)}` : ''}`,
-          type: 'Check Call Log', slots, notes,
-        });
+      const headers = ['Date', 'Site Name', 'Security Officer', 'Badge ID', 'Shift Time', 'Record Type', 'Event Time / Result', 'Incident Log / Notes'];
+      const lines = [headers.join(',')];
+
+      rows.forEach(r => {
+        const escape = val => `"${String(val ?? '').replace(/"/g, '""')}"`;
+        const eventDetail = r.type === 'check_call' ? `${r.checkCallTime} · ${r.checkCallResult}` : `${r.patrolTime} (Checkpoints: ${r.checkpointsCapt})`;
+        const line = [
+          escape(r.date),
+          escape(r.site),
+          escape(r.guardName),
+          escape(r.badgeNumber),
+          escape(r.shiftTime),
+          escape(r.type === 'check_call' ? 'Check Call' : 'Patrol Tour'),
+          escape(eventDetail),
+          escape(r.note || (r.missingCheckpoints ? `Missing: ${r.missingCheckpoints}` : '')),
+        ].join(',');
+        lines.push(line);
       });
-    if (!API_ENABLED) (reportType === 'combined' || reportType === 'check_calls' ? checkCalls : []).filter(cc => isInRange(cc.firedAt, dateRange, customStart, customEnd))
-      .filter(cc => currentUser.siteIds?.includes(cc.siteId))
-      .filter(cc => guardFilter === 'all' || cc.guardId === guardFilter)
-      .filter(cc => siteFilter === 'all' || cc.siteId === siteFilter)
-      .forEach(cc => {
-        const guard = users.find(u => u.id === cc.guardId);
-        const site = sites.find(s => s.id === cc.siteId);
-        const fired = new Date(cc.firedAt);
-        const day = fired.getHours() >= 7 && fired.getHours() < 19;
-        const date = formatDate(fired);
-        const key = [date, cc.siteId, cc.guardId, day ? 'Day' : 'Night'].join('|');
-        if (!groups.has(key)) groups.set(key, { date, site: site?.name || '—', guard: guard?.name || '—', badge: guard?.badgeNumber || '—', shift: day ? 'Day' : 'Night', type: 'Check Call Log', slots: {}, notes: [] });
-        const group = groups.get(key);
-        const slot = `${String(fired.getHours()).padStart(2, '0')}00`;
-        const missed = cc.response === 'missed';
-        const responded = cc.respondedAt ? new Date(cc.respondedAt) : null;
-        const late = !missed && responded && responded - fired > 15 * 60 * 1000;
-        const exact = responded && !Number.isNaN(responded.getTime()) ? formatTime(responded) : formatTime(fired);
-        const cell = missed ? `MISSED >15m (${exact})` : late ? `${exact} LATE` : exact;
-        group.slots[slot] = group.slots[slot] ? `${group.slots[slot]}; ${cell}` : cell;
-        if (missed) group.notes.push(`Missed call at ${slot} — ${cc.note || 'Incident Log Book explanation required'}`);
-        else if (late) group.notes.push(`Late call at ${slot}${cc.note ? ` — ${cc.note}` : ''}`);
-        else if (cc.note) group.notes.push(cc.note);
+
+      const csvContent = lines.join('\n');
+
+      // Web direct file download
+      if (typeof window !== 'undefined' && window.document && window.Blob) {
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', `observant_shift_report_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        Alert.alert('Report Exported', 'CSV report downloaded successfully.');
+        return;
+      }
+
+      // Native mobile share
+      await Share.share({
+        title: 'Observant Shift Security Report',
+        message: csvContent,
       });
-    const checklistRows = [...groups.values()];
-    const patrolRows = reportType === 'check_calls' ? [] : rows.filter(row => row.type === 'patrol').map(row => ({
-      date: row.date, site: row.site, guard: row.guardName, badge: row.badgeNumber,
-      shift: row.shiftTime || '', type: 'Patrol', slots: {},
-      notes: [`${row.patrolTime || 'Patrol'} · Checkpoints ${row.checkpointsCapt || '—'}${row.missingCheckpoints ? ` · Missing: ${row.missingCheckpoints}` : ''}`],
-    }));
-    const allRows = [...checklistRows, ...patrolRows];
-    const escape = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
-    const lines = [headers, ...allRows.map(row => {
-      const hours = row.shift?.startsWith('Night') ? [...dayHours.map(() => ''), ...nightHours.map(hour => row.slots[hour] || '')] : [...dayHours.map(hour => row.slots[hour] || ''), ...nightHours.map(() => '')];
-      return [row.date,row.site,row.guard,row.badge,row.shift,row.type, ...hours, row.notes.join('; ')];
-    })]
-      .map(line => line.map(escape).join(','));
-    const csv = lines.join('\n');
-    await Share.share({
-      title: 'Observant Shift Report',
-      message: csv,
-    });
     } catch (error) {
-      Alert.alert('Report export failed', error.message || 'Could not generate this report. Check your connection and try again.');
+      Alert.alert('Report export failed', error.message || 'Could not generate this report.');
     } finally {
       setExportBusy(false);
     }

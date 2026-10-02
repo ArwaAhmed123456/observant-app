@@ -9,6 +9,15 @@ async function fireDueCheckCalls(now = new Date()) {
   for (const session of sessions) {
     const dueAt = session.nextCheckCallAt;
     try {
+      // A guard may already have submitted this hour manually while the job was
+      // queued. Preserve that log and move the automated reminder to the next hour.
+      const slotStart = new Date(dueAt); slotStart.setMinutes(0, 0, 0);
+      const slotEnd = new Date(slotStart.getTime() + HOUR);
+      const manualForSlot = await CheckCall.findOne({ sessionId: session._id, isManualLog: true, firedAt: { $gte: slotStart, $lt: slotEnd } }).select('_id');
+      if (manualForSlot) {
+        await ShiftSession.updateOne({ _id: session._id, bookedOffAt: null, nextCheckCallAt: null }, { $set: { nextCheckCallAt: slotEnd } });
+        continue;
+      }
       const claimed = await ShiftSession.updateOne(
         { _id: session._id, bookedOffAt: null, nextCheckCallAt: dueAt },
         { $set: { nextCheckCallAt: null } }
@@ -53,7 +62,7 @@ async function expireCheckCalls(now = new Date()) {
     if (!call) continue;
     if (call.sessionId) await ShiftSession.findByIdAndUpdate(call.sessionId, {
       $inc: { missedCheckCallCount: 1 },
-      $set: { nextCheckCallAt: new Date(now.getTime() + HOUR) },
+      $set: { nextCheckCallAt: (() => { const next = new Date(call.scheduledFor || call.firedAt); next.setMinutes(0, 0, 0); return new Date(next.getTime() + HOUR); })() },
     });
     const guard = await User.findById(call.guardId).select('name badgeNumber');
     await createAlert({

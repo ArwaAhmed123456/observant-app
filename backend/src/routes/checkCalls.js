@@ -18,6 +18,41 @@ const { upload: uploadPhoto, saveImage } = require('../services/mediaStore');
 const { Site } = require('../models');
 const { audit } = require('../utils/auditLogger');
 
+// Guard-initiated check calls are completed immediately and occupy the current
+// scheduled hour. The following automatic call is aligned to the next hour.
+router.post('/manual', authenticate, requireRole('guard'), [
+  body('response').isIn(['yes', 'no']).withMessage('Response must be yes or no'),
+  body('note').optional().trim().isLength({ max: 500 }),
+  body('category').optional().trim().isLength({ max: 100 }),
+], validate, asyncHandler(async (req, res) => {
+  const now = new Date();
+  const session = await ShiftSession.findOne({ organisationId: req.user.organisationId, guardId: req.user._id, bookedOffAt: null });
+  if (!session) return res.status(400).json({ error: 'Book on before recording a check call.' });
+  const hourStart = new Date(now); hourStart.setMinutes(0, 0, 0);
+  const nextHour = new Date(hourStart.getTime() + 60 * 60 * 1000);
+  const existing = await CheckCall.findOne({ sessionId: session._id, firedAt: { $gte: hourStart, $lt: nextHour } }).sort({ firedAt: -1 });
+  if (existing) return res.status(409).json({ error: 'A check call is already recorded for this hour.', checkCall: existing });
+  const call = await CheckCall.create({
+    organisationId: req.user.organisationId, sessionId: session._id, guardId: req.user._id,
+    siteId: session.siteId, firedAt: now, scheduledFor: hourStart, expiresAt: now,
+    respondedAt: now, response: req.body.response, note: req.body.note || null,
+    category: req.body.category || null, isManualLog: true,
+  });
+  await ShiftSession.findByIdAndUpdate(session._id, {
+    $inc: { checkCallCount: 1 }, $set: { nextCheckCallAt: nextHour },
+  });
+  if (req.body.response === 'no') {
+    const guard = await User.findById(req.user._id).select('name');
+    await createAlert({ organisationId: req.user.organisationId, siteId: session.siteId, guardId: req.user._id,
+      type: 'check_call_issue', title: 'Issue reported by guard',
+      message: `${guard?.name || 'Guard'} reported an issue during a manual check call at ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.`,
+      note: req.body.note || null, refModel: 'CheckCall', refId: call._id });
+    await CheckCall.findByIdAndUpdate(call._id, { managerAlerted: true, managerAlertedAt: now });
+  }
+  await audit({ req, action: req.body.response === 'no' ? 'issue_reported' : 'check_call_completed', targetModel: 'CheckCall', targetId: call._id, targetName: req.user.name, details: { manual: true, response: req.body.response } });
+  res.status(201).json({ checkCall: call });
+}));
+
 // ── Fire a check call ─────────────────────────────────────────────────────────
 router.post('/fire',
   authenticate, requireRole('guard'),
@@ -108,7 +143,7 @@ router.post('/:id/respond',
     // Update session counter
     await ShiftSession.findByIdAndUpdate(cc.sessionId, {
       $inc: { checkCallCount: 1 },
-      $set: { nextCheckCallAt: new Date(now.getTime() + 60 * 60 * 1000) },
+      $set: { nextCheckCallAt: (() => { const hour = new Date(cc.scheduledFor || cc.firedAt); hour.setMinutes(0, 0, 0); return new Date(hour.getTime() + 60 * 60 * 1000); })() },
     });
 
     // If guard reported an issue, alert managers
@@ -157,7 +192,7 @@ router.post('/expire',
     // Update session missed counter
     if (cc.sessionId) await ShiftSession.findByIdAndUpdate(cc.sessionId, {
       $inc: { missedCheckCallCount: 1 },
-      $set: { nextCheckCallAt: new Date(now.getTime() + 60 * 60 * 1000) },
+      $set: { nextCheckCallAt: (() => { const hour = new Date(cc.scheduledFor || cc.firedAt); hour.setMinutes(0, 0, 0); return new Date(hour.getTime() + 60 * 60 * 1000); })() },
     });
 
     // Alert managers

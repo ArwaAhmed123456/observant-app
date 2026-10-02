@@ -7,27 +7,16 @@
     "scheme": "observant",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "androidNavigationBar": {
-      "backgroundColor": "#0B192C",
-      "barStyle": "light-content",
-      "enforceContrast": false
-    },
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.observant.app",
-      "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Observant requires camera access to scan security checkpoint QR codes and attach photos to incident reports.",
-        "NSLocationWhenInUseUsageDescription": "Observant uses your location to verify security guard checkpoint patrols.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Observant uses location tracking during active security patrol tours."
-      }
-    },
     "android": {
       "package": "com.observant.app",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
-      "backgroundColor": "#F4F6FA"
+        "backgroundColor": "#F4F6FA"
+      },
+      "navigationBar": {
+        "backgroundColor": "#0B192C",
+        "barStyle": "light-content"
       },
       "permissions": [
         "CAMERA",
@@ -40,6 +29,16 @@
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ]
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.observant.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSCameraUsageDescription": "Observant requires camera access to scan security checkpoint QR codes and attach photos to incident reports.",
+        "NSLocationWhenInUseUsageDescription": "Observant uses your location to verify security guard checkpoint patrols.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Observant uses location tracking during active security patrol tours."
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
