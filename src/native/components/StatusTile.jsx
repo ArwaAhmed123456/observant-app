@@ -16,6 +16,7 @@ export function StatusTile({
   latestPatrol: latestPatrolRecord,
   onPress,
   onManualLog,
+  onReassignSite,
 }) {
   const missedCount = todayCheckCalls.filter(cc => cc.response === 'missed').length;
   const issueCount = todayCheckCalls.filter(cc => cc.response === 'no').length;
@@ -147,19 +148,35 @@ export function StatusTile({
             <ChevronRight size={13} color={P.t3} />
           </View>
 
-          {onManualLog && (
-            <TouchableOpacity
-              style={styles.manualBtn}
-              onPress={(e) => {
-                e.stopPropagation?.();
-                onManualLog(guard);
-              }}
-              activeOpacity={0.7}
-            >
-              <ClipboardList size={12} color={P.blueLight} />
-              <Text style={styles.manualBtnText}>Manual Log</Text>
-            </TouchableOpacity>
-          )}
+          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+            {onReassignSite && (
+              <TouchableOpacity
+                style={styles.reassignBtn}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  onReassignSite(guard);
+                }}
+                activeOpacity={0.7}
+              >
+                <MapPin size={11} color="#D97706" />
+                <Text style={styles.reassignBtnText}>Assign site</Text>
+              </TouchableOpacity>
+            )}
+
+            {onManualLog && (
+              <TouchableOpacity
+                style={styles.manualBtn}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  onManualLog(guard);
+                }}
+                activeOpacity={0.7}
+              >
+                <ClipboardList size={11} color={P.blueLight} />
+                <Text style={styles.manualBtnText}>Manual Log</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
       </View>
     </TouchableOpacity>
@@ -316,5 +333,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: P.blueLight,
+  },
+  reassignBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(217,119,6,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(217,119,6,0.3)',
+    borderRadius: BR.sm,
+    paddingHorizontal: SP.px12,
+    paddingVertical: 4,
+  },
+  reassignBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#D97706',
   },
 });

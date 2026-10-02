@@ -512,14 +512,14 @@ const s = StyleSheet.create({
   successTxt:      { fontSize: 16, fontWeight: '800', color: P.white, letterSpacing: 1 },
   successSub:      { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: SP.px8 },
 
-  // Sheets
-  sheetOverlay:    { flex: 1, backgroundColor: P.overlay, justifyContent: 'flex-end' },
-  sheet:           { borderTopLeftRadius: BR.xxl, borderTopRightRadius: BR.xxl, padding: SP.px24, borderWidth: 1, borderColor: P.b3, overflow: 'hidden', maxHeight: '88%' },
-  sheetHandle:     { width: 40, height: 4, backgroundColor: P.b3, borderRadius: 2, alignSelf: 'center', marginBottom: SP.px20 },
+  // Sheets / Centered Modals
+  sheetOverlay:    { flex: 1, backgroundColor: P.overlay, justifyContent: 'center', alignItems: 'center', padding: SP.px16 },
+  sheet:           { width: '100%', maxWidth: 400, borderRadius: BR.xl, padding: SP.px20, borderWidth: 1.5, borderColor: P.b3, backgroundColor: P.bg0, overflow: 'hidden', maxHeight: '90%', ...SH_TOKENS.lg },
+  sheetHandle:     { display: 'none' },
   sheetTitleRow:   { flexDirection: 'row', alignItems: 'center', gap: SP.px12, marginBottom: SP.px4 },
   issueDot:        { width: 10, height: 10, borderRadius: 5, backgroundColor: P.warn },
   sheetTitle:      { fontSize: 18, fontWeight: '800', color: P.t1, marginBottom: SP.px4 },
-  sheetSub:        { fontSize: 13, color: P.t3, lineHeight: 20, marginBottom: SP.px20 },
+  sheetSub:        { fontSize: 13, color: P.t3, lineHeight: 20, marginBottom: SP.px16 },
   fieldLabel:      { fontSize: 9, fontWeight: '800', color: P.t4, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: SP.px8, marginTop: SP.px12 },
 
   catBtn:          { backgroundColor: P.bg3, borderWidth: 1, borderColor: P.b2, borderRadius: BR.sm, padding: SP.px16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

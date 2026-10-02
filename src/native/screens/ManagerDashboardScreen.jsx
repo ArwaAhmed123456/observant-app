@@ -15,7 +15,7 @@ const TABS = ['overview', 'alerts'];
 
 export function ManagerDashboardScreen({ navigation }) {
   const {
-    currentUser, users, sites, logout, createUser, createSite,
+    currentUser, users, sites, logout, createUser, updateUser, createSite,
     shiftSessions, checkCalls, patrolSessions,
     alerts, markAlertRead, markAllAlertsRead, getUnreadAlerts,
     addAlert, addManualCheckCall, addManualPatrol,
@@ -42,6 +42,11 @@ export function ManagerDashboardScreen({ navigation }) {
   const [createSiteVisible, setCreateSiteVisible] = useState(false);
   const [createSiteBusy, setCreateSiteBusy] = useState(false);
   const [siteDraft, setSiteDraft] = useState({ name: '', address: '', geofenceRadius: '250' });
+
+  // Reassign guard site
+  const [reassignGuard, setReassignGuard] = useState(null);
+  const [reassignSiteId, setReassignSiteId] = useState('');
+  const [reassignBusy, setReassignBusy] = useState(false);
 
   const managerSiteIds = (currentUser?.siteIds || []).map(String);
   const canSeeSite = siteId => currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || managerSiteIds.includes(String(siteId || ''));
@@ -113,12 +118,29 @@ export function ManagerDashboardScreen({ navigation }) {
       const newId = String(result.site?.id || result.site?._id);
       if (newId) {
         setGuardDraft(prev => ({ ...prev, siteId: newId }));
+        setReassignSiteId(newId);
       }
       Alert.alert('Site Created', `${result.site?.name || name} has been registered and is now available to assign to security officers.`);
     } catch (error) {
       Alert.alert('Could not create site', error.message || 'Please try again.');
     } finally {
       setCreateSiteBusy(false);
+    }
+  };
+
+  const handleReassignSite = async () => {
+    if (!reassignGuard || !reassignSiteId) return;
+    setReassignBusy(true);
+    try {
+      const targetSite = (sites || []).find(s => String(s.id || s._id) === String(reassignSiteId));
+      const res = await updateUser(reassignGuard.id || reassignGuard._id, { siteId: reassignSiteId });
+      if (!res?.success) throw new Error(res?.error || 'Failed to update site assignment.');
+      Alert.alert('Site Assigned', `${reassignGuard.name} has been assigned to ${targetSite?.name || 'the selected site'}.`);
+      setReassignGuard(null);
+    } catch (err) {
+      Alert.alert('Could not update site', err.message || 'Please try again.');
+    } finally {
+      setReassignBusy(false);
     }
   };
 
@@ -280,16 +302,24 @@ export function ManagerDashboardScreen({ navigation }) {
 
           <View style={styles.guardSectionHeader}>
             <Text style={[styles.sectionTitle, { flex: 1, marginBottom: 0 }]}>LIVE GUARD STATUS ({guards.length})</Text>
-            <TouchableOpacity style={styles.addGuardButton} onPress={() => {
-              if (!availableSites.length) {
-                Alert.alert('No site assigned', 'Ask an administrator to assign a site to your manager account before creating guards.');
-                return;
-              }
-              setGuardDraft(previous => ({ ...previous, siteId: previous.siteId || String(availableSites[0].id || availableSites[0]._id) }));
-              setCreateGuardVisible(true);
-            }}>
-              <Text style={styles.addGuardButtonText}>+ Add guard</Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity style={styles.addSiteButton} onPress={() => setCreateSiteVisible(true)}>
+                <Text style={styles.addSiteButtonText}>+ Add site</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addGuardButton} onPress={() => {
+                if (!availableSites.length) {
+                  Alert.alert('No site assigned', 'Register or assign a site before creating guards.', [
+                    { text: 'Register site now', onPress: () => setCreateSiteVisible(true) },
+                    { text: 'Cancel', style: 'cancel' }
+                  ]);
+                  return;
+                }
+                setGuardDraft(previous => ({ ...previous, siteId: previous.siteId || String(availableSites[0].id || availableSites[0]._id) }));
+                setCreateGuardVisible(true);
+              }}>
+                <Text style={styles.addGuardButtonText}>+ Add guard</Text>
+              </TouchableOpacity>
+            </View>
           </View>
           {guards.length === 0 ? (
             <EmptyState
@@ -320,6 +350,10 @@ export function ManagerDashboardScreen({ navigation }) {
                   latestPatrol={latestPatrol}
                   onPress={() => navigation?.navigate('GuardCheckCallPath', { guardId: guard.id || guard._id })}
                   onManualLog={(g) => setManualGuard(g)}
+                  onReassignSite={(g) => {
+                    setReassignGuard(g);
+                    setReassignSiteId(String(g.siteId || ''));
+                  }}
                 />
               );
             })
@@ -553,6 +587,53 @@ export function ManagerDashboardScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* Reassign Guard Site Modal */}
+      <Modal visible={!!reassignGuard} transparent animationType="slide" onRequestClose={() => setReassignGuard(null)}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: S.xl }} keyboardShouldPersistTaps="handled">
+            <Text style={styles.modalTitle}>Assign Site to Officer</Text>
+            <Text style={styles.modalSub}>
+              Assign or transfer <Text style={{ color: COLORS.textPrimary, fontWeight: '700' }}>{reassignGuard?.name}</Text> ({reassignGuard?.badgeNumber || 'Officer'}) to one of your active security sites.
+            </Text>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
+              <Text style={styles.fieldLabel}>Select Site</Text>
+              <TouchableOpacity onPress={() => { setReassignGuard(null); setCreateSiteVisible(true); }}>
+                <Text style={{ color: COLORS.brand, fontSize: 11, fontWeight: '700' }}>+ Register new site</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.typeRow}>
+              {availableSites.map(site => {
+                const id = String(site.id || site._id);
+                const active = String(reassignSiteId) === id;
+                return (
+                  <TouchableOpacity
+                    key={id}
+                    style={[styles.typePill, active && styles.typePillActive]}
+                    onPress={() => setReassignSiteId(id)}
+                  >
+                    <Text style={[styles.typePillTxt, active && styles.typePillTxtActive]}>{site.name}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.submitBtn, (!reassignSiteId || reassignBusy) && styles.btnDisabled]}
+              onPress={handleReassignSite}
+              disabled={!reassignSiteId || reassignBusy}
+            >
+              <Text style={styles.submitBtnTxt}>{reassignBusy ? 'Updating Assignment…' : 'Confirm Site Assignment'}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.cancelBtn} onPress={() => setReassignGuard(null)}>
+              <Text style={styles.cancelBtnTxt}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <Modal visible={!!manualGuard} transparent animationType="slide">
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalCard}>
@@ -647,6 +728,8 @@ const styles = StyleSheet.create({
   kpiLabel:      { color: COLORS.textMuted, fontSize: 10, marginTop: 2 },
   sectionTitle:  { ...TYPE.label, marginBottom: S.md },
   guardSectionHeader:{ flexDirection: 'row', alignItems: 'center', gap: S.sm, marginBottom: S.md },
+  addSiteButton: { backgroundColor: COLORS.bgInput, borderWidth: 1, borderColor: COLORS.brand, borderRadius: R.md, paddingHorizontal: S.md, paddingVertical: S.sm },
+  addSiteButtonText: { color: COLORS.brand, fontSize: 12, fontWeight: '800' },
   addGuardButton:{ backgroundColor: COLORS.brand, borderRadius: R.md, paddingHorizontal: S.md, paddingVertical: S.sm },
   addGuardButtonText:{ color: COLORS.white, fontSize: 12, fontWeight: '800' },
   emptyHint:     { color: COLORS.textDisabled, fontSize: 13, textAlign: 'center', marginTop: S.xl },

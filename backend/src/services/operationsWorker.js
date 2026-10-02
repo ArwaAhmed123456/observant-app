@@ -1,4 +1,4 @@
-const { ShiftSession, CheckCall, RandomPromptLog, User } = require('../models');
+const { ShiftSession, CheckCall, RandomPromptLog, User, Site } = require('../models');
 const { createAlert } = require('./alertService');
 const { sendPush } = require('./fcm');
 
@@ -64,14 +64,17 @@ async function expireCheckCalls(now = new Date()) {
       $inc: { missedCheckCallCount: 1 },
       $set: { nextCheckCallAt: (() => { const next = new Date(call.scheduledFor || call.firedAt); next.setMinutes(0, 0, 0); return new Date(next.getTime() + HOUR); })() },
     });
-    const guard = await User.findById(call.guardId).select('name badgeNumber');
+    const [guard, site] = await Promise.all([
+      User.findById(call.guardId).select('name badgeNumber'),
+      Site.findById(call.siteId).select('name'),
+    ]);
     await createAlert({
       organisationId: call.organisationId,
       siteId: call.siteId,
       guardId: call.guardId,
       type: 'check_call_missed',
-      title: 'Missed check call',
-      message: `${guard?.name || 'A guard'} did not respond within the 10-minute check-call window.`,
+      title: `Missed Check Call · ${guard?.name || 'Officer'}`,
+      message: `${guard?.name || 'Officer'} (${guard?.badgeNumber || '—'}) did not respond within the 10-minute window${site?.name ? ` at ${site.name}` : ''}.`,
       refModel: 'CheckCall',
       refId: call._id,
     });
@@ -135,13 +138,17 @@ async function alertIgnoredPrompts(now = new Date()) {
       { new: true }
     );
     if (!claimed) continue;
+    const [guard, site] = await Promise.all([
+      User.findById(item.guardId).select('name badgeNumber'),
+      Site.findById(item.siteId).select('name'),
+    ]);
     await createAlert({
       organisationId: item.organisationId,
       siteId: item.siteId,
       guardId: item.guardId,
       type: 'random_prompt_ignored',
-      title: 'HIGH PRIORITY · Surprise patrol missed',
-      message: 'The guard did not acknowledge the surprise patrol within the 10-minute response window.',
+      title: `Surprise Patrol Missed · ${guard?.name || 'Officer'}`,
+      message: `${guard?.name || 'Officer'} (${guard?.badgeNumber || '—'}) did not acknowledge the surprise patrol within the 10-minute window${site?.name ? ` at ${site.name}` : ''}.`,
       refModel: 'RandomPromptLog',
       refId: item._id,
     });

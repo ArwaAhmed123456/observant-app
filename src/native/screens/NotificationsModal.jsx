@@ -5,79 +5,160 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  ScrollView
+  ScrollView,
 } from 'react-native';
-import { Bell, X, ShieldAlert, Clock, Calendar, Info, CheckCheck } from 'lucide-react-native';
+import { Bell, X, ShieldAlert, Clock, Calendar, Info, CheckCheck, MapPin, User } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { P, SP, BR, FONT, SH_TOKENS } from '../../ds';
+import { useApp } from '../../context/AppContext';
 import { useSecurity } from '../../context/SecurityContext';
 
-export const NotificationsModal = ({ visible, onClose }) => {
-  const { notifications, setNotifications } = useSecurity();
+export const NotificationsModal = ({ visible, onClose, onSelectAlert }) => {
+  // Gracefully support AppContext and SecurityContext
+  let appContext = null;
+  let securityContext = null;
+  try { appContext = useApp(); } catch (_) {}
+  try { securityContext = useSecurity(); } catch (_) {}
+
+  const rawAlerts = appContext?.alerts || [];
+  const rawNotifs = securityContext?.notifications || [];
+
+  // Unified items list
+  const items = rawAlerts.length > 0
+    ? rawAlerts.map(a => ({
+        id: a.id || a._id,
+        title: a.title || 'Security alert',
+        message: a.message || '',
+        note: a.note || null,
+        type: a.type || 'info',
+        read: !!a.read,
+        timestamp: a.createdAt || new Date().toISOString(),
+        guardName: a.guardName || a.guard?.name || null,
+        siteName: a.siteName || a.site?.name || null,
+        raw: a,
+      }))
+    : rawNotifs.map(n => ({
+        id: n.id || String(Math.random()),
+        title: n.title || 'Notification',
+        message: n.message || '',
+        note: null,
+        type: n.type || 'info',
+        read: !!n.read,
+        timestamp: n.timestamp || new Date().toISOString(),
+        guardName: null,
+        siteName: null,
+        raw: n,
+      }));
 
   const handleMarkAllRead = () => {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    if (appContext?.markAllAlertsRead) {
+      appContext.markAllAlertsRead();
+    }
+    if (securityContext?.setNotifications) {
+      securityContext.setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    }
   };
 
   const getIcon = (type) => {
     switch (type) {
       case 'emergency':
-        return <ShieldAlert color="#ef4444" size={18} />;
+      case 'sos':
+      case 'random_prompt_ignored':
+        return <ShieldAlert color={P.danger} size={18} />;
       case 'shift':
-        return <Clock color="#38bdf8" size={18} />;
       case 'check_call':
-        return <Clock color="#10b981" size={18} />;
+      case 'check_call_missed':
+        return <Clock color="#D97706" size={18} />;
       case 'roster':
-        return <Calendar color="#f59e0b" size={18} />;
+        return <Calendar color={P.blueLight} size={18} />;
       default:
-        return <Info color="#94a3b8" size={18} />;
+        return <Info color={P.t3} size={18} />;
     }
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
+    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.overlay}>
         <View style={styles.card}>
+          <LinearGradient colors={['#FFFFFF', '#F8FAFC']} style={StyleSheet.absoluteFillObject} />
+
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerTitleRow}>
-              <Bell color="#38bdf8" size={20} />
-              <Text style={styles.headerTitle}>Operations Inbox</Text>
+              <View style={styles.bellWrap}>
+                <Bell color="#D97706" size={18} />
+              </View>
+              <View>
+                <Text style={styles.headerTitle}>Operations Inbox</Text>
+                <Text style={styles.headerSubtitle}>Real-time alerts & shift notices</Text>
+              </View>
             </View>
             <View style={styles.headerActions}>
-              <TouchableOpacity onPress={handleMarkAllRead} style={styles.markReadButton}>
-                <CheckCheck color="#38bdf8" size={16} />
+              <TouchableOpacity onPress={handleMarkAllRead} style={styles.markReadButton} activeOpacity={0.7}>
+                <CheckCheck color="#D97706" size={15} />
+                <Text style={styles.markReadTxt}>Mark read</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                <X color="#94a3b8" size={20} />
+              <TouchableOpacity onPress={onClose} style={styles.closeButton} activeOpacity={0.7}>
+                <X color={P.t3} size={18} />
               </TouchableOpacity>
             </View>
           </View>
 
-          <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-            {notifications.length === 0 ? (
+          <ScrollView style={styles.body} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
+            {items.length === 0 ? (
               <View style={styles.emptyWrap}>
-                <Text style={styles.emptyText}>No notifications yet.</Text>
+                <Bell color={P.t4} size={36} />
+                <Text style={styles.emptyText}>No notifications in your inbox.</Text>
+                <Text style={styles.emptySub}>All monitored operations are running smoothly.</Text>
               </View>
             ) : (
-              notifications.map((n) => (
-                <View
+              items.map((n) => (
+                <TouchableOpacity
                   key={n.id}
                   style={[styles.notifCard, !n.read && styles.notifCardUnread]}
+                  onPress={() => {
+                    if (onSelectAlert) onSelectAlert(n.raw);
+                  }}
+                  activeOpacity={onSelectAlert ? 0.75 : 1}
                 >
                   <View style={styles.iconWrap}>{getIcon(n.type)}</View>
                   <View style={styles.notifCol}>
-                    <Text style={styles.notifTitle}>{n.title}</Text>
+                    <View style={styles.titleRow}>
+                      <Text style={[styles.notifTitle, !n.read && styles.notifTitleUnread]} numberOfLines={1}>
+                        {n.title}
+                      </Text>
+                      <Text style={styles.notifTime}>
+                        {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </Text>
+                    </View>
                     <Text style={styles.notifMsg}>{n.message}</Text>
-                    <Text style={styles.notifTime}>
-                      {new Date(n.timestamp).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </Text>
+                    {(n.guardName || n.siteName) && (
+                      <View style={styles.metaRow}>
+                        {n.guardName && (
+                          <View style={styles.metaPill}>
+                            <User size={10} color={P.t3} />
+                            <Text style={styles.metaPillTxt}>{n.guardName}</Text>
+                          </View>
+                        )}
+                        {n.siteName && (
+                          <View style={styles.metaPill}>
+                            <MapPin size={10} color={P.t3} />
+                            <Text style={styles.metaPillTxt}>{n.siteName}</Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+                    {n.note && <Text style={styles.notifNote}>"{n.note}"</Text>}
                   </View>
-                </View>
+                  {!n.read && <View style={styles.unreadDot} />}
+                </TouchableOpacity>
               ))
             )}
           </ScrollView>
+
+          <TouchableOpacity style={styles.closeFooterBtn} onPress={onClose} activeOpacity={0.85}>
+            <Text style={styles.closeFooterBtnTxt}>Dismiss & Return</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -87,95 +168,197 @@ export const NotificationsModal = ({ visible, onClose }) => {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'flex-end'
+    backgroundColor: P.overlay,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: SP.px16,
   },
   card: {
-    backgroundColor: '#0f172a',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    borderWidth: 1,
-    borderColor: '#334155',
-    maxHeight: '85%',
-    padding: 20
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: P.bg0,
+    borderRadius: BR.xl,
+    borderWidth: 1.5,
+    borderColor: P.b3,
+    maxHeight: '82%',
+    padding: SP.px18,
+    overflow: 'hidden',
+    ...SH_TOKENS.lg,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16
+    paddingBottom: SP.px12,
+    borderBottomWidth: 1,
+    borderBottomColor: P.b1,
+    marginBottom: SP.px12,
   },
   headerTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8
+    gap: 10,
+  },
+  bellWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(217,119,6,0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#f8fafc'
+    fontSize: 16,
+    fontWeight: '800',
+    color: P.t1,
+  },
+  headerSubtitle: {
+    fontSize: 11,
+    color: P.t3,
+    marginTop: 1,
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8
+    gap: 6,
   },
   markReadButton: {
-    padding: 6,
-    borderRadius: 8,
-    backgroundColor: '#1e293b'
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: BR.sm,
+    backgroundColor: 'rgba(217,119,6,0.1)',
+  },
+  markReadTxt: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#D97706',
   },
   closeButton: {
     padding: 6,
-    borderRadius: 8,
-    backgroundColor: '#1e293b'
+    borderRadius: BR.sm,
+    backgroundColor: P.bg2,
+    borderWidth: 1,
+    borderColor: P.b2,
   },
   body: {
-    marginBottom: 10
+    maxHeight: 400,
   },
   emptyWrap: {
     paddingVertical: 40,
-    alignItems: 'center'
+    alignItems: 'center',
+    gap: 8,
   },
   emptyText: {
-    color: '#64748b',
-    fontSize: 14
+    color: P.t2,
+    fontSize: 14,
+    fontWeight: '700',
+    marginTop: 6,
+  },
+  emptySub: {
+    color: P.t4,
+    fontSize: 12,
   },
   notifCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 10,
+    gap: 10,
+    backgroundColor: P.bg1,
+    borderRadius: BR.md,
+    padding: SP.px12,
+    marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#334155'
+    borderColor: P.b2,
+    position: 'relative',
   },
   notifCardUnread: {
-    borderColor: '#0284c7',
-    backgroundColor: 'rgba(2, 132, 199, 0.08)'
+    borderColor: 'rgba(217,119,6,0.4)',
+    backgroundColor: 'rgba(217,119,6,0.06)',
   },
   iconWrap: {
-    marginTop: 2
+    marginTop: 2,
+    width: 28,
+    alignItems: 'center',
   },
   notifCol: {
-    flex: 1
+    flex: 1,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
   },
   notifTitle: {
     fontSize: 13,
     fontWeight: '700',
-    color: '#f8fafc',
-    marginBottom: 2
+    color: P.t2,
+    flex: 1,
+    marginRight: 6,
+  },
+  notifTitleUnread: {
+    color: P.t1,
+    fontWeight: '800',
   },
   notifMsg: {
     fontSize: 12,
-    color: '#94a3b8',
-    lineHeight: 16
+    color: P.t3,
+    lineHeight: 16,
   },
   notifTime: {
     fontSize: 10,
-    color: '#64748b',
-    marginTop: 4
-  }
+    color: P.t4,
+    fontWeight: '600',
+  },
+  metaRow: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 6,
+    flexWrap: 'wrap',
+  },
+  metaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: P.bg3,
+    borderRadius: BR.xs,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  metaPillTxt: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: P.t3,
+  },
+  notifNote: {
+    fontSize: 11,
+    fontStyle: 'italic',
+    color: '#D97706',
+    marginTop: 4,
+  },
+  unreadDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#D97706',
+    position: 'absolute',
+    top: 12,
+    right: 10,
+  },
+  closeFooterBtn: {
+    marginTop: 8,
+    backgroundColor: P.bg2,
+    borderWidth: 1,
+    borderColor: P.b2,
+    borderRadius: BR.md,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  closeFooterBtnTxt: {
+    color: P.t2,
+    fontSize: 13,
+    fontWeight: '700',
+  },
 });

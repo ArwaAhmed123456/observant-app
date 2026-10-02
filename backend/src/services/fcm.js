@@ -12,6 +12,7 @@ async function sendPush(tokens, { title, body, data = {} }) {
       to, title, body,
       data: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, String(value)])),
       sound: 'default', priority: 'high', channelId: 'observant_alerts',
+      _displayInForeground: true,
     }));
   if (!messages.length) return { success: false, reason: 'No supported Expo push tokens' };
   try {
@@ -35,7 +36,12 @@ async function notifyManagers(alertDoc, managerUsers) {
   const result = await sendPush(managerUsers.map(user => user.fcmToken).filter(Boolean), {
     title: alertDoc.title,
     body: alertDoc.message,
-    data: { alertId: alertDoc._id.toString(), type: alertDoc.type },
+    data: {
+      alertId: alertDoc._id.toString(),
+      type: alertDoc.type,
+      guardId: alertDoc.guardId?.toString() || '',
+      siteId: alertDoc.siteId?.toString() || '',
+    },
   });
   if (result.success) await Alert.findByIdAndUpdate(alertDoc._id, { pushSent: true, pushSentAt: new Date() });
   return result;
