@@ -411,8 +411,9 @@ export function CheckCallPathScreen({ route, navigation }) {
       )}
 
       {/* Node detail modal */}
-      <Modal visible={!!detailNode} transparent animationType="fade" onRequestClose={() => setDetailNode(null)}>
+      <Modal visible={!!detailNode} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setDetailNode(null)}>
         <View style={styles.modalOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setDetailNode(null)} />
           <View style={styles.modalCard}>
             {detailNode && (() => {
               const st = statusFor(detailNode.cc);
@@ -511,8 +512,8 @@ const styles = StyleSheet.create({
   legendItem:     { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot:      { width: 9, height: 9, borderRadius: 5 },
   legendLabel:    { color: P.t3, fontSize: 11, fontWeight: '600' },
-  modalOverlay:   { flex: 1, backgroundColor: P.overlay, justifyContent: 'flex-end' },
-  modalCard:      { backgroundColor: P.bg2, borderTopLeftRadius: BR.xxl, borderTopRightRadius: BR.xxl, padding: SP.px24, borderWidth: 1, borderColor: P.b3, ...SH_TOKENS.lg },
+  modalOverlay:   { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.65)', justifyContent: 'center', alignItems: 'center', padding: SP.px20 },
+  modalCard:      { width: '100%', maxWidth: 380, backgroundColor: '#FFFFFF', borderRadius: BR.xl, padding: SP.px24, borderWidth: 1.5, borderColor: P.b3, elevation: 25, ...SH_TOKENS.lg },
   modalHeader:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
   modalStatusDot: { width: 10, height: 10, borderRadius: 5 },
   modalTitle:     { color: P.t1, fontSize: 18, fontWeight: '800', flex: 1 },

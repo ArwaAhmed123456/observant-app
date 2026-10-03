@@ -8,6 +8,7 @@ import {
   Image, KeyboardAvoidingView, Platform, ScrollView,
   ActivityIndicator, Animated,
 } from 'react-native';
+import { Eye, EyeOff } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useApp } from '../../context/AppContext';
 import { API_ENABLED, apiPost } from '../../services/api';
@@ -134,6 +135,7 @@ export function LoginScreen() {
       <KeyboardAvoidingView
         style={styles.kav}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
         <ScrollView
           contentContainerStyle={styles.scroll}
@@ -198,8 +200,11 @@ export function LoginScreen() {
                     autoCapitalize="none"
                     selectionColor={P.blue}
                   />
-                  <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPass(v => !v)}>
-                    <Text style={styles.eyeTxt}>{showPass ? 'Hide' : 'Show'}</Text>
+                  <TouchableOpacity style={styles.eyeBtn} onPress={() => setShowPass(v => !v)} accessibilityLabel={showPass ? 'Hide password' : 'Show password'}>
+                    {showPass
+                      ? <EyeOff size={18} color={P.info} />
+                      : <Eye    size={18} color={P.info} />
+                    }
                   </TouchableOpacity>
                 </View>
 
@@ -430,8 +435,7 @@ const styles = StyleSheet.create({
   inputError: { borderColor: P.redBorder },
   passRow:    { flexDirection: 'row', alignItems: 'center', gap: SP.px8, marginBottom: SP.px4 },
   passInput:  { flex: 1, marginBottom: 0 },
-  eyeBtn:     { paddingHorizontal: SP.px12, paddingVertical: SP.px12 },
-  eyeTxt:     { color: P.info, fontSize: 13, fontWeight: '600' },
+  eyeBtn:     { paddingHorizontal: SP.px12, paddingVertical: SP.px12, justifyContent: 'center', alignItems: 'center' },
   codeInput:  { fontSize: 22, letterSpacing: 10, textAlign: 'center' },
 
   forgotBtn:  { alignSelf: 'flex-end', marginTop: SP.px8, marginBottom: SP.px24 },

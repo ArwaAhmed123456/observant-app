@@ -80,28 +80,55 @@ export function CheckCallScreen() {
   const mins = Math.floor(timeLeft / 60);
   const secs = timeLeft % 60;
 
-  // ── Respond YES ────────────────────────────────────────────────────────────
   const handleYes = async () => {
     if (!activeCheckCall) {
+      // Guard-initiated check-in when no system-fired call is pending
+      const hasActiveSession = (shiftSessions || []).some(
+        s => (s.guardId === gId) && !s.bookedOffAt
+      );
+      if (!hasActiveSession) {
+        Alert.alert(
+          'Not Booked On',
+          'You must be booked on to a shift before recording a check call.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
       setManualSaving(true);
-      try { await recordManualGuardCheckCall('yes'); showSuccess(); }
-      catch (error) { Alert.alert('Check call not recorded', error.message || 'Please try again.'); }
-      finally { setManualSaving(false); }
+      try {
+        await recordManualGuardCheckCall('yes');
+        showSuccess();
+        Alert.alert('Check Call Recorded', '✓ All okay recorded for this hour.');
+      } catch (err) {
+        Alert.alert('Check call not recorded', err?.message || 'Please try again.');
+      } finally {
+        setManualSaving(false);
+      }
       return;
     }
     setResponding(true);
     const ccId = activeCheckCall.id || activeCheckCall._id;
-
-    if (!isOnline) {
-      await enqueue({ url: `/api/check-calls/${ccId}/respond`, method: 'POST', body: { response: 'yes' }, label: 'Check call YES' });
-      setPendingSync(true);
+    if (!ccId) {
       setResponding(false);
-      showSuccess();
+      Alert.alert('Error', 'Check call ID missing. Please restart the app.');
       return;
     }
-    await respondToCheckCall(ccId, 'yes');
-    setResponding(false);
-    showSuccess();
+    try {
+      if (!isOnline) {
+        await enqueue({ url: `/api/check-calls/${ccId}/respond`, method: 'POST', body: { response: 'yes' }, label: 'Check call YES' });
+        setPendingSync(true);
+        showSuccess();
+        Alert.alert('Check Call Queued', '✓ Recorded locally. Will sync automatically.');
+      } else {
+        await respondToCheckCall(ccId, 'yes');
+        showSuccess();
+        Alert.alert('Check Call Recorded', '✓ All okay on site verified.');
+      }
+    } catch (err) {
+      Alert.alert('Could not record check call', err?.message || 'Please try again.');
+    } finally {
+      setResponding(false);
+    }
   };
 
   // ── Submit issue ──────────────────────────────────────────────────────────
@@ -116,6 +143,7 @@ export function CheckCallScreen() {
         setShowIssueForm(false);
         resetForm();
         showSuccess();
+        Alert.alert('Issue Report Logged', 'Your manager has been alerted immediately.');
       } catch (error) {
         Alert.alert('Issue not recorded', error.message || 'Please try again.');
       } finally {
@@ -124,19 +152,28 @@ export function CheckCallScreen() {
       return;
     }
     const ccId = activeCheckCall.id || activeCheckCall._id;
-
-    if (!isOnline) {
-      await enqueue({ url: `/api/check-calls/${ccId}/respond`, method: 'POST', body: { response: 'no', note: noteText }, label: 'Check call issue' });
-      setPendingSync(true);
+    if (!ccId) {
       setResponding(false);
-      setShowIssueForm(false);
-      resetForm();
+      Alert.alert('Error', 'Check call ID missing. Please restart the app.');
       return;
     }
-    await respondToCheckCall(ccId, 'no', noteText, { category, photoUri: issuePhoto });
-    setResponding(false);
-    setShowIssueForm(false);
-    resetForm();
+
+    try {
+      if (!isOnline) {
+        await enqueue({ url: `/api/check-calls/${ccId}/respond`, method: 'POST', body: { response: 'no', note: noteText }, label: 'Check call issue' });
+        setPendingSync(true);
+      } else {
+        await respondToCheckCall(ccId, 'no', noteText, { category, photoUri: issuePhoto });
+      }
+      setShowIssueForm(false);
+      resetForm();
+      showSuccess();
+      Alert.alert('Issue Report Logged', 'Your manager has been alerted immediately.');
+    } catch (err) {
+      Alert.alert('Issue not submitted', err?.message || 'Please try again.');
+    } finally {
+      setResponding(false);
+    }
   };
 
   const resetForm = () => { setCategory(''); setNote(''); setIssuePhoto(null); };
@@ -298,72 +335,90 @@ export function CheckCallScreen() {
       )}
 
       {/* ── Issue Form Modal ── */}
-      <Modal visible={showIssueForm} transparent animationType="slide">
-        <KeyboardAvoidingView style={s.sheetOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <ScrollView style={s.sheet} contentContainerStyle={{ paddingBottom: 32 }} keyboardShouldPersistTaps="handled">
-            <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
-            <View style={s.sheetHandle} />
-            <View style={s.sheetTitleRow}>
-              <View style={s.issueDot} />
-              <Text style={s.sheetTitle}>Report an Issue</Text>
+      <Modal visible={showIssueForm} transparent animationType="fade" statusBarTranslucent onRequestClose={() => { setShowIssueForm(false); resetForm(); }}>
+        <View style={s.sheetOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFillObject}
+            activeOpacity={1}
+            onPress={() => { setShowIssueForm(false); resetForm(); }}
+          />
+          <KeyboardAvoidingView
+            style={{ width: '100%', maxWidth: 420 }}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={s.sheetCard}>
+              <View style={s.sheetHandle} />
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                bounces={false}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: 16 }}
+              >
+                <View style={s.sheetTitleRow}>
+                  <View style={s.issueDot} />
+                  <Text style={s.sheetTitle}>Report an Issue</Text>
+                </View>
+                <Text style={s.sheetSub}>Describe what you observed. Your manager will be alerted immediately.</Text>
+
+                {/* Category */}
+                <Text style={s.fieldLabel}>ISSUE CATEGORY  *</Text>
+                <TouchableOpacity style={s.catBtn} onPress={() => setShowCatPicker(true)}>
+                  <Text style={category ? s.catBtnTxt : s.catBtnPlaceholder}>
+                    {category || 'Select a category…'}
+                  </Text>
+                  <Text style={s.catArrow}>▾</Text>
+                </TouchableOpacity>
+
+                {/* Note */}
+                <Text style={s.fieldLabel}>NOTES (optional)</Text>
+                <TextInput
+                  style={s.noteInput}
+                  value={note}
+                  onChangeText={setNote}
+                  placeholder="Describe what you observed…"
+                  placeholderTextColor={P.t4}
+                  multiline
+                  numberOfLines={3}
+                  textAlignVertical="top"
+                  returnKeyType="done"
+                  blurOnSubmit
+                />
+
+                {/* Photo */}
+                <Text style={s.fieldLabel}>PHOTO (optional)</Text>
+                <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
+                  <Text style={s.photoBtnTxt}>{issuePhoto ? '📷  Retake photo' : '📷  Take photo'}</Text>
+                </TouchableOpacity>
+                {issuePhoto && (
+                  <View style={s.photoPreviewWrap}>
+                    <Image source={{ uri: issuePhoto }} style={s.photoPreview} resizeMode="cover" />
+                  </View>
+                )}
+
+                {/* Submit */}
+                <TouchableOpacity
+                  style={[s.submitBtn, (!category || responding) && s.btnDisabled]}
+                  onPress={handleSubmitIssue}
+                  disabled={!category || responding}
+                >
+                  <LinearGradient colors={[P.warn, P.warnDark]} start={{x:0,y:0}} end={{x:1,y:0}} style={s.btnGrad}>
+                    <Text style={s.submitTxt}>{responding ? 'SENDING…' : 'SUBMIT ISSUE REPORT'}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.cancelBtn} onPress={() => { setShowIssueForm(false); resetForm(); }}>
+                  <Text style={s.cancelTxt}>Cancel</Text>
+                </TouchableOpacity>
+              </ScrollView>
             </View>
-            <Text style={s.sheetSub}>Describe what you observed. Your manager will be alerted immediately.</Text>
-
-            {/* Category */}
-            <Text style={s.fieldLabel}>ISSUE CATEGORY  *</Text>
-            <TouchableOpacity style={s.catBtn} onPress={() => setShowCatPicker(true)}>
-              <Text style={category ? s.catBtnTxt : s.catBtnPlaceholder}>
-                {category || 'Select a category…'}
-              </Text>
-              <Text style={s.catArrow}>▾</Text>
-            </TouchableOpacity>
-
-            {/* Note */}
-            <Text style={s.fieldLabel}>NOTES (optional)</Text>
-            <TextInput
-              style={s.noteInput}
-              value={note}
-              onChangeText={setNote}
-              placeholder="Describe what you observed…"
-              placeholderTextColor={P.t4}
-              multiline
-              numberOfLines={3}
-              textAlignVertical="top"
-            />
-
-            {/* Photo */}
-            <Text style={s.fieldLabel}>PHOTO (optional)</Text>
-            <TouchableOpacity style={s.photoBtn} onPress={pickPhoto}>
-              <Text style={s.photoBtnTxt}>{issuePhoto ? '📷  Retake photo' : '📷  Take photo'}</Text>
-            </TouchableOpacity>
-            {issuePhoto && (
-              <View style={s.photoPreviewWrap}>
-                <Image source={{ uri: issuePhoto }} style={s.photoPreview} resizeMode="cover" />
-              </View>
-            )}
-
-            {/* Submit */}
-            <TouchableOpacity
-              style={[s.submitBtn, (!category || responding) && s.btnDisabled]}
-              onPress={handleSubmitIssue}
-              disabled={!category || responding}
-            >
-              <LinearGradient colors={[P.warn, P.warnDark]} start={{x:0,y:0}} end={{x:1,y:0}} style={s.btnGrad}>
-                <Text style={s.submitTxt}>{responding ? 'SENDING…' : 'SUBMIT ISSUE REPORT'}</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.cancelBtn} onPress={() => { setShowIssueForm(false); resetForm(); }}>
-              <Text style={s.cancelTxt}>Cancel</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       {/* ── Category Picker ── */}
-      <Modal visible={showCatPicker} transparent animationType="slide">
+      <Modal visible={showCatPicker} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setShowCatPicker(false)}>
         <View style={s.sheetOverlay}>
-          <View style={s.sheet}>
-            <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowCatPicker(false)} />
+          <View style={s.sheetCard}>
             <View style={s.sheetHandle} />
             <Text style={s.sheetTitle}>Select Category</Text>
             {CATEGORIES.map(cat => (
@@ -384,8 +439,9 @@ export function CheckCallScreen() {
       </Modal>
 
       {/* ── Detail Modal (Tactical Centered HUD) ── */}
-      <Modal visible={!!detailCC} transparent animationType="fade" onRequestClose={() => setDetailCC(null)}>
+      <Modal visible={!!detailCC} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setDetailCC(null)}>
         <View style={s.modalBackdrop}>
+          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setDetailCC(null)} />
           <View style={s.detailCard}>
             {detailCC && (() => {
               const tok = statusToken(detailCC.response || 'upcoming');
@@ -505,17 +561,17 @@ const s = StyleSheet.create({
   histArrow:       { color: P.t4, fontSize: 18, paddingRight: SP.px16 },
 
   // Success overlay
-  successOverlay:  { position: 'absolute', top: 82, left: 18, right: 18, alignItems: 'center', zIndex: 100 },
-  successBadge:    { borderRadius: BR.xxl, overflow: 'hidden', ...SH_TOKENS.ok },
-  successGrad:     { paddingHorizontal: SP.px24, paddingVertical: SP.px16, alignItems: 'center' },
-  successIcon:     { fontSize: 48, color: P.white, marginBottom: SP.px12 },
+  successOverlay:  { position: 'absolute', top: 120, left: 20, right: 20, alignItems: 'center', zIndex: 9999, elevation: 50 },
+  successBadge:    { borderRadius: BR.xxl, overflow: 'hidden', width: '100%', maxWidth: 360, elevation: 20, ...SH_TOKENS.ok },
+  successGrad:     { paddingHorizontal: SP.px24, paddingVertical: SP.px18, alignItems: 'center' },
+  successIcon:     { fontSize: 44, color: P.white, marginBottom: SP.px8 },
   successTxt:      { fontSize: 16, fontWeight: '800', color: P.white, letterSpacing: 1 },
-  successSub:      { fontSize: 13, color: 'rgba(255,255,255,0.7)', marginTop: SP.px8 },
+  successSub:      { fontSize: 13, color: 'rgba(255,255,255,0.85)', marginTop: SP.px4 },
 
   // Sheets / Centered Modals
-  sheetOverlay:    { flex: 1, backgroundColor: P.overlay, justifyContent: 'center', alignItems: 'center', padding: SP.px16 },
-  sheet:           { width: '100%', maxWidth: 400, borderRadius: BR.xl, padding: SP.px20, borderWidth: 1.5, borderColor: P.b3, backgroundColor: P.bg0, overflow: 'hidden', maxHeight: '90%', ...SH_TOKENS.lg },
-  sheetHandle:     { display: 'none' },
+  sheetOverlay:    { flex: 1, backgroundColor: 'rgba(15,23,42,0.65)', justifyContent: 'center', alignItems: 'center', padding: SP.px16 },
+  sheetCard:       { width: '100%', maxWidth: 420, borderRadius: BR.xl, padding: SP.px20, borderWidth: 1.5, borderColor: P.b3, backgroundColor: '#FFFFFF', overflow: 'hidden', maxHeight: '90%', elevation: 25, ...SH_TOKENS.lg },
+  sheetHandle:     { width: 36, height: 4, backgroundColor: P.b3, borderRadius: 2, alignSelf: 'center', marginBottom: SP.px16 },
   sheetTitleRow:   { flexDirection: 'row', alignItems: 'center', gap: SP.px12, marginBottom: SP.px4 },
   issueDot:        { width: 10, height: 10, borderRadius: 5, backgroundColor: P.warn },
   sheetTitle:      { fontSize: 18, fontWeight: '800', color: P.t1, marginBottom: SP.px4 },
@@ -544,8 +600,8 @@ const s = StyleSheet.create({
   catOptionTxt:    { color: P.t1, fontSize: 14, flex: 1 },
 
   // Detail modal
-  modalBackdrop:   { flex: 1, backgroundColor: P.overlay, justifyContent: 'center', alignItems: 'center', padding: SP.px20 },
-  detailCard:      { width: '100%', maxWidth: 380, backgroundColor: P.bg2, borderRadius: BR.xl, borderWidth: 1.5, borderColor: P.b3, padding: SP.px20, ...SH_TOKENS.lg },
+  modalBackdrop:   { flex: 1, backgroundColor: 'rgba(15,23,42,0.65)', justifyContent: 'center', alignItems: 'center', padding: SP.px20 },
+  detailCard:      { width: '100%', maxWidth: 380, backgroundColor: '#FFFFFF', borderRadius: BR.xl, borderWidth: 1.5, borderColor: P.b3, padding: SP.px20, elevation: 25, ...SH_TOKENS.lg },
   detailCardHeader:{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px16 },
   detailHeaderLeft:{ flexDirection: 'row', alignItems: 'center', gap: SP.px8 },
   detailDot:       { width: 10, height: 10, borderRadius: 5 },

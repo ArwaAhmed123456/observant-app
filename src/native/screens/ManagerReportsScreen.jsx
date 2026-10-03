@@ -4,11 +4,13 @@ import {
   Modal, TextInput, Switch, Share, Alert,
 } from 'react-native';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
-import { FileText, Download, Filter, X, ChevronDown } from 'lucide-react-native';
+import { FileText, Download, Filter, X, ChevronDown, File } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, input as inputStyle, btnPrimary } from '../../ds';
 import { API_ENABLED, apiGet } from '../../services/api';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 const REPORT_TYPES = ['combined', 'check_calls', 'patrols'];
 const DATE_RANGES  = ['today', 'this_week', 'this_month', 'custom'];
@@ -145,6 +147,9 @@ export function ManagerReportsScreen() {
   }, [reportType, guardFilter, siteFilter, dateRange, customStart, customEnd,
       checkCalls, patrolSessions, patrolCaptures, users, sites, shiftSessions, checkpoints, currentUser]);
 
+  const guardName = guardFilter !== 'all' ? (users || []).find(u => u.id === guardFilter || u._id === guardFilter)?.name || 'All Guards' : 'All Guards';
+  const siteName  = siteFilter !== 'all' ? (sites || []).find(s => s.id === siteFilter || s._id === siteFilter)?.name || 'All Sites' : 'All Sites';
+
   const generateCSV = async () => {
     if (exportBusy) return;
     setExportBusy(true);
@@ -201,8 +206,76 @@ export function ManagerReportsScreen() {
     }
   };
 
-  const guardName = guardFilter !== 'all' ? users.find(u => u.id === guardFilter)?.name : 'All Guards';
-  const siteName  = siteFilter !== 'all' ? sites.find(s => s.id === siteFilter)?.name : 'All Sites';
+  const generatePDF = async () => {
+    if (exportBusy) return;
+    setExportBusy(true);
+    try {
+      if (!rows || rows.length === 0) {
+        Alert.alert('No Records', 'No security check-calls or patrols match the selected filters.');
+        return;
+      }
+
+      const tableRows = rows.map(r => {
+        const resultColor = r.type === 'check_call'
+          ? (r.checkCallResult?.startsWith('✓') ? '#16a34a' : r.checkCallResult?.startsWith('✗') ? '#dc2626' : '#d97706')
+          : '#2563eb';
+        const eventDetail = r.type === 'check_call'
+          ? `${r.checkCallTime} · ${r.checkCallResult}`
+          : `${r.patrolTime}<br/><small>Checkpoints: ${r.checkpointsCapt || '—'}${r.missingCheckpoints ? ` <span style="color:#d97706">(missing: ${r.missingCheckpoints})</span>` : ''}</small>`;
+        const badge = r.type === 'check_call'
+          ? `<span style="background:#eff6ff;color:#1e40af;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700">CHECK CALL</span>`
+          : `<span style="background:#f0fdf4;color:#166534;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700">PATROL</span>`;
+        return `<tr>
+          <td>${badge}<br/><small style="color:#64748b">${r.date}</small></td>
+          <td><strong>${r.guardName}</strong><br/><small style="color:#64748b">${r.badgeNumber}</small></td>
+          <td style="color:#475569">${r.site}</td>
+          <td style="color:#475569">${r.shiftTime}</td>
+          <td style="color:${resultColor};font-weight:600">${eventDetail}</td>
+          <td style="color:#64748b;font-size:11px">${r.note || r.missingCheckpoints ? `Missing: ${r.missingCheckpoints || '—'}` : '—'}</td>
+        </tr>`;
+      }).join('');
+
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
+        body{font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;font-size:12px;color:#0f172a;margin:0;padding:24px;}
+        h1{font-size:20px;font-weight:800;color:#0B192C;margin:0 0 4px;}
+        .sub{font-size:12px;color:#64748b;margin:0 0 20px;}
+        .meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
+        .tag{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:20px;padding:3px 10px;font-size:11px;color:#475569;}
+        table{width:100%;border-collapse:collapse;}
+        th{background:#0B192C;color:#fff;padding:10px 8px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
+        td{padding:9px 8px;border-bottom:1px solid #e2e8f0;font-size:11px;vertical-align:top;}
+        tr:nth-child(even){background:#f8fafc;}
+        .footer{margin-top:20px;font-size:10px;color:#94a3b8;text-align:center;border-top:1px solid #e2e8f0;padding-top:12px;}
+      </style></head><body>
+        <h1>OBSERVANT SECURITY — SHIFT REPORT</h1>
+        <p class="sub">Generated: ${new Date().toLocaleString()} · ${rows.length} record(s)</p>
+        <div class="meta">
+          <span class="tag">${getDateRangeLabel(dateRange)}</span>
+          <span class="tag">${guardName}</span>
+          <span class="tag">${siteName}</span>
+          <span class="tag">${reportType.replace('_', ' ')}</span>
+        </div>
+        <table><thead><tr>
+          <th>Type</th><th>Officer</th><th>Site</th><th>Shift</th><th>Event / Result</th><th>Notes</th>
+        </tr></thead><tbody>
+          ${tableRows}
+        </tbody></table>
+        <p class="footer">OBSERVANT SECURITY · Confidential Operational Report · ${new Date().toLocaleDateString()}</p>
+      </body></html>`;
+
+      const { uri } = await Print.printToFileAsync({ html, base64: false });
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Share Security Report PDF' });
+      } else {
+        await Print.printAsync({ html });
+      }
+    } catch (error) {
+      Alert.alert('PDF export failed', error.message || 'Could not generate PDF report.');
+    } finally {
+      setExportBusy(false);
+    }
+  };
 
   return (
     <View style={styles.root}>
@@ -216,24 +289,40 @@ export function ManagerReportsScreen() {
           <TouchableOpacity style={styles.iconBtn} onPress={() => setFilterModal(true)}>
             <Filter color={P.t2} size={20} />
           </TouchableOpacity>
+          <TouchableOpacity style={[styles.pdfBtn, exportBusy && { opacity: 0.65 }]} onPress={generatePDF} disabled={exportBusy}>
+            <File color={P.white} size={15} />
+            <Text style={styles.exportBtnTxt}>{exportBusy ? 'PDF…' : 'PDF'}</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={[styles.exportBtn, exportBusy && { opacity: 0.65 }]} onPress={generateCSV} disabled={exportBusy}>
             <Download color={P.white} size={15} />
-            <Text style={styles.exportBtnTxt}>{exportBusy ? 'Generating…' : 'Export CSV'}</Text>
+            <Text style={styles.exportBtnTxt}>{exportBusy ? 'CSV…' : 'CSV'}</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       {/* Active filters summary */}
       <View style={styles.filterSummary}>
-        <Text style={styles.filterTag}>{getDateRangeLabel(dateRange)}</Text>
-        <Text style={styles.filterTag}>{guardName}</Text>
-        <Text style={styles.filterTag}>{siteName}</Text>
-        <Text style={styles.filterTag}>{reportType.replace('_',' ')}</Text>
+        <TouchableOpacity style={[styles.filterTag, dateRange !== 'today' && styles.filterTagActive]} onPress={() => setFilterModal(true)}>
+          <Text style={styles.filterTagTxt}>{getDateRangeLabel(dateRange)}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.filterTag, guardFilter !== 'all' && styles.filterTagActive]} onPress={() => setGuardPickerModal(true)}>
+          <Text style={styles.filterTagTxt}>{guardName}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.filterTag, siteFilter !== 'all' && styles.filterTagActive]} onPress={() => setSitePickerModal(true)}>
+          <Text style={styles.filterTagTxt}>{siteName}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.filterTag, reportType !== 'combined' && styles.filterTagActive]} onPress={() => setFilterModal(true)}>
+          <Text style={styles.filterTagTxt}>{reportType.replace('_',' ')}</Text>
+        </TouchableOpacity>
       </View>
 
-      <Text style={styles.rowCount}>{rows.length} record{rows.length !== 1 ? 's' : ''}</Text>
+      <Text style={styles.rowCount}>{rows.length} record{rows.length !== 1 ? 's' : ''} — tap PDF or CSV to export</Text>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.reportScroll}
+        contentContainerStyle={styles.reportScrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {rows.length === 0 && (
           <View style={{ marginTop: SP.px24 }}>
             <EmptyState
@@ -426,10 +515,15 @@ const styles = StyleSheet.create({
   topBtns:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
   iconBtn:      { padding: 8, backgroundColor: P.bg2, borderRadius: BR.sm, borderWidth: 1, borderColor: P.b2 },
   exportBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.blue, borderRadius: BR.sm, paddingHorizontal: SP.px12, paddingVertical: 9, ...SH_TOKENS.blue },
+  pdfBtn:       { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#7c3aed', borderRadius: BR.sm, paddingHorizontal: SP.px12, paddingVertical: 9 },
   exportBtnTxt: { color: P.white, fontSize: 12, fontWeight: '700' },
   filterSummary:{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: SP.px8, paddingHorizontal: SP.px20 },
   filterTag:    { backgroundColor: P.bg3, borderRadius: BR.xs, paddingHorizontal: SP.px8, paddingVertical: 4, borderWidth: 1, borderColor: P.b2 },
+  filterTagActive: { backgroundColor: P.blueSubtle, borderColor: P.blueBorder },
+  filterTagTxt: { color: P.t2, fontSize: 12, fontWeight: '600' },
   rowCount:     { color: P.t3, fontSize: 12, marginBottom: SP.px12, paddingHorizontal: SP.px20 },
+  reportScroll: { flex: 1 },
+  reportScrollContent: { paddingBottom: SP.px40 },
   row:          { ...card, padding: SP.px16, marginBottom: SP.px8, marginHorizontal: SP.px20 },
   rowPatrol:    { borderColor: P.blueBorder },
   rowHeader:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px8 },

@@ -1,57 +1,67 @@
+/**
+ * CheckCallModal — Overlay modal driven by AppContext.activeCheckCall
+ * Shown whenever the guard has a pending check call to acknowledge.
+ */
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Modal, View, Text, TouchableOpacity, StyleSheet, Animated,
 } from 'react-native';
-import { ShieldCheck, Clock, MapPin, AlertCircle, Zap } from 'lucide-react-native';
-import { useSecurity } from '../../context/SecurityContext';
+import { ShieldCheck, Clock, MapPin, Zap, AlertTriangle } from 'lucide-react-native';
+import { useApp } from '../../context/AppContext';
 import { P, SP, BR, FONT, SH_TOKENS } from '../../ds';
 
-export const CheckCallModal = () => {
-  const { pendingCheckCall, respondCheckCall, activeShiftSession } = useSecurity();
-  const [secondsRemaining, setSecondsRemaining] = useState(600);
+const WINDOW_SECS = 600;
 
-  // Pulse animation for urgent state
+export const CheckCallModal = () => {
+  const { activeCheckCall, respondToCheckCall, currentUser, sites } = useApp();
+  const [secondsRemaining, setSecondsRemaining] = useState(WINDOW_SECS);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    if (!pendingCheckCall) {
-      setSecondsRemaining(600);
+    if (!activeCheckCall) {
+      setSecondsRemaining(WINDOW_SECS);
       return;
     }
-    const interval = setInterval(() => {
-      setSecondsRemaining(prev => {
-        if (prev <= 1) { clearInterval(interval); return 0; }
-        return prev - 1;
-      });
-    }, 1000);
+    const start = activeCheckCall.firedAt
+      ? new Date(activeCheckCall.firedAt).getTime()
+      : Date.now();
+    const tick = () => setSecondsRemaining(Math.max(0, WINDOW_SECS - Math.floor((Date.now() - start) / 1000)));
+    tick();
+    const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [pendingCheckCall]);
+  }, [activeCheckCall?.id]);
 
   useEffect(() => {
     const isUrgent = secondsRemaining < 120 && secondsRemaining > 0;
     if (isUrgent) {
-      Animated.loop(
+      const loop = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, { toValue: 1.12, duration: 500, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 500, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1,    duration: 500, useNativeDriver: true }),
         ])
-      ).start();
+      );
+      loop.start();
+      return () => loop.stop();
     } else {
       pulseAnim.setValue(1);
     }
   }, [secondsRemaining < 120]);
 
-  if (!pendingCheckCall) return null;
+  if (!activeCheckCall) return null;
 
   const mins = Math.floor(secondsRemaining / 60);
   const secs = secondsRemaining % 60;
-  const timeFormatted = `${mins.toString().padStart(2,'0')}:${secs.toString().padStart(2,'0')}`;
+  const timeFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   const isUrgent = secondsRemaining < 120;
 
-  const handleConfirm = () => respondCheckCall(pendingCheckCall.id, 'safe');
+  const site = sites?.find(s => s.id === currentUser?.siteId || s._id === currentUser?.siteId);
+
+  const handleConfirm = async () => {
+    await respondToCheckCall(activeCheckCall.id, 'yes');
+  };
 
   return (
-    <Modal visible={!!pendingCheckCall} animationType="fade" transparent>
+    <Modal visible={!!activeCheckCall} animationType="fade" transparent statusBarTranslucent>
       <View style={styles.overlay}>
         <View style={[styles.card, isUrgent && styles.cardUrgent]}>
 
@@ -59,15 +69,16 @@ export const CheckCallModal = () => {
           <Animated.View style={[
             styles.iconCircle,
             isUrgent && styles.iconCircleUrgent,
-            { transform: [{ scale: pulseAnim }] }
+            { transform: [{ scale: pulseAnim }] },
           ]}>
-            <ShieldCheck color={isUrgent ? P.danger : P.ok} size={36} />
+            {isUrgent
+              ? <AlertTriangle color={P.danger} size={36} />
+              : <ShieldCheck color={P.ok} size={36} />
+            }
           </Animated.View>
 
           <Text style={styles.title}>Safety Check-Call</Text>
-          <Text style={styles.subtitle}>
-            Confirm your status and on-site presence.
-          </Text>
+          <Text style={styles.subtitle}>Confirm your status and on-site presence.</Text>
 
           {/* Countdown timer */}
           <View style={[styles.timerBox, isUrgent && styles.timerBoxUrgent]}>
@@ -78,11 +89,11 @@ export const CheckCallModal = () => {
             <Text style={styles.timerLabel}>Response Window</Text>
           </View>
 
-          {/* GPS row */}
+          {/* GPS / site row */}
           <View style={styles.gpsRow}>
             <MapPin color={P.t3} size={13} />
             <Text style={styles.gpsText}>
-              {activeShiftSession?.gpsLocation || 'GPS Geofence: Active Site Verified'}
+              {site?.name || 'Active site verified'}
             </Text>
           </View>
 
@@ -90,15 +101,22 @@ export const CheckCallModal = () => {
           <View style={styles.warningBox}>
             <Zap color={P.warn} size={14} />
             <Text style={styles.warningText}>
-              Unacknowledged calls trigger an automated dispatcher escalation.
+              Unacknowledged calls trigger an automated manager escalation.
             </Text>
           </View>
 
-          {/* Confirm */}
-          <TouchableOpacity onPress={handleConfirm} style={[styles.confirmButton, isUrgent && styles.confirmButtonUrgent]}>
+          {/* Confirm safe */}
+          <TouchableOpacity
+            onPress={handleConfirm}
+            style={[styles.confirmButton, isUrgent && styles.confirmButtonUrgent]}
+          >
             <ShieldCheck color={P.white} size={18} />
             <Text style={styles.confirmButtonText}>I AM SAFE & ON PATROL</Text>
           </TouchableOpacity>
+
+          <Text style={styles.issueHint}>
+            To report an issue, dismiss this modal and use the Check Call tab.
+          </Text>
         </View>
       </View>
     </Modal>
@@ -126,7 +144,6 @@ const styles = StyleSheet.create({
   },
   cardUrgent: {
     borderColor: P.dangerBorder,
-    backgroundColor: P.bg2,
   },
   iconCircle: {
     width: 72,
@@ -178,9 +195,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     fontVariant: ['tabular-nums'],
   },
-  timerTextUrgent: {
-    color: P.danger,
-  },
+  timerTextUrgent: { color: P.danger },
   timerLabel: {
     fontSize: 10,
     color: P.t3,
@@ -194,10 +209,7 @@ const styles = StyleSheet.create({
     gap: 5,
     marginBottom: SP.px16,
   },
-  gpsText: {
-    fontSize: 11,
-    color: P.t3,
-  },
+  gpsText: { fontSize: 11, color: P.t3 },
   warningBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -210,12 +222,7 @@ const styles = StyleSheet.create({
     marginBottom: SP.px20,
     width: '100%',
   },
-  warningText: {
-    fontSize: 11,
-    color: P.warn,
-    flex: 1,
-    lineHeight: 15,
-  },
+  warningText: { fontSize: 11, color: P.warn, flex: 1, lineHeight: 15 },
   confirmButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -236,5 +243,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  issueHint: {
+    fontSize: 11,
+    color: P.t4,
+    textAlign: 'center',
+    marginTop: SP.px12,
+    lineHeight: 16,
   },
 });

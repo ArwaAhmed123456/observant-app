@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
   Modal, TextInput, KeyboardAvoidingView, Platform
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, formatTime } from '../../context/AppContext';
 import { LogOut, Bell, MapPin, CheckCircle, AlertTriangle, Clock, Users, Zap, ClipboardList, Shield, PlusCircle, ChevronRight, X } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
@@ -14,6 +15,8 @@ import { COLORS, S, R, TYPE, shadows, cardStyle } from '../../theme';
 const TABS = ['overview', 'alerts'];
 
 export function ManagerDashboardScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const safeBottom = Math.max(insets.bottom, 16);
   const {
     currentUser, users, sites, logout, createUser, updateUser, createSite,
     shiftSessions, checkCalls, patrolSessions,
@@ -412,7 +415,7 @@ export function ManagerDashboardScreen({ navigation }) {
       {/* ── Alert Detail Modal ── */}
       <Modal visible={!!selectedAlert} transparent animationType="fade" onRequestClose={() => setSelectedAlert(null)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.alertDetailCard}>
+          <View style={[styles.alertDetailCard, { paddingBottom: safeBottom + S.xl }]}>
             {selectedAlert && (() => {
               const sev = alertSeverity(selectedAlert.type);
               const targetGuard = (users || []).find(u => u.id === selectedAlert.guardId || u._id === selectedAlert.guardId);
@@ -507,8 +510,8 @@ export function ManagerDashboardScreen({ navigation }) {
 
       {/* Create Site Modal */}
       <Modal visible={createSiteVisible} transparent animationType="slide" onRequestClose={() => setCreateSiteVisible(false)}>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: S.xl }} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: safeBottom + S.xl }} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitle}>Register New Security Site</Text>
             <Text style={styles.modalSub}>Add a new site or client facility to your management portfolio. You can assign security officers and check-calls immediately.</Text>
 
@@ -552,8 +555,8 @@ export function ManagerDashboardScreen({ navigation }) {
 
       {/* Create Guard Modal */}
       <Modal visible={createGuardVisible} transparent animationType="slide" onRequestClose={() => setCreateGuardVisible(false)}>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: S.xl }} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: safeBottom + S.xl }} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitle}>Create guard account</Text>
             <Text style={styles.modalSub}>Create a sign-in for an officer at one of your assigned sites. You can publish their rota immediately after.</Text>
             <Text style={styles.fieldLabel}>Full name</Text>
@@ -590,7 +593,7 @@ export function ManagerDashboardScreen({ navigation }) {
       {/* Reassign Guard Site Modal */}
       <Modal visible={!!reassignGuard} transparent animationType="slide" onRequestClose={() => setReassignGuard(null)}>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: S.xl }} keyboardShouldPersistTaps="handled">
+          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: safeBottom + S.xl }} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitle}>Assign Site to Officer</Text>
             <Text style={styles.modalSub}>
               Assign or transfer <Text style={{ color: COLORS.textPrimary, fontWeight: '700' }}>{reassignGuard?.name}</Text> ({reassignGuard?.badgeNumber || 'Officer'}) to one of your active security sites.

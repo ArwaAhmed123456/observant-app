@@ -788,13 +788,17 @@ export function AppProvider({ children }) {
     if (response === 'no') {
       // Alert manager for issue
       const catLabel = extra?.category ? `[${extra.category}] ` : '';
+      const callTimeStr = formatTime(new Date());
       await addAlert({
         type: 'check_call_issue',
         severity: 'issue',
         guardId: cc.guardId,
+        guardName: guard?.name,
+        badgeNumber: guard?.badgeNumber,
         siteId: cc.siteId,
-        title: `⚠️ Check Call Issue — ${guard?.name || 'Guard'}`,
-        message: `${catLabel}${guard?.name || 'Guard'} reported an issue at ${site?.name || 'site'}: ${note || 'No notes provided'}.`,
+        siteName: site?.name,
+        title: `⚠️ Issue at ${callTimeStr} — ${guard?.name || 'Guard'} (${guard?.badgeNumber || '—'})`,
+        message: `${catLabel}${guard?.name || 'Guard'} (${guard?.badgeNumber || '—'}) reported an issue at ${site?.name || 'site'} during the ${callTimeStr} check call: ${note || 'No notes provided'}.`,
         note,
         category: extra?.category,
         photoUri: extra?.photoUri,
@@ -970,8 +974,8 @@ export function AppProvider({ children }) {
       badgeNumber: guard?.badgeNumber,
       siteId: cc.siteId,
       siteName: site?.name,
-      title: `🚨 Missed Check Call — ${guardName}`,
-      message: `${guardName} did not respond to the hourly check call at ${siteName} (${formatTime(new Date())}). Immediate supervisor welfare follow-up recommended.`,
+      title: `🚨 Missed Check Call — ${guardName} at ${formatTime(new Date(cc.firedAt))}`,
+      message: `${guardName} did not respond to the ${formatTime(new Date(cc.firedAt))} check call at ${siteName}. The 10-minute response window has expired. Immediate welfare follow-up recommended.`,
     });
 
     // Update missed count
@@ -999,14 +1003,44 @@ export function AppProvider({ children }) {
     setActiveCheckCall(null);
 
     if (API_ENABLED) {
-      const { checkCall } = await apiPost('/api/check-calls/manual', { response, note, category });
-      const saved = normalizeCheckCall(checkCall);
-      setCheckCalls(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
-      const session = shiftSessions.find(item => item.id === saved.sessionId || item.guardId === currentUser?.id && !item.bookedOffAt);
-      if (session && !session.bookedOffAt) {
-        startCheckCallTimer(session);
+      try {
+        // Use the /manual endpoint — single atomic call that creates & responds
+        const body = { response };
+        if (note) body.note = note;
+        if (category) body.category = category;
+        const result = await apiPost('/api/check-calls/manual', body);
+        const saved = normalizeCheckCall(result.checkCall);
+        setCheckCalls(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
+        const session = shiftSessions.find(item => item.id === saved.sessionId || (item.guardId === currentUser?.id && !item.bookedOffAt));
+        if (session && !session.bookedOffAt) startCheckCallTimer(session);
+        return saved;
+      } catch (err) {
+        // Fallback 1: If Render backend route /api/check-calls/manual is not yet deployed (404),
+        // fallback to /api/check-calls/fire + /api/check-calls/:id/respond
+        if (err?.message?.includes('not found') || err?.message?.includes('404')) {
+          try {
+            const fireRes = await apiPost('/api/check-calls/fire', {});
+            const firedId = fireRes?.checkCall?._id || fireRes?.checkCall?.id;
+            if (firedId) {
+              const noteText = category ? `[${category}]${note ? ' ' + note : ''}` : note;
+              const respRes = await apiPost(`/api/check-calls/${firedId}/respond`, { response, note: noteText || undefined });
+              const saved = normalizeCheckCall(respRes.checkCall);
+              setCheckCalls(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
+              const session = shiftSessions.find(item => item.id === saved.sessionId || (item.guardId === currentUser?.id && !item.bookedOffAt));
+              if (session && !session.bookedOffAt) startCheckCallTimer(session);
+              return saved;
+            }
+          } catch (fireErr) {
+            console.warn('Fire fallback failed', fireErr);
+          }
+        }
+        // Fallback 2: If offline / network error / server unreachable, fall through to local storage so guard is never blocked
+        const isNetworkError = err?.message?.includes('Cannot reach') || err?.message?.includes('Network') || err?.message?.includes('fetch') || err?.message?.includes('timeout') || err?.message?.includes('not found') || err?.message?.includes('404');
+        if (!isNetworkError) {
+          throw new Error(err?.message || 'Could not record check call. Please try again.');
+        }
+        // Fall through to local save below
       }
-      return saved;
     }
     const session = shiftSessions.find(item => item.guardId === currentUser?.id && !item.bookedOffAt);
     if (!session) throw new Error('Book on before recording a check call.');
@@ -1159,12 +1193,19 @@ export function AppProvider({ children }) {
       if (nfcTagId) form.append('nfcTagId', nfcTagId);
       if (location?.latitude != null) form.append('latitude', String(location.latitude));
       if (location?.longitude != null) form.append('longitude', String(location.longitude));
-      const { patrol } = await apiUpload(`/api/patrols/${patrolId}/capture`, form);
-      const saved = normalizePatrol(patrol);
-      setPatrolSessions(previous => previous.map(item => item.id === saved.id ? saved : item));
-      setPatrolCaptures(saved.captures || []);
-      setActivePatrol(saved);
-      return saved.captures?.[saved.captures.length - 1];
+      try {
+        const { patrol } = await apiUpload(`/api/patrols/${patrolId}/capture`, form);
+        const saved = normalizePatrol(patrol);
+        setPatrolSessions(previous => previous.map(item => item.id === saved.id ? saved : item));
+        setPatrolCaptures(saved.captures || []);
+        setActivePatrol(saved);
+        return saved.captures?.[saved.captures.length - 1];
+      } catch (err) {
+        // If server is unreachable, fall through to local storage so patrol can continue offline
+        const isNetworkError = err?.message?.includes('Cannot reach') || err?.message?.includes('Network') || err?.message?.includes('fetch');
+        if (!isNetworkError) throw err;
+        // Fall through to local path below
+      }
     }
     const capture = {
       id: `pc_${Date.now()}`,
@@ -1194,13 +1235,24 @@ export function AppProvider({ children }) {
     await save(KEYS.PATROL_CAPTURES, updated);
     setPatrolCaptures(updated);
 
-    // Update active patrol's captured list
+    // Update active patrol — embed capture into patrol.captures AND add to checkpointsCaptured
     const allPatrols = await load(KEYS.PATROL_SESSIONS) || [];
-    const updatedPatrols = allPatrols.map(p =>
-      p.id === patrolId
-        ? { ...p, checkpointsCaptured: [...(p.checkpointsCaptured || []), checkpointId] }
-        : p
-    );
+    const updatedPatrols = allPatrols.map(p => {
+      if (p.id !== patrolId) return p;
+      const existingCaptures = p.captures || [];
+      const capIdx = existingCaptures.findIndex(c => c.checkpointId === checkpointId);
+      const newCaptures = capIdx < 0
+        ? [...existingCaptures, capture]
+        : existingCaptures.map((c, i) => i === capIdx ? { ...c, ...capture } : c);
+      const alreadyCaptured = (p.checkpointsCaptured || []).includes(checkpointId);
+      return {
+        ...p,
+        captures: newCaptures,
+        checkpointsCaptured: alreadyCaptured
+          ? p.checkpointsCaptured
+          : [...(p.checkpointsCaptured || []), checkpointId],
+      };
+    });
     await save(KEYS.PATROL_SESSIONS, updatedPatrols);
     setPatrolSessions(updatedPatrols);
 
