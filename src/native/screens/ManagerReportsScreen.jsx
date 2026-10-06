@@ -247,11 +247,13 @@ export function ManagerReportsScreen() {
       const finishDateStr = fmtDate(endD);
       const yearStr = endD.getFullYear() || new Date().getFullYear();
 
-      // Meaningful filename: e.g. "Observant Demo Site Check Calls 2026.pdf"
-      const siteClean = siteFilter !== 'all' && siteName && siteName !== 'All Sites'
-        ? siteName.trim().replace(/[\/\\?%*:|"<>]/g, '_')
+      // Clean hyphenated filename: e.g. "Tripod-Checkcalls-2026.pdf" or "Observant-Checkcalls-2026.pdf"
+      const siteRaw = siteFilter !== 'all' && siteName && siteName !== 'All Sites'
+        ? siteName
         : (currentUser?.organisationName || 'Observant');
-      const pdfFileName = `${siteClean} Check Calls ${yearStr}.pdf`;
+      const cleanSite = siteRaw.trim().replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'Observant';
+      const cleanType = reportType === 'check_calls' ? 'Checkcalls' : reportType === 'patrols' ? 'Patrols' : 'Checkcalls-Patrols';
+      const pdfFileName = `${cleanSite}-${cleanType}-${yearStr}.pdf`;
 
       // ── Group check-call rows by officer + site + shift-date ──────────────
       const checkCallRows = rows.filter(r => r.type === 'check_call');
@@ -420,8 +422,8 @@ ${(reportType === 'combined' || reportType === 'patrols') && patrolRows.length >
 
       let targetUri = uri;
       try {
-        const cleanName = pdfFileName.replace(/[^a-zA-Z0-9._ -]/g, '_');
-        const destUri = `${FileSystem.cacheDirectory}${cleanName}`;
+        const destUri = `${FileSystem.documentDirectory || FileSystem.cacheDirectory}${pdfFileName}`;
+        await FileSystem.deleteAsync(destUri, { idempotent: true });
         await FileSystem.copyAsync({ from: uri, to: destUri });
         targetUri = destUri;
       } catch (copyErr) {
@@ -681,10 +683,10 @@ const styles = StyleSheet.create({
   topRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px12, paddingHorizontal: SP.px20, paddingTop: SP.px8 },
   screenTitle:  { ...FONT.h2 },
   topBtns:      { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  iconBtn:      { padding: 8, backgroundColor: P.bg2, borderRadius: BR.sm, borderWidth: 1, borderColor: P.b2 },
-  exportBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.blue, borderRadius: BR.sm, paddingHorizontal: SP.px12, paddingVertical: 9, ...SH_TOKENS.blue },
-  pdfBtn:       { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#7c3aed', borderRadius: BR.sm, paddingHorizontal: SP.px12, paddingVertical: 9 },
-  exportBtnTxt: { color: P.white, fontSize: 12, fontWeight: '700' },
+  iconBtn:      { padding: 9, backgroundColor: P.bg3, borderRadius: BR.sm, borderWidth: 1.5, borderColor: P.b3 },
+  exportBtn:    { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#2563EB', borderRadius: BR.sm, paddingHorizontal: 14, paddingVertical: 10, shadowColor: '#2563EB', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 2 },
+  pdfBtn:       { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#DC2626', borderRadius: BR.sm, paddingHorizontal: 14, paddingVertical: 10, shadowColor: '#DC2626', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 4, elevation: 2 },
+  exportBtnTxt: { color: P.white, fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
   filterSummary:{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: SP.px8, paddingHorizontal: SP.px20 },
   filterTag:    { backgroundColor: P.bg3, borderRadius: BR.xs, paddingHorizontal: SP.px8, paddingVertical: 4, borderWidth: 1, borderColor: P.b2 },
   filterTagActive: { backgroundColor: P.blueSubtle, borderColor: P.blueBorder },
