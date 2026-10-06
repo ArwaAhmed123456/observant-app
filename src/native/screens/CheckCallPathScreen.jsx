@@ -18,7 +18,7 @@ import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, GR, card, SCREEN } from '../../ds';
-import { ChevronLeft, ChevronRight, X, Clock, CheckCircle, AlertTriangle, Radio } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, X, Clock, CheckCircle, AlertTriangle, Radio, User, Phone, Mail, MapPin, Calendar } from 'lucide-react-native';
 
 const { width: SCREEN_W } = Dimensions.get('window');
 const PATH_W  = SCREEN_W - 40;   // canvas width
@@ -74,6 +74,9 @@ function nodeX(index, total) {
 export function CheckCallPathScreen({ route, navigation }) {
   const guardId  = route?.params?.guardId;
   const readOnly = route?.params?.readOnly ?? false;
+
+  // Tab state — only for manager (readOnly) view
+  const [activeTab, setActiveTab] = useState('details');
 
   const {
     currentUser, users, sites, shiftSessions, checkCalls,
@@ -225,7 +228,100 @@ export function CheckCallPathScreen({ route, navigation }) {
           )}
         </View>
 
+        {/* Tab bar — only for manager readOnly view */}
+        {readOnly && (
+          <View style={styles.tabBar}>
+            {[['details', 'Details'], ['path', 'Check-Call Path']].map(([key, label]) => (
+              <TouchableOpacity
+                key={key}
+                style={[styles.tabBtn, activeTab === key && styles.tabBtnActive]}
+                onPress={() => setActiveTab(key)}
+              >
+                <Text style={[styles.tabBtnTxt, activeTab === key && styles.tabBtnTxtActive]}>{label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </View>
+
+        {/* ── Details Tab ── */}
+        {readOnly && activeTab === 'details' ? (
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: SP.px16, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+            {/* Profile Card */}
+            <View style={styles.detailCard}>
+              <View style={styles.detailAvatar}>
+                <Text style={styles.detailAvatarTxt}>{(targetUser.name || 'G').charAt(0).toUpperCase()}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.detailName}>{targetUser.name}</Text>
+                <Text style={styles.detailRole}>Security Officer</Text>
+              </View>
+              <View style={[styles.detailStatusPill, { backgroundColor: isCurrentShift ? P.okSubtle : P.bg3, borderColor: isCurrentShift ? P.okBorder : P.b2 }]}>
+                <Text style={[styles.detailStatusTxt, { color: isCurrentShift ? P.ok : P.t3 }]}>{isCurrentShift ? 'ON DUTY' : 'OFF DUTY'}</Text>
+              </View>
+            </View>
+
+            {/* Info rows */}
+            <View style={styles.detailSection}>
+              <Text style={styles.detailSectionLabel}>OFFICER INFORMATION</Text>
+              {[
+                { icon: <User size={14} color={P.t3} />, label: 'Badge / ID', value: targetUser.badgeNumber || '—' },
+                { icon: <MapPin size={14} color={P.t3} />, label: 'Assigned Site', value: site?.name || '—' },
+                { icon: <Mail size={14} color={P.t3} />, label: 'Email', value: targetUser.email || '—' },
+                { icon: <Phone size={14} color={P.t3} />, label: 'Phone', value: targetUser.phone || '—' },
+              ].map(({ icon, label, value }) => (
+                <View key={label} style={styles.detailRow}>
+                  <View style={styles.detailRowIcon}>{icon}</View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.detailRowLabel}>{label}</Text>
+                    <Text style={styles.detailRowValue}>{value}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+
+            {/* Shift Stats */}
+            <View style={styles.detailSection}>
+              <Text style={styles.detailSectionLabel}>SHIFT HISTORY</Text>
+              <View style={styles.detailStatsRow}>
+                {[
+                  { val: guardSessions.length, label: 'Total Shifts' },
+                  { val: (checkCalls || []).filter(cc => cc.guardId === targetId && cc.response === 'yes').length, label: 'Verified Calls' },
+                  { val: (checkCalls || []).filter(cc => cc.guardId === targetId && cc.response === 'missed').length, label: 'Missed Calls', danger: true },
+                ].map(({ val, label, danger }) => (
+                  <View key={label} style={styles.detailStatBox}>
+                    <Text style={[styles.detailStatVal, danger && val > 0 && { color: P.danger }]}>{val}</Text>
+                    <Text style={styles.detailStatLabel}>{label}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* Recent sessions */}
+            {guardSessions.slice(0, 3).map(s => (
+              <View key={s.id} style={styles.sessionCard}>
+                <Calendar size={13} color={P.t3} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.sessionCardDate}>{formatDate(s.bookedOnAt)}</Text>
+                  <Text style={styles.sessionCardTime}>{formatTime(s.bookedOnAt)} – {s.bookedOffAt ? formatTime(s.bookedOffAt) : 'Ongoing'}</Text>
+                </View>
+                <View style={[styles.sessionStatusPill, { backgroundColor: s.bookedOffAt ? P.bg3 : P.okSubtle }]}>
+                  <Text style={[styles.sessionStatusTxt, { color: s.bookedOffAt ? P.t3 : P.ok }]}>{s.bookedOffAt ? 'Completed' : 'Active'}</Text>
+                </View>
+              </View>
+            ))}
+
+            <TouchableOpacity
+              style={styles.viewPathBtn}
+              onPress={() => setActiveTab('path')}
+            >
+              <Text style={styles.viewPathBtnTxt}>View Check-Call Path →</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        ) : (
+          <>
         {/* Session selector */}
+        <View style={{ paddingHorizontal: SP.px16 }}>
         {guardSessions.length > 0 ? (
           <View style={styles.sessionNav}>
             <TouchableOpacity
@@ -272,7 +368,7 @@ export function CheckCallPathScreen({ route, navigation }) {
             })}
           </View>
         )}
-      </View>
+        </View>
 
       {/* Winding SVG path with subtle draw-in motion */}
       {nodes.length > 0 ? (
@@ -409,7 +505,8 @@ export function CheckCallPathScreen({ route, navigation }) {
           style={{ marginTop: SP.px48 }}
         />
       )}
-
+      </>
+      )}
       {/* Node detail modal */}
       <Modal visible={!!detailNode} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setDetailNode(null)}>
         <View style={styles.modalOverlay}>
@@ -533,4 +630,41 @@ const styles = StyleSheet.create({
   disabled:       { opacity: 0.6 },
   closeBtn:       { backgroundColor: P.bg3, borderRadius: BR.md, paddingVertical: 13, alignItems: 'center', borderWidth: 1, borderColor: P.b2 },
   closeBtnTxt:    { color: P.t2, fontSize: 14, fontWeight: '700' },
+
+  // ── Tab bar ─────────────────────────────────────────────────────────────────
+  tabBar:         { flexDirection: 'row', marginHorizontal: SP.px16, marginBottom: SP.px12, backgroundColor: P.bg2, borderRadius: BR.md, padding: 3, borderWidth: 1, borderColor: P.b2 },
+  tabBtn:         { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: BR.sm },
+  tabBtnActive:   { backgroundColor: P.bg0, borderWidth: 1, borderColor: P.b3 },
+  tabBtnTxt:      { color: P.t3, fontSize: 12, fontWeight: '600' },
+  tabBtnTxtActive:{ color: P.t1, fontWeight: '800' },
+
+  // ── Details tab styles ──────────────────────────────────────────────────────
+  detailCard:      { flexDirection: 'row', alignItems: 'center', gap: SP.px12, backgroundColor: P.bg2, borderRadius: BR.lg, padding: SP.px16, marginBottom: SP.px16, borderWidth: 1, borderColor: P.b2 },
+  detailAvatar:    { width: 48, height: 48, borderRadius: 24, backgroundColor: P.blueSubtle, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: P.blueBorder },
+  detailAvatarTxt: { color: P.blue, fontSize: 20, fontWeight: '800' },
+  detailName:      { color: P.t1, fontSize: 16, fontWeight: '800' },
+  detailRole:      { color: P.t3, fontSize: 12, marginTop: 2 },
+  detailStatusPill:{ borderRadius: BR.full, paddingHorizontal: SP.px12, paddingVertical: 4, borderWidth: 1 },
+  detailStatusTxt: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+
+  detailSection:   { backgroundColor: P.bg2, borderRadius: BR.lg, padding: SP.px16, marginBottom: SP.px12, borderWidth: 1, borderColor: P.b2 },
+  detailSectionLabel:{ color: P.t3, fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: SP.px12, textTransform: 'uppercase' },
+  detailRow:       { flexDirection: 'row', alignItems: 'center', gap: SP.px12, paddingVertical: SP.px8, borderBottomWidth: 1, borderBottomColor: P.b1 },
+  detailRowIcon:   { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: P.bg3, borderRadius: BR.sm },
+  detailRowLabel:  { color: P.t3, fontSize: 11, fontWeight: '600' },
+  detailRowValue:  { color: P.t1, fontSize: 13, fontWeight: '700', marginTop: 1 },
+
+  detailStatsRow:  { flexDirection: 'row', gap: SP.px8 },
+  detailStatBox:   { flex: 1, backgroundColor: P.bg3, borderRadius: BR.sm, padding: SP.px12, alignItems: 'center', borderWidth: 1, borderColor: P.b1 },
+  detailStatVal:   { color: P.t1, fontSize: 20, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  detailStatLabel: { color: P.t3, fontSize: 9, fontWeight: '700', textTransform: 'uppercase', marginTop: 3, textAlign: 'center' },
+
+  sessionCard:     { flexDirection: 'row', alignItems: 'center', gap: SP.px12, backgroundColor: P.bg2, borderRadius: BR.md, padding: SP.px12, marginBottom: SP.px8, borderWidth: 1, borderColor: P.b2 },
+  sessionCardDate: { color: P.t1, fontSize: 13, fontWeight: '700' },
+  sessionCardTime: { color: P.t3, fontSize: 11, marginTop: 2 },
+  sessionStatusPill:{ borderRadius: BR.full, paddingHorizontal: 10, paddingVertical: 3 },
+  sessionStatusTxt:{ fontSize: 10, fontWeight: '800' },
+
+  viewPathBtn:     { backgroundColor: P.blueSubtle, borderRadius: BR.md, paddingVertical: 14, alignItems: 'center', marginTop: SP.px8, borderWidth: 1, borderColor: P.blueBorder },
+  viewPathBtnTxt:  { color: P.blue, fontSize: 14, fontWeight: '800' },
 });

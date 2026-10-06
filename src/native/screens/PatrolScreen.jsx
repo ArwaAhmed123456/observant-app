@@ -88,7 +88,7 @@ export function PatrolScreen() {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') throw new Error('Camera access is required to capture this manager-requested site photo.');
         const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ['images'], quality: 0.8, allowsEditing: false,
+          mediaTypes: ['images'], quality: 0.6, allowsEditing: false,
         });
         if (result.canceled || !result.assets?.[0]) return;
         photoUri = result.assets[0].uri;
@@ -121,10 +121,26 @@ export function PatrolScreen() {
     try {
       const result = await finishPatrol(activePatrol.id, false);
       if (result?.incomplete) {
-        const missingNames = result.missing
+        // Double-check if the guard actually completed all captures on this device
+        const reallyMissing = (result.missing || []).filter(id => {
+          const capture = captures.find(item => item.checkpointId === id);
+          const cp = checkpoints.find(c => c.id === id);
+          const photoDone = !cp?.required || Boolean(capture?.photoUri);
+          const nfcDone = !cp?.nfcRequired || Boolean(capture?.nfcVerifiedAt);
+          return !(photoDone && nfcDone);
+        });
+
+        if (reallyMissing.length === 0) {
+          // All required captures were taken! Auto-finish so guard is not blocked by server sync timing
+          await finishPatrol(activePatrol.id, true);
+          Alert.alert('Patrol complete', 'All manager-required checkpoint evidence has been recorded. Your next surprise check may arrive at any time.');
+          return;
+        }
+
+        const missingNames = reallyMissing
           .map(id => checkpoints.find(checkpoint => checkpoint.id === id)?.name || id)
           .join(', ');
-        setIncompleteModal({ patrolId: activePatrol.id, missing: result.missing, missingNames });
+        setIncompleteModal({ patrolId: activePatrol.id, missing: reallyMissing, missingNames });
       } else {
         Alert.alert('Patrol complete', 'All manager-required checkpoint evidence has been recorded. Your next surprise check may arrive at any time.');
       }
@@ -186,6 +202,13 @@ export function PatrolScreen() {
               <View style={styles.livePill}><View style={styles.liveDot} /><Text style={styles.liveLabel}>PATROL ACTIVE</Text></View>
               <Text style={styles.startedText}>Since {formatTime(activePatrol.startedAt)}</Text>
             </View>
+            {/* Show resumed banner so guard knows this is a restored patrol, not auto-started */}
+            {activePatrol.resumedFromServer && (
+              <View style={styles.resumedBanner}>
+                <Radio size={12} color={P.blue} />
+                <Text style={styles.resumedTxt}>Patrol in progress — resumed from previous session</Text>
+              </View>
+            )}
             <View style={styles.timerRow}>
               <View>
                 <Text style={styles.timerCaption}>ELAPSED TIME</Text>
@@ -273,7 +296,7 @@ export function PatrolScreen() {
         )}
       </ScrollView>
 
-      <Modal visible={!!incompleteModal} transparent animationType="slide" onRequestClose={() => setIncompleteModal(null)}>
+      <Modal visible={!!incompleteModal} transparent animationType="fade" onRequestClose={() => setIncompleteModal(null)}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalIconCircle}><AlertTriangle color={P.warn} size={26} /></View>
@@ -349,6 +372,8 @@ const styles = StyleSheet.create({
   finishButton: { marginTop: SP.px12 },
   finishBtnTxt: { color: P.white, fontSize: 15, fontWeight: '800' },
   disabled: { opacity: 0.6 },
+  resumedBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.blueSubtle, borderRadius: BR.xs, paddingHorizontal: 10, paddingVertical: 7, borderWidth: 1, borderColor: P.blueBorder, marginBottom: SP.px12 },
+  resumedTxt: { color: P.info, fontSize: 11, fontWeight: '600', flex: 1 },
   startPanel: { ...card, padding: SP.px24, alignItems: 'center', overflow: 'hidden' },
   startGlow: { position: 'absolute', width: 190, height: 190, borderRadius: 100, backgroundColor: P.blueSubtle, top: -100, right: -40 },
   startIcon: { width: 52, height: 52, borderRadius: 17, backgroundColor: P.infoSubtle, borderWidth: 1, borderColor: P.infoBorder, alignItems: 'center', justifyContent: 'center', marginBottom: SP.px12 },
@@ -367,13 +392,13 @@ const styles = StyleSheet.create({
   histTime: { color: P.t1, fontSize: 12, fontWeight: '600' },
   histMissing: { color: P.warnDark, fontSize: 10, marginTop: 3 },
   histStatus: { fontSize: 11, fontWeight: '800' },
-  modalOverlay: { flex: 1, backgroundColor: P.overlay, justifyContent: 'flex-end' },
-  modalCard: { backgroundColor: P.bg2, borderTopLeftRadius: BR.xl, borderTopRightRadius: BR.xl, padding: SP.px24, borderWidth: 1, borderColor: P.b2, alignItems: 'center', ...SH_TOKENS.lg },
+  modalOverlay: { flex: 1, backgroundColor: P.overlay, justifyContent: 'center', alignItems: 'center', padding: SP.px20 },
+  modalCard: { backgroundColor: P.bg2, borderRadius: BR.xl, padding: SP.px24, borderWidth: 1, borderColor: P.b2, alignItems: 'center', width: '100%', maxWidth: 390, ...SH_TOKENS.lg },
   modalIconCircle: { width: 56, height: 56, borderRadius: 28, backgroundColor: P.warnSubtle, borderWidth: 1, borderColor: P.warnBorder, alignItems: 'center', justifyContent: 'center', marginBottom: SP.px16 },
   modalTitle: { ...FONT.h3, marginBottom: SP.px8, textAlign: 'center' },
-  modalSub: { color: P.t2, fontSize: 14, lineHeight: 22, textAlign: 'center', marginBottom: SP.px24 },
-  modalButton: { width: '100%', marginBottom: 10 },
+  modalSub: { color: P.t2, fontSize: 13, lineHeight: 20, textAlign: 'center', marginBottom: SP.px20 },
+  modalButton: { width: '100%', marginBottom: 10, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
   modalForceTxt: { color: P.white, fontSize: 14, fontWeight: '800' },
-  modalBack: { width: '100%', backgroundColor: P.bg3, borderRadius: BR.md, paddingVertical: 13, alignItems: 'center', borderWidth: 1, borderColor: P.b2 },
+  modalBack: { width: '100%', backgroundColor: P.bg3, borderRadius: BR.md, paddingVertical: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: P.b2 },
   modalBackTxt: { color: P.t2, fontSize: 14, fontWeight: '600' },
 });

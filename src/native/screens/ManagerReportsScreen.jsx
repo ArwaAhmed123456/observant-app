@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Modal, TextInput, Switch, Share, Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { FileText, Download, Filter, X, ChevronDown, File } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
@@ -11,6 +12,9 @@ import { P, SP, BR, FONT, SH_TOKENS, card, input as inputStyle, btnPrimary } fro
 import { API_ENABLED, apiGet } from '../../services/api';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
+
+import { LOGO_BASE64 } from '../../assets/logoBase64';
 
 const REPORT_TYPES = ['combined', 'check_calls', 'patrols'];
 const DATE_RANGES  = ['today', 'this_week', 'this_month', 'custom'];
@@ -214,59 +218,223 @@ export function ManagerReportsScreen() {
         Alert.alert('No Records', 'No security check-calls or patrols match the selected filters.');
         return;
       }
+      // ── Build date range formatted as DD/MM/YYYY ───────────────────────────
+      let startD = new Date();
+      let endD = new Date();
+      if (dateRange === 'today') {
+        startD = new Date();
+        endD = new Date();
+      } else if (dateRange === 'this_week') {
+        const mon = new Date();
+        const day = mon.getDay() || 7;
+        mon.setDate(mon.getDate() - (day - 1));
+        startD = mon;
+        endD = new Date();
+      } else if (dateRange === 'this_month') {
+        startD = new Date(startD.getFullYear(), startD.getMonth(), 1);
+        endD = new Date();
+      } else if (dateRange === 'custom' && customStart && customEnd) {
+        startD = new Date(customStart);
+        endD = new Date(customEnd);
+      }
+      const fmtDate = d => {
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yy = d.getFullYear();
+        return `${dd}/${mm}/${yy}`;
+      };
+      const startDateStr = fmtDate(startD);
+      const finishDateStr = fmtDate(endD);
+      const yearStr = endD.getFullYear() || new Date().getFullYear();
 
-      const tableRows = rows.map(r => {
-        const resultColor = r.type === 'check_call'
-          ? (r.checkCallResult?.startsWith('✓') ? '#16a34a' : r.checkCallResult?.startsWith('✗') ? '#dc2626' : '#d97706')
-          : '#2563eb';
-        const eventDetail = r.type === 'check_call'
-          ? `${r.checkCallTime} · ${r.checkCallResult}`
-          : `${r.patrolTime}<br/><small>Checkpoints: ${r.checkpointsCapt || '—'}${r.missingCheckpoints ? ` <span style="color:#d97706">(missing: ${r.missingCheckpoints})</span>` : ''}</small>`;
-        const badge = r.type === 'check_call'
-          ? `<span style="background:#eff6ff;color:#1e40af;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700">CHECK CALL</span>`
-          : `<span style="background:#f0fdf4;color:#166534;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700">PATROL</span>`;
+      // Meaningful filename: e.g. "Observant Demo Site Check Calls 2026.pdf"
+      const siteClean = siteFilter !== 'all' && siteName && siteName !== 'All Sites'
+        ? siteName.trim().replace(/[\/\\?%*:|"<>]/g, '_')
+        : (currentUser?.organisationName || 'Observant');
+      const pdfFileName = `${siteClean} Check Calls ${yearStr}.pdf`;
+
+      // ── Group check-call rows by officer + site + shift-date ──────────────
+      const checkCallRows = rows.filter(r => r.type === 'check_call');
+      const patrolRows    = rows.filter(r => r.type === 'patrol');
+
+      // 13 hourly columns: Day shift 0700→1900, Night shift 1900→0700
+      const DAY_HOURS   = ['0700','0800','0900','1000','1100','1200','1300','1400','1500','1600','1700','1800','1900'];
+      const NIGHT_HOURS = ['1900','2000','2100','2200','2300','0000','0100','0200','0300','0400','0500','0600','0700'];
+
+      const ccGroupMap = new Map();
+      checkCallRows.forEach(r => {
+        const key = `${r.site}||${r.guardName}||${r.badgeNumber}||${r.date}`;
+        if (!ccGroupMap.has(key)) {
+          const startH = parseInt((r.shiftTime || '').split(':')[0], 10);
+          const isNight = !isNaN(startH) && (startH >= 19 || startH < 7);
+          ccGroupMap.set(key, {
+            site: r.site,
+            guardName: r.guardName,
+            badgeNumber: r.badgeNumber,
+            date: r.date,
+            shiftTime: r.shiftTime,
+            isNight,
+            checks: {},
+          });
+        }
+        const timeStr = r.checkCallTime;
+        const parts = (timeStr || '').split(':');
+        const h = parseInt(parts[0], 10);
+        const m = parseInt(parts[1] || '0', 10);
+        if (!isNaN(h)) {
+          const nearestHour = Math.round((h * 60 + m) / 60) % 24;
+          const slotKey = String(nearestHour).padStart(2, '0') + '00';
+          const timeVal = timeStr ? timeStr.replace(':', '').substring(0, 4) : '-';
+          const isMissed = r.checkCallResult?.startsWith('✗');
+          const isIssue  = r.checkCallResult?.startsWith('⚠');
+          if (!ccGroupMap.get(key).checks[slotKey]) {
+            ccGroupMap.get(key).checks[slotKey] = { time: timeVal, missed: isMissed, issue: isIssue };
+          }
+        }
+      });
+
+      const ccGroups = [...ccGroupMap.values()];
+
+      // Render one Check Call row per guard per shift
+      const renderCCRow = (g) => {
+        const hours = g.isNight ? NIGHT_HOURS : DAY_HOURS;
+        const cells = hours.map(h => {
+          const c = g.checks[h];
+          if (!c) return `<td style="border:1px solid #000;padding:3px 2px;text-align:center;font-size:8px;">-</td>`;
+          const isProblem = c.missed || c.issue;
+          const color = isProblem ? 'color:red;font-weight:bold;' : '';
+          return `<td style="border:1px solid #000;padding:3px 2px;text-align:center;font-size:8px;${color}">${c.time}</td>`;
+        }).join('');
         return `<tr>
-          <td>${badge}<br/><small style="color:#64748b">${r.date}</small></td>
-          <td><strong>${r.guardName}</strong><br/><small style="color:#64748b">${r.badgeNumber}</small></td>
-          <td style="color:#475569">${r.site}</td>
-          <td style="color:#475569">${r.shiftTime}</td>
-          <td style="color:${resultColor};font-weight:600">${eventDetail}</td>
-          <td style="color:#64748b;font-size:11px">${r.note || r.missingCheckpoints ? `Missing: ${r.missingCheckpoints || '—'}` : '—'}</td>
+          <td style="border:1px solid #000;padding:4px 5px;font-size:8.5px;font-weight:bold;text-align:center;text-transform:uppercase;vertical-align:middle;">${g.site}</td>
+          <td style="border:1px solid #000;padding:4px 5px;font-size:8.5px;text-align:center;vertical-align:middle;">${g.guardName}</td>
+          <td style="border:1px solid #000;padding:4px 3px;font-size:8.5px;text-align:center;vertical-align:middle;">${g.badgeNumber || '-'}</td>
+          <td style="border:1px solid #000;padding:4px 3px;font-size:8.5px;text-align:center;vertical-align:middle;">${g.isNight ? 'Night' : 'Day'}</td>
+          ${cells}
+        </tr>`;
+      };
+
+      // Patrol Verification Records rows
+      const buildPatrolRows = () => patrolRows.map(r => {
+        const isIncomplete = r.patrolStatus !== 'complete';
+        return `<tr>
+          <td style="border:1px solid #000;padding:4px 6px;font-size:8.5px;text-align:center;">${r.site}</td>
+          <td style="border:1px solid #000;padding:4px 6px;font-size:8.5px;text-align:center;">${r.guardName}</td>
+          <td style="border:1px solid #000;padding:4px 4px;font-size:8.5px;text-align:center;">${r.date}</td>
+          <td style="border:1px solid #000;padding:4px 4px;font-size:8.5px;text-align:center;">${r.patrolTime}</td>
+          <td style="border:1px solid #000;padding:4px 4px;font-size:8.5px;text-align:center;${isIncomplete ? 'color:red;font-weight:bold;' : ''}">${r.checkpointsCapt}</td>
+          <td style="border:1px solid #000;padding:4px 4px;font-size:8.5px;text-align:center;${r.missingCheckpoints ? 'color:red;font-weight:bold;' : ''}">${r.missingCheckpoints || '-'}</td>
         </tr>`;
       }).join('');
 
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/><style>
-        body{font-family:-apple-system,BlinkMacSystemFont,Arial,sans-serif;font-size:12px;color:#0f172a;margin:0;padding:24px;}
-        h1{font-size:20px;font-weight:800;color:#0B192C;margin:0 0 4px;}
-        .sub{font-size:12px;color:#64748b;margin:0 0 20px;}
-        .meta{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;}
-        .tag{background:#f1f5f9;border:1px solid #e2e8f0;border-radius:20px;padding:3px 10px;font-size:11px;color:#475569;}
-        table{width:100%;border-collapse:collapse;}
-        th{background:#0B192C;color:#fff;padding:10px 8px;text-align:left;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
-        td{padding:9px 8px;border-bottom:1px solid #e2e8f0;font-size:11px;vertical-align:top;}
-        tr:nth-child(even){background:#f8fafc;}
-        .footer{margin-top:20px;font-size:10px;color:#94a3b8;text-align:center;border-top:1px solid #e2e8f0;padding-top:12px;}
-      </style></head><body>
-        <h1>OBSERVANT SECURITY — SHIFT REPORT</h1>
-        <p class="sub">Generated: ${new Date().toLocaleString()} · ${rows.length} record(s)</p>
-        <div class="meta">
-          <span class="tag">${getDateRangeLabel(dateRange)}</span>
-          <span class="tag">${guardName}</span>
-          <span class="tag">${siteName}</span>
-          <span class="tag">${reportType.replace('_', ' ')}</span>
-        </div>
-        <table><thead><tr>
-          <th>Type</th><th>Officer</th><th>Site</th><th>Shift</th><th>Event / Result</th><th>Notes</th>
-        </tr></thead><tbody>
-          ${tableRows}
-        </tbody></table>
-        <p class="footer">OBSERVANT SECURITY · Confidential Operational Report · ${new Date().toLocaleDateString()}</p>
-      </body></html>`;
+      // ── Build full HTML report matching reference image exactly ────────────
+      const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+  @page { size: A4 landscape; margin: 8mm 8mm; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; color: #000; margin: 0; padding: 0; background: #fff; }
+  .page-header { display: flex; flex-direction: column; align-items: center; margin-bottom: 4px; }
+  .logo-wrap { text-align: center; margin-bottom: 4px; }
+  .logo-wrap img { width: 80px; height: 80px; object-fit: contain; background: transparent; display: inline-block; }
+  .header-row { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-bottom: 4px; }
+  .date-hdr { font-size: 10px; font-weight: bold; text-decoration: underline; min-width: 200px; }
+  .report-title { font-size: 18px; font-weight: bold; text-align: center; flex: 1; }
+  .notes-box { text-align: center; font-size: 8.5px; color: #222; margin-bottom: 10px; line-height: 1.5; }
+  .notes-box .red { color: red; font-weight: bold; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  th { border: 1px solid #000; background: #fff; color: #000; font-size: 8px; font-weight: bold; text-align: center; padding: 3px 2px; vertical-align: middle; }
+  td { border: 1px solid #000; }
+  .section-label { font-size: 11px; font-weight: bold; margin: 8px 0 4px 0; text-transform: uppercase; border-bottom: 1.5px solid #000; padding-bottom: 2px; }
+  .footer { margin-top: 10px; font-size: 7.5px; color: #555; text-align: center; border-top: 1px solid #ccc; padding-top: 4px; }
+  .doc-no { font-size: 7.5px; color: #555; text-align: left; margin-top: 6px; }
+</style>
+</head>
+<body>
 
+<div class="logo-wrap">
+  <img src="${LOGO_BASE64}" alt="Observant Security" />
+</div>
+
+<div class="header-row">
+  <div class="date-hdr">Start Date:${startDateStr} Finish Date:${finishDateStr}</div>
+  <div class="report-title">Check Call Log</div>
+  <div style="min-width:200px;"></div>
+</div>
+
+<div class="notes-box">
+  The precise time must be recorded. Late CALLS must be recorded in <span class="red">RED</span> ink and a brief explanation in the Logbook.<br/>
+  Missed calls (Security Officer not responding to your call after 15 minutes) must be reported &amp; fully explained in the Incident Log Book
+</div>
+
+${(reportType === 'combined' || reportType === 'check_calls') && ccGroups.length > 0 ? `
+<table>
+  <thead>
+    <tr>
+      <th rowspan="2" style="width:13%; border:1.5px solid #000;">Site<br/>Name</th>
+      <th rowspan="2" style="width:15%; border:1.5px solid #000;">Name of<br/>Security Officer<br/>on Duty</th>
+      <th rowspan="2" style="width:6%; border:1.5px solid #000;">ID<br/>No</th>
+      <th rowspan="2" style="width:9%; border:1.5px solid #000;">Shift Times<br/>(DAY/Night)</th>
+      <th colspan="13" style="border:1.5px solid #000; font-size:8.5px; padding:4px;">Times of check calls made by the security officers to control</th>
+    </tr>
+    <tr>
+      ${DAY_HOURS.map((h, i) => `
+      <th style="width:3.9%; border:1px solid #000; padding:1px 0; font-size:7px;">
+        <div style="font-weight:bold;">${h}</div>
+        <div style="color:#666; border-top:1px dotted #aaa; margin-top:1px; padding-top:1px; font-weight:normal;">${NIGHT_HOURS[i]}</div>
+      </th>`).join('')}
+    </tr>
+  </thead>
+  <tbody>
+    ${ccGroups.map(renderCCRow).join('')}
+  </tbody>
+</table>
+` : ''}
+
+${(reportType === 'combined' || reportType === 'patrols') && patrolRows.length > 0 ? `
+<div class="section-label">Patrol Verification Records</div>
+<table>
+  <thead>
+    <tr>
+      <th style="border:1.5px solid #000; padding:5px;">Site Name</th>
+      <th style="border:1.5px solid #000; padding:5px;">Officer on Duty</th>
+      <th style="border:1.5px solid #000; padding:5px;">Date</th>
+      <th style="border:1.5px solid #000; padding:5px;">Patrol Time</th>
+      <th style="border:1.5px solid #000; padding:5px;">Checkpoints Captured</th>
+      <th style="border:1.5px solid #000; padding:5px;">Missing Evidence</th>
+    </tr>
+  </thead>
+  <tbody>${buildPatrolRows()}</tbody>
+</table>
+` : ''}
+
+<div class="footer">OBSERVANT SECURITY &nbsp;&middot;&nbsp; Confidential Operational Security Record &nbsp;&middot;&nbsp; Generated: ${new Date().toLocaleString('en-GB')} &nbsp;&middot;&nbsp; ${rows.length} Total Record(s)</div>
+<div class="doc-no">Doc No: QBC.3, Issue Date:${startDateStr}, Issue:1</div>
+
+</body>
+</html>`;
+
+      // Write PDF using Expo Print with proper filename
       const { uri } = await Print.printToFileAsync({ html, base64: false });
+
+      let targetUri = uri;
+      try {
+        const cleanName = pdfFileName.replace(/[^a-zA-Z0-9._ -]/g, '_');
+        const destUri = `${FileSystem.cacheDirectory}${cleanName}`;
+        await FileSystem.copyAsync({ from: uri, to: destUri });
+        targetUri = destUri;
+      } catch (copyErr) {
+        console.warn('Could not copy PDF with custom name:', copyErr);
+      }
+
       const canShare = await Sharing.isAvailableAsync();
       if (canShare) {
-        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Share Security Report PDF' });
+        await Sharing.shareAsync(targetUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: pdfFileName,
+          UTI: 'com.adobe.pdf',
+        });
       } else {
         await Print.printAsync({ html });
       }
@@ -541,7 +709,7 @@ const styles = StyleSheet.create({
   manualLogBadge: { backgroundColor: P.infoSubtle, borderWidth: 1, borderColor: P.infoBorder, borderRadius: BR.xs, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start', marginVertical: 4 },
   manualLogBadgeTxt: { color: P.info, fontSize: 11, fontWeight: '700' },
   modalOverlay: { flex: 1, backgroundColor: P.overlay, justifyContent: 'flex-end' },
-  modalCard:    { backgroundColor: P.bg2, borderTopLeftRadius: BR.xl, borderTopRightRadius: BR.xl, padding: SP.px24, borderWidth: 1, borderColor: P.b2, maxHeight: '90%', ...SH_TOKENS.lg },
+  modalCard:    { backgroundColor: P.bg2, borderTopLeftRadius: BR.xl, borderTopRightRadius: BR.xl, padding: SP.px24, paddingBottom: 36, borderWidth: 1, borderColor: P.b2, maxHeight: '90%', ...SH_TOKENS.lg },
   modalHead:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px16 },
   modalTitle:   { ...FONT.h3, marginBottom: SP.px16 },
   fieldLabel:   { color: P.t3, fontSize: 11, fontWeight: '700', marginBottom: SP.px8, marginTop: SP.px12, textTransform: 'uppercase', letterSpacing: 0.6 },

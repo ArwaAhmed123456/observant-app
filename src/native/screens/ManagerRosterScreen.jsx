@@ -4,6 +4,7 @@ import {
   Modal, TextInput, Alert, Switch,
 } from 'react-native';
 import { useApp, formatDate } from '../../context/AppContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChevronLeft, ChevronRight, ChevronDown, Save, Bookmark, Trash2, Send, Clock, UserRound } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
@@ -34,6 +35,8 @@ function toWeekKey(date) {
 const DEFAULT_DAYS = { mon:null,tue:null,wed:null,thu:null,fri:null,sat:null,sun:null };
 
 export function ManagerRosterScreen() {
+  const insets = useSafeAreaInsets();
+  const safeBottom = Math.max(insets.bottom, 16);
   const {
     currentUser, users, sites, checkpoints, publishRoster,
     getWeekRosters, getGuardRoster,
@@ -223,7 +226,7 @@ export function ManagerRosterScreen() {
         {/* Edit Roster Modal */}
         <Modal visible={editModalVisible} animationType="slide" transparent>
           <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
+            <View style={[styles.modalCard, { paddingBottom: safeBottom + 16 }]}>
               <View style={styles.modalHeader}>
                 <View>
                   <Text style={styles.modalTitle}>{selectedGuard?.name}</Text>

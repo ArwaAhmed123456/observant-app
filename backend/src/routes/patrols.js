@@ -223,8 +223,8 @@ router.post('/:id/capture',
     }) : null;
     let capture = patrol.captures.find(item => String(item.checkpointId) === String(checkpointId));
     if (!capture) {
-      capture = { checkpointId, photoUrl: null, publicId: null, nfcTagId: null, nfcVerifiedAt: null, capturedAt: new Date() };
-      patrol.captures.push(capture);
+      patrol.captures.push({ checkpointId, photoUrl: null, publicId: null, nfcTagId: null, nfcVerifiedAt: null, capturedAt: new Date() });
+      capture = patrol.captures[patrol.captures.length - 1];
     }
     if (fileId) {
       capture.photoUrl = `${req.protocol}://${req.get('host')}/api/media/${fileId}`;
@@ -238,6 +238,7 @@ router.post('/:id/capture',
     capture.latitude = latitude !== undefined && latitude !== '' ? parseFloat(latitude) : capture.latitude ?? null;
     capture.longitude = longitude !== undefined && longitude !== '' ? parseFloat(longitude) : capture.longitude ?? null;
     if (!patrol.capturedCheckpointIds.map(String).includes(String(checkpointId))) patrol.capturedCheckpointIds.push(checkpointId);
+    patrol.markModified('captures');
     await patrol.save();
 
     res.json({ patrol, capture });
@@ -268,8 +269,11 @@ router.post('/:id/finish',
     }).select('_id required nfcRequired');
 
     const missingIds   = required.filter(cp => {
-      const capture = patrol.captures.find(item => String(item.checkpointId) === String(cp._id));
-      return !capture || (cp.required && !capture.photoUrl) || (cp.nfcRequired && !capture.nfcVerifiedAt);
+      const cpIdStr = String(cp._id);
+      const capture = patrol.captures.find(item => String(item.checkpointId) === cpIdStr);
+      const hasPhoto = Boolean(capture?.photoUrl || capture?.publicId || patrol.capturedCheckpointIds?.map(String).includes(cpIdStr));
+      const hasNfc = !cp.nfcRequired || Boolean(capture?.nfcVerifiedAt);
+      return !capture || (cp.required && !hasPhoto) || (cp.nfcRequired && !hasNfc);
     }).map(cp => cp._id.toString());
 
     if (missingIds.length > 0 && !forceFinish) {

@@ -52,8 +52,17 @@ export function ManagerDashboardScreen({ navigation }) {
   const [reassignBusy, setReassignBusy] = useState(false);
 
   const managerSiteIds = (currentUser?.siteIds || []).map(String);
-  const canSeeSite = siteId => currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || managerSiteIds.includes(String(siteId || ''));
-  const availableSites = (sites || []).filter(site => canSeeSite(site.id || site._id));
+  const currentUserId = String(currentUser?.id || currentUser?._id || '');
+  const canSeeSite = (siteId, siteObj) => {
+    if (currentUser?.role === 'admin' || currentUser?.role === 'superadmin') return true;
+    const sId = String(siteId || '');
+    if (managerSiteIds.includes(sId)) return true;
+    if (siteObj && String(siteObj.managerId || '') === currentUserId) return true;
+    const found = (sites || []).find(s => String(s.id || s._id) === sId);
+    if (found && String(found.managerId || '') === currentUserId) return true;
+    return false;
+  };
+  const availableSites = (sites || []).filter(site => canSeeSite(site.id || site._id, site));
   const guards   = (users || []).filter(u => u.role === 'guard' && canSeeSite(u.siteId));
   const unread   = getUnreadAlerts(currentUser?.id || currentUser?._id);
   const todayStr = new Date().toISOString().slice(0,10);

@@ -9,6 +9,7 @@ import {
   normalizePatrol, normalizeRoster, normalizeAlert, normalizeCheckpoint,
 } from '../services/api';
 import { registerPushNotifications } from '../services/pushNotifications';
+import { compressImageForUpload } from '../utils/imageCompressor';
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -120,7 +121,7 @@ export function AppProvider({ children }) {
             setActiveCheckCall(pendingCall || null);
             if (activePatrolRecord) {
               const detail = await apiGet(`/api/patrols/${activePatrolRecord.id}`);
-              const active = normalizePatrol(detail.patrol);
+              const active = { ...normalizePatrol(detail.patrol), resumedFromServer: true };
               setActivePatrol(active);
               setPatrolSessions(previous => previous.map(item => item.id === active.id ? active : item));
             }
@@ -204,7 +205,7 @@ export function AppProvider({ children }) {
         const active = patrolList.find(patrol => patrol.guardId === currentUser.id && patrol.status === 'in_progress');
         if (active && !activePatrol) {
           const detail = await apiGet(`/api/patrols/${active.id}`);
-          setActivePatrol(normalizePatrol(detail.patrol));
+          setActivePatrol({ ...normalizePatrol(detail.patrol), resumedFromServer: true });
         }
         setAlerts((alerts.alerts || []).map(alert => ({ ...normalizeAlert(alert), read: !!alert.isRead })));
         const promptList = prompts.logs || [];
@@ -707,7 +708,10 @@ export function AppProvider({ children }) {
       const form = new FormData();
       form.append('response', response);
       if (note) form.append('note', note);
-      if (extra?.photoUri) form.append('photo', { uri: extra.photoUri, name: 'check-call-issue.jpg', type: 'image/jpeg' });
+      if (extra?.photoUri) {
+        const compressedUri = await compressImageForUpload(extra.photoUri);
+        form.append('photo', { uri: compressedUri, name: 'check-call-issue.jpg', type: 'image/jpeg' });
+      }
       if (extra?.category) form.append('category', extra.category);
       if (checkCallLocation?.latitude != null) form.append('latitude', String(checkCallLocation.latitude));
       if (checkCallLocation?.longitude != null) form.append('longitude', String(checkCallLocation.longitude));
@@ -1189,7 +1193,10 @@ export function AppProvider({ children }) {
     if (API_ENABLED) {
       const form = new FormData();
       form.append('checkpointId', checkpointId);
-      if (photoUri) form.append('photo', { uri: photoUri, name: `checkpoint-${checkpointId}.jpg`, type: 'image/jpeg' });
+      if (photoUri) {
+        const compressedUri = await compressImageForUpload(photoUri);
+        form.append('photo', { uri: compressedUri, name: `checkpoint-${checkpointId}.jpg`, type: 'image/jpeg' });
+      }
       if (nfcTagId) form.append('nfcTagId', nfcTagId);
       if (location?.latitude != null) form.append('latitude', String(location.latitude));
       if (location?.longitude != null) form.append('longitude', String(location.longitude));
@@ -1489,9 +1496,18 @@ export function AppProvider({ children }) {
       const saved = normalizeSite(site);
       setSites(previous => [...previous, saved]);
       if (saved.managerId) {
-        setUsers(previous => previous.map(user => user.id === saved.managerId
+        const mgrId = String(saved.managerId);
+        setUsers(previous => previous.map(user => (String(user.id) === mgrId || String(user._id) === mgrId)
           ? { ...user, siteIds: [...new Set([...(user.siteIds || []), saved.id])] }
           : user));
+        setCurrentUser(prev => {
+          if (prev && (String(prev.id) === mgrId || String(prev._id) === mgrId)) {
+            const nextSiteIds = [...new Set([...(prev.siteIds || []), saved.id])];
+            save(KEYS.CURRENT_USER, { ...prev, siteIds: nextSiteIds }).catch(() => {});
+            return { ...prev, siteIds: nextSiteIds };
+          }
+          return prev;
+        });
       }
       return { success: true, site: saved };
     }
@@ -1499,6 +1515,20 @@ export function AppProvider({ children }) {
     const updated = [...(await load(KEYS.SITES) || []), saved];
     await save(KEYS.SITES, updated);
     setSites(updated);
+    if (saved.managerId) {
+      const mgrId = String(saved.managerId);
+      setUsers(previous => previous.map(user => (String(user.id) === mgrId || String(user._id) === mgrId)
+        ? { ...user, siteIds: [...new Set([...(user.siteIds || []), saved.id])] }
+        : user));
+      setCurrentUser(prev => {
+        if (prev && (String(prev.id) === mgrId || String(prev._id) === mgrId)) {
+          const nextSiteIds = [...new Set([...(prev.siteIds || []), saved.id])];
+          save(KEYS.CURRENT_USER, { ...prev, siteIds: nextSiteIds }).catch(() => {});
+          return { ...prev, siteIds: nextSiteIds };
+        }
+        return prev;
+      });
+    }
     return { success: true, site: saved };
   }, []);
 
