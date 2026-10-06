@@ -38,12 +38,6 @@
     }
   },
   "submit": {
-    "production": {
-      "ios": {
-        "appleId": "hayat123a",
-        "ascAppId": "",
-        "appleTeamId": "QM8VK8RT5S"
-      }
-    }
+    "production": {}
   }
 }
