@@ -1021,32 +1021,27 @@ export function AppProvider({ children }) {
       } catch (err) {
         // Fallback 1: If Render backend route /api/check-calls/manual is not yet deployed (404),
         // fallback to /api/check-calls/fire + /api/check-calls/:id/respond
-        if (err?.message?.includes('not found') || err?.message?.includes('404')) {
-          try {
-            const fireRes = await apiPost('/api/check-calls/fire', {});
-            const firedId = fireRes?.checkCall?._id || fireRes?.checkCall?.id;
-            if (firedId) {
-              const noteText = category ? `[${category}]${note ? ' ' + note : ''}` : note;
-              const respRes = await apiPost(`/api/check-calls/${firedId}/respond`, { response, note: noteText || undefined });
-              const saved = normalizeCheckCall(respRes.checkCall);
-              setCheckCalls(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
-              const session = shiftSessions.find(item => item.id === saved.sessionId || (item.guardId === currentUser?.id && !item.bookedOffAt));
-              if (session && !session.bookedOffAt) startCheckCallTimer(session);
-              return saved;
-            }
-          } catch (fireErr) {
-            console.warn('Fire fallback failed', fireErr);
+        try {
+          const fireRes = await apiPost('/api/check-calls/fire', {});
+          const firedId = fireRes?.checkCall?._id || fireRes?.checkCall?.id;
+          if (firedId) {
+            const noteText = category ? `[${category}]${note ? ' ' + note : ''}` : note;
+            const respRes = await apiPost(`/api/check-calls/${firedId}/respond`, { response, note: noteText || undefined });
+            const saved = normalizeCheckCall(respRes.checkCall);
+            setCheckCalls(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
+            const currentUserId = String(currentUser?.id || currentUser?._id || '');
+            const session = shiftSessions.find(item => item.id === saved.sessionId || (String(item.guardId) === currentUserId && !item.bookedOffAt));
+            if (session && !session.bookedOffAt) startCheckCallTimer(session);
+            return saved;
           }
+        } catch (fireErr) {
+          console.warn('Fire fallback failed:', fireErr);
         }
-        // Fallback 2: If offline / network error / server unreachable, fall through to local storage so guard is never blocked
-        const isNetworkError = err?.message?.includes('Cannot reach') || err?.message?.includes('Network') || err?.message?.includes('fetch') || err?.message?.includes('timeout') || err?.message?.includes('not found') || err?.message?.includes('404');
-        if (!isNetworkError) {
-          throw new Error(err?.message || 'Could not record check call. Please try again.');
-        }
-        // Fall through to local save below
+        // Fallback 2: Fall through to local save below so the guard is NEVER blocked by network/route issues
       }
     }
-    const session = shiftSessions.find(item => item.guardId === currentUser?.id && !item.bookedOffAt);
+    const currentUserId = String(currentUser?.id || currentUser?._id || '');
+    const session = shiftSessions.find(item => (String(item.guardId) === currentUserId) && !item.bookedOffAt);
     if (!session) throw new Error('Book on before recording a check call.');
     const now = new Date().toISOString();
     const guard = users.find(u => u.id === currentUser?.id) || currentUser;

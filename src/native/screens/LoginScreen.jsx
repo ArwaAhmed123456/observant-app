@@ -373,22 +373,22 @@ function ErrorBox({ text }) {
 const styles = StyleSheet.create({
   root:       { flex: 1, backgroundColor: P.bg0 },
   kav:        { flex: 1 },
-  scroll:     { flexGrow: 1, justifyContent: 'center', paddingHorizontal: SP.px24, paddingVertical: SP.px40 },
+  scroll:     { flexGrow: 1, paddingHorizontal: SP.px24, paddingTop: SP.px24, paddingBottom: 80 },
 
-  glowOrb:    { position: 'absolute', top: -60, alignSelf: 'center', width: 340, height: 340 },
-  glowOrbInner:{ flex: 1, borderRadius: 170 },
+  glowOrb:    { position: 'absolute', top: -40, alignSelf: 'center', width: 280, height: 280 },
+  glowOrbInner:{ flex: 1, borderRadius: 140 },
 
   // Logo section
-  logoSection:{ alignItems: 'center', marginBottom: SP.px40 },
-  badgeWrap:  { position: 'relative', marginBottom: SP.px20 },
-  badge:      { width: 120, height: 120 },
+  logoSection:{ alignItems: 'center', marginTop: SP.px8, marginBottom: SP.px20 },
+  badgeWrap:  { position: 'relative', marginBottom: SP.px12 },
+  badge:      { width: 84, height: 84 },
   outerRing:  {
-    position: 'absolute', inset: -6,
-    borderRadius: 66, borderWidth: 1.5, borderColor: P.goldBorder,
+    position: 'absolute', inset: -5,
+    borderRadius: 48, borderWidth: 1.5, borderColor: P.goldBorder,
   },
-  orgName:    { fontSize: 15, fontWeight: '800', color: P.t1, letterSpacing: 3.5, marginBottom: SP.px8 },
-  goldDivider:{ width: 60, height: 1.5, backgroundColor: P.gold, borderRadius: 1, marginBottom: SP.px8 },
-  appLabel:   { ...FONT.label, color: P.gold, letterSpacing: 2 },
+  orgName:    { fontSize: 14, fontWeight: '800', color: P.t1, letterSpacing: 3, marginBottom: SP.px6 },
+  goldDivider:{ width: 50, height: 1.5, backgroundColor: P.gold, borderRadius: 1, marginBottom: SP.px6 },
+  appLabel:   { ...FONT.label, color: P.gold, letterSpacing: 1.8, fontSize: 10 },
 
   // Card
   card: {

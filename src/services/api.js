@@ -52,7 +52,17 @@ export async function apiRequest(path, options = {}, retry = true) {
   if (!API_ENABLED) throw new Error('The Observant API is not configured for this build.');
   const session = await restoreTokens();
   const headers = { Accept: 'application/json', ...(options.headers || {}) };
-  if (options.body && !(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+  const isFormData = options.body && (
+    options.body instanceof FormData ||
+    (typeof options.body === 'object' && typeof options.body.append === 'function') ||
+    options.body?._parts !== undefined
+  );
+  if (options.body && !isFormData) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (isFormData) {
+    delete headers['Content-Type'];
+  }
   if (session?.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
 
   let response;
