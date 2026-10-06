@@ -8,7 +8,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "android": {
-      "package": "com.observant.app",
+      "package": "com.observantsecurity.app",
       "versionCode": 2,
       "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
@@ -35,7 +35,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.observant.app",
+      "bundleIdentifier": "com.observantsecurity.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Observant requires camera access to scan security checkpoint QR codes and attach photos to incident reports.",

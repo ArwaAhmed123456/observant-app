@@ -10,9 +10,6 @@
     },
     "preview": {
       "distribution": "internal",
-      "env": {
-        "EXPO_PUBLIC_API_URL": "https://observant-api-zl49.onrender.com"
-      },
       "android": {
         "buildType": "apk"
       },
@@ -31,15 +28,22 @@
     },
     "production": {
       "autoIncrement": true,
-      "env": {
-        "EXPO_PUBLIC_API_URL": "https://observant-api-zl49.onrender.com"
-      },
+      "distribution": "store",
       "android": {
         "buildType": "app-bundle"
+      },
+      "ios": {
+        "buildConfiguration": "Release"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "hayat123a",
+        "ascAppId": "",
+        "appleTeamId": "QM8VK8RT5S"
+      }
+    }
   }
 }
