@@ -21,7 +21,6 @@
       },
       "permissions": [
         "CAMERA",
-        "NFC",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "VIBRATE",
@@ -38,7 +37,7 @@
       "bundleIdentifier": "com.observantsecurity.app",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Observant requires camera access to scan security checkpoint QR codes and attach photos to incident reports.",
+        "NSCameraUsageDescription": "Observant requires camera access to capture patrol checkpoint photos and incident evidence.",
         "NSLocationWhenInUseUsageDescription": "Observant uses your location to verify security guard checkpoint patrols.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Observant uses location tracking during active security patrol tours."
       }
@@ -57,19 +56,13 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Observant to access your camera to scan QR codes and capture incident photos."
+          "cameraPermission": "Allow Observant to access your camera to capture patrol checkpoint photos and incident evidence."
         }
       ],
       [
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Allow Observant to use your location for security patrol verification."
-        }
-      ],
-      [
-        "react-native-nfc-manager",
-        {
-          "nfcPermission": "Allow Observant to verify assigned patrol checkpoint cards."
         }
       ]
     ],
