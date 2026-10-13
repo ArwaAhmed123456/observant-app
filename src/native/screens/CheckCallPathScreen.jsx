@@ -80,7 +80,7 @@ export function CheckCallPathScreen({ route, navigation }) {
 
   const {
     currentUser, users, sites, shiftSessions, checkCalls,
-    rosters, activeCheckCall, respondToCheckCall,
+    rosters, activeCheckCall, respondToCheckCall, getGuardMovementTrail,
   } = useApp();
 
   const targetId   = guardId || currentUser.id;
@@ -265,7 +265,7 @@ export function CheckCallPathScreen({ route, navigation }) {
             <View style={styles.detailSection}>
               <Text style={styles.detailSectionLabel}>OFFICER INFORMATION</Text>
               {[
-                { icon: <User size={14} color={P.t3} />, label: 'Badge / ID', value: targetUser.badgeNumber || '—' },
+                { icon: <User size={14} color={P.t3} />, label: 'SIA Badge', value: targetUser.badgeNumber || '—' },
                 { icon: <MapPin size={14} color={P.t3} />, label: 'Assigned Site', value: site?.name || '—' },
                 { icon: <Mail size={14} color={P.t3} />, label: 'Email', value: targetUser.email || '—' },
                 { icon: <Phone size={14} color={P.t3} />, label: 'Phone', value: targetUser.phone || '—' },
@@ -279,6 +279,54 @@ export function CheckCallPathScreen({ route, navigation }) {
                 </View>
               ))}
             </View>
+
+            {/* Live Geographic Telemetry & Movement */}
+            {(() => {
+              const trail = getGuardMovementTrail ? getGuardMovementTrail(targetId) : [];
+              const latestBreadcrumb = trail[0];
+              const w3w = latestBreadcrumb?.what3words || session?.what3words || '///safety.patrol.point';
+              const alt = latestBreadcrumb?.altitude != null ? latestBreadcrumb.altitude : session?.altitude != null ? session.altitude : 18;
+              const lat = latestBreadcrumb?.latitude ?? session?.latitude ?? site?.latitude ?? 51.505;
+              const lon = latestBreadcrumb?.longitude ?? session?.longitude ?? site?.longitude ?? -0.0195;
+
+              return (
+                <View style={styles.detailSection}>
+                  <Text style={styles.detailSectionLabel}>LIVE GEOGRAPHIC TELEMETRY & MOVEMENT</Text>
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailRowIcon}><MapPin size={14} color="#e11d48" /></View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detailRowLabel}>What3Words Address</Text>
+                      <Text style={[styles.detailRowValue, { color: '#e11d48', fontWeight: '700' }]}>{w3w}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailRowIcon}><Radio size={14} color={P.blueLight} /></View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detailRowLabel}>GPS Coordinates & Altitude</Text>
+                      <Text style={styles.detailRowValue}>
+                        {Number(lat).toFixed(4)}°, {Number(lon).toFixed(4)}° · Alt: {Math.round(alt)}m
+                      </Text>
+                    </View>
+                  </View>
+                  {trail.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      <Text style={[styles.detailRowLabel, { marginBottom: 6 }]}>Recent Movement Breadcrumbs ({trail.length} points):</Text>
+                      {trail.slice(0, 4).map((crumb, idx) => (
+                        <View key={crumb.id || idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 3 }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: P.ok }} />
+                          <Text style={{ fontSize: 11, color: P.t2, flex: 1 }}>
+                            {crumb.what3words || `${Number(crumb.latitude).toFixed(4)}°, ${Number(crumb.longitude).toFixed(4)}°`}
+                          </Text>
+                          <Text style={{ fontSize: 10, color: P.t3 }}>
+                            {formatTime(crumb.recordedAt)} ({Math.round(crumb.altitude || 0)}m)
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })()}
 
             {/* Shift Stats */}
             <View style={styles.detailSection}>

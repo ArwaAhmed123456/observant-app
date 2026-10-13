@@ -162,7 +162,7 @@ export function ManagerReportsScreen() {
         Alert.alert('No Records', 'No security check-calls or patrols match the selected filters.');
         return;
       }
-      const headers = ['Date', 'Site Name', 'Security Officer', 'Badge ID', 'Shift Time', 'Record Type', 'Event Time / Result', 'Incident Log / Notes'];
+      const headers = ['Date', 'Site Name', 'Security Officer', 'SIA Badge', 'Shift Time', 'Record Type', 'Event Time / Result', 'Incident Log / Notes'];
       const lines = [headers.join(',')];
 
       rows.forEach(r => {
@@ -376,7 +376,7 @@ ${(reportType === 'combined' || reportType === 'check_calls') && ccGroups.length
     <tr>
       <th rowspan="2" style="width:13%; border:1.5px solid #000;">Site<br/>Name</th>
       <th rowspan="2" style="width:15%; border:1.5px solid #000;">Name of<br/>Security Officer<br/>on Duty</th>
-      <th rowspan="2" style="width:6%; border:1.5px solid #000;">ID<br/>No</th>
+      <th rowspan="2" style="width:6%; border:1.5px solid #000;">SIA<br/>Badge</th>
       <th rowspan="2" style="width:9%; border:1.5px solid #000;">Shift Times<br/>(DAY/Night)</th>
       <th colspan="13" style="border:1.5px solid #000; font-size:8.5px; padding:4px;">Times of check calls made by the security officers to control</th>
     </tr>

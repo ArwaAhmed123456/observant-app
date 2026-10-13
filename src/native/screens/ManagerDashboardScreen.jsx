@@ -86,8 +86,8 @@ export function ManagerDashboardScreen({ navigation }) {
       Alert.alert('Complete guard details', 'Enter the guard name and work email, then assign a site.');
       return;
     }
-    if (password.length < 12) {
-      Alert.alert('Password too short', 'Set a temporary password with at least 12 characters.');
+    if (password.length < 6) {
+      Alert.alert('Password too short', 'Set a temporary password with at least 6 characters.');
       return;
     }
     setCreateGuardBusy(true);
@@ -572,10 +572,10 @@ export function ManagerDashboardScreen({ navigation }) {
             <TextInput style={styles.accountInput} value={guardDraft.name} onChangeText={name => setGuardDraft(value => ({ ...value, name }))} placeholder="Guard name" placeholderTextColor={COLORS.textDisabled} autoCapitalize="words" />
             <Text style={styles.fieldLabel}>Work email</Text>
             <TextInput style={styles.accountInput} value={guardDraft.email} onChangeText={email => setGuardDraft(value => ({ ...value, email }))} placeholder="guard@company.com" placeholderTextColor={COLORS.textDisabled} keyboardType="email-address" autoCapitalize="none" autoCorrect={false} />
-            <Text style={styles.fieldLabel}>Temporary password (12+ characters)</Text>
+            <Text style={styles.fieldLabel}>Temporary password (6+ characters)</Text>
             <TextInput style={styles.accountInput} value={guardDraft.password} onChangeText={password => setGuardDraft(value => ({ ...value, password }))} placeholder="Set a secure temporary password" placeholderTextColor={COLORS.textDisabled} secureTextEntry autoCapitalize="none" />
             <View style={styles.guardFieldsRow}>
-              <View style={{ flex: 1 }}><Text style={styles.fieldLabel}>Badge ID</Text><TextInput style={styles.accountInput} value={guardDraft.badgeNumber} onChangeText={badgeNumber => setGuardDraft(value => ({ ...value, badgeNumber }))} placeholder="Optional" placeholderTextColor={COLORS.textDisabled} /></View>
+              <View style={{ flex: 1 }}><Text style={styles.fieldLabel}>SIA Badge</Text><TextInput style={styles.accountInput} value={guardDraft.badgeNumber} onChangeText={badgeNumber => setGuardDraft(value => ({ ...value, badgeNumber }))} placeholder="e.g. SIA-1092" placeholderTextColor={COLORS.textDisabled} /></View>
               <View style={{ flex: 1 }}><Text style={styles.fieldLabel}>Phone</Text><TextInput style={styles.accountInput} value={guardDraft.phone} onChangeText={phone => setGuardDraft(value => ({ ...value, phone }))} placeholder="Optional" placeholderTextColor={COLORS.textDisabled} keyboardType="phone-pad" /></View>
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
@@ -605,7 +605,7 @@ export function ManagerDashboardScreen({ navigation }) {
           <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: safeBottom + S.xl }} keyboardShouldPersistTaps="handled">
             <Text style={styles.modalTitle}>Assign Site to Officer</Text>
             <Text style={styles.modalSub}>
-              Assign or transfer <Text style={{ color: COLORS.textPrimary, fontWeight: '700' }}>{reassignGuard?.name}</Text> ({reassignGuard?.badgeNumber || 'Officer'}) to one of your active security sites.
+              Assign or transfer <Text style={{ color: COLORS.textPrimary, fontWeight: '700' }}>{reassignGuard?.name}</Text> (SIA: {reassignGuard?.badgeNumber || 'Officer'}) to one of your active security sites.
             </Text>
 
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>

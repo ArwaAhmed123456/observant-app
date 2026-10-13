@@ -10,6 +10,7 @@ import {
 } from '../services/api';
 import { registerPushNotifications } from '../services/pushNotifications';
 import { compressImageForUpload } from '../utils/imageCompressor';
+import { getWhat3WordsSync, formatLocationTelemetry } from '../utils/what3words';
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -357,6 +358,52 @@ export function AppProvider({ children }) {
     return { success: true, user: newUser };
   }, [addAuditLog]);
 
+  const createSite = useCallback(async (siteData) => {
+    if (API_ENABLED) {
+      try {
+        const response = await apiPost('/api/sites', {
+          name: siteData.name.trim(),
+          address: siteData.address?.trim() || null,
+          postcode: siteData.postcode?.trim() || null,
+          managerId: siteData.managerId || currentUser?.id || null,
+          latitude: siteData.latitude != null ? Number(siteData.latitude) : undefined,
+          longitude: siteData.longitude != null ? Number(siteData.longitude) : undefined,
+          geofenceRadiusMetres: Number(siteData.geofenceRadiusMetres || siteData.geofenceRadius) || 250,
+          notes: siteData.notes || null,
+        });
+        const site = normalizeSite(response.site);
+        setSites(previous => [site, ...previous]);
+        return { success: true, site };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+    const allSites = await load(KEYS.SITES) || [];
+    const newSite = {
+      id: `s_${Date.now()}`,
+      name: siteData.name.trim(),
+      address: siteData.address?.trim() || '',
+      postcode: siteData.postcode?.trim() || '',
+      managerId: siteData.managerId || currentUser?.id || 'u2',
+      latitude: siteData.latitude != null ? Number(siteData.latitude) : 51.5050,
+      longitude: siteData.longitude != null ? Number(siteData.longitude) : -0.0195,
+      geofenceRadiusMeters: Number(siteData.geofenceRadiusMetres || siteData.geofenceRadius) || 250,
+      notes: siteData.notes || '',
+      active: true,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [newSite, ...allSites];
+    await save(KEYS.SITES, updated);
+    setSites(updated);
+    await addAuditLog({
+      action: 'SITE_CREATED',
+      targetName: newSite.name,
+      details: `New site registered with perimeter geofence ${newSite.geofenceRadiusMeters}m.`,
+      severity: 'info',
+    });
+    return { success: true, site: newSite };
+  }, [currentUser, addAuditLog]);
+
   const updateUser = useCallback(async (userId, updates) => {
     if (API_ENABLED) {
       try {
@@ -450,6 +497,45 @@ export function AppProvider({ children }) {
 
     return { success: true };
   }, [addAuditLog]);
+
+  const deleteAccount = useCallback(async (userId = null) => {
+    const targetId = userId || currentUser?.id;
+    if (!targetId) return { success: false, error: 'No user selected' };
+    const res = await deleteUser(targetId);
+    if (res?.success && targetId === currentUser?.id) {
+      await logout();
+    }
+    return res;
+  }, [currentUser, deleteUser, logout]);
+
+  // ── Geographic Movement & Breadcrumb Tracking ──────────────────────────────
+  const [guardMovements, setGuardMovements] = useState({});
+
+  const recordMovementBreadcrumb = useCallback(async (guardId, locationData) => {
+    if (!guardId || !locationData || locationData.latitude == null) return;
+    const w3w = locationData.what3words || getWhat3WordsSync(locationData.latitude, locationData.longitude);
+    const point = {
+      latitude: Number(locationData.latitude),
+      longitude: Number(locationData.longitude),
+      altitude: locationData.altitude != null ? Number(locationData.altitude) : null,
+      accuracy: locationData.accuracy != null ? Number(locationData.accuracy) : null,
+      what3words: w3w,
+      timestamp: locationData.timestamp || new Date().toISOString(),
+    };
+
+    setUsers(prev => prev.map(u => (u.id === guardId || u._id === guardId) ? { ...u, lastLocation: point } : u));
+
+    setGuardMovements(prev => {
+      const list = prev[guardId] || [];
+      const updated = [point, ...list.slice(0, 99)];
+      save(`guard_movements_${guardId}`, updated);
+      return { ...prev, [guardId]: updated };
+    });
+  }, []);
+
+  const getGuardMovementTrail = useCallback((guardId) => {
+    return guardMovements[guardId] || [];
+  }, [guardMovements]);
 
   const updatePassword = useCallback(async (userId, oldPassword, newPassword) => {
     if (API_ENABLED) {
@@ -699,7 +785,16 @@ export function AppProvider({ children }) {
         if (permission.status !== 'granted') permission = await Location.requestForegroundPermissionsAsync();
         if (permission.status === 'granted') {
           const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          checkCallLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude };
+          checkCallLocation = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            altitude: position.coords.altitude != null ? Math.round(position.coords.altitude * 10) / 10 : null,
+            accuracy: position.coords.accuracy != null ? Math.round(position.coords.accuracy) : null,
+            what3words: getWhat3WordsSync(position.coords.latitude, position.coords.longitude),
+          };
+          if (currentUser?.id) {
+            recordMovementBreadcrumb(currentUser.id, checkCallLocation);
+          }
         }
       } catch { /* Check call response remains available without location access. */ }
     }
@@ -1041,11 +1136,35 @@ export function AppProvider({ children }) {
       }
     }
     const currentUserId = String(currentUser?.id || currentUser?._id || '');
-    const session = shiftSessions.find(item => (String(item.guardId) === currentUserId) && !item.bookedOffAt);
-    if (!session) throw new Error('Book on before recording a check call.');
     const now = new Date().toISOString();
+    let session = shiftSessions.find(item => (String(item.guardId) === currentUserId) && !item.bookedOffAt);
+    if (!session) {
+      const fallbackSiteId = currentUser?.siteId || sites[0]?.id || 's1';
+      session = {
+        id: `sess_manual_${Date.now()}`,
+        guardId: currentUserId,
+        siteId: fallbackSiteId,
+        bookedOnAt: now,
+      };
+    }
     const guard = users.find(u => u.id === currentUser?.id) || currentUser;
     const site = sites.find(s => s.id === session.siteId);
+
+    let manualLoc = null;
+    try {
+      const perm = await Location.getForegroundPermissionsAsync();
+      if (perm.status === 'granted') {
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        manualLoc = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          altitude: pos.coords.altitude != null ? Math.round(pos.coords.altitude * 10) / 10 : null,
+          accuracy: pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : null,
+          what3words: getWhat3WordsSync(pos.coords.latitude, pos.coords.longitude),
+        };
+        recordMovementBreadcrumb(currentUserId, manualLoc);
+      }
+    } catch (_) {}
 
     const saved = {
       id: `cc_${Date.now()}`,
@@ -1061,6 +1180,7 @@ export function AppProvider({ children }) {
       response,
       note,
       category,
+      location: manualLoc,
       isManualLog: true,
       manuallyLogged: false,
     };
@@ -1219,7 +1339,12 @@ export function AppProvider({ children }) {
       capturedAt: new Date().toISOString(),
       latitude: location?.latitude ?? null,
       longitude: location?.longitude ?? null,
+      altitude: location?.altitude ?? null,
+      what3words: location?.what3words ?? (location?.latitude ? getWhat3WordsSync(location.latitude, location.longitude) : null),
     };
+    if (location && currentUser?.id) {
+      recordMovementBreadcrumb(currentUser.id, capture);
+    }
 
     const allCaptures = await load(KEYS.PATROL_CAPTURES) || [];
     const existing = allCaptures.findIndex(item => item.patrolId === patrolId && item.checkpointId === checkpointId);
@@ -1570,12 +1695,14 @@ export function AppProvider({ children }) {
 
   const value = {
     // Auth
-    currentUser, authLoading, login, logout, createSite,
+    currentUser, authLoading, login, logout, createSite, deleteAccount,
     updatePassword, resetPasswordWithCode,
     // Reference data
     users, sites, checkpoints, refreshUsers,
     // Super Admin Account Management & Audit
     auditLogs, addAuditLog, createUser, updateUser, toggleUserStatus, deleteUser,
+    // Geographic Movement & Telemetry
+    guardMovements, recordMovementBreadcrumb, getGuardMovementTrail,
     // Sessions
     shiftSessions, getGuardActiveSession, bookOn, bookOff,
     // Check calls

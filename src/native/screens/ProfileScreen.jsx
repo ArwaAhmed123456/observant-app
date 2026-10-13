@@ -8,14 +8,16 @@ import { AppHeader } from '../components/AppHeader';
 import { P, SP, BR, FONT, SH_TOKENS, card, input, btnPrimary, btnDanger } from '../../ds';
 import {
   User, Lock, Bell, LogOut, ChevronRight, Shield,
-  MapPin, Eye, EyeOff, CheckCircle, AlertCircle,
+  MapPin, Eye, EyeOff, CheckCircle, AlertCircle, Trash2, AlertTriangle,
 } from 'lucide-react-native';
 
 export function ProfileScreen() {
-  const { currentUser, sites, logout, shiftSessions, checkCalls, patrolSessions, updatePassword } = useApp();
+  const { currentUser, sites, logout, shiftSessions, checkCalls, patrolSessions, updatePassword, deleteAccount } = useApp();
   const site = sites.find(s => s.id === currentUser?.siteId || s._id === currentUser?.siteId);
 
   const [pwModal, setPwModal]     = useState(false);
+  const [deleteModal, setDeleteModal] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [oldPw, setOldPw]         = useState('');
   const [newPw, setNewPw]         = useState('');
   const [confirmPw, setConfirmPw] = useState('');
@@ -81,7 +83,7 @@ export function ProfileScreen() {
         {/* Info card */}
         <Text style={styles.sectionLabel}>Identity</Text>
         <View style={styles.infoCard}>
-          <InfoRow label="Badge Number" value={currentUser?.badgeNumber || '—'} />
+          <InfoRow label="SIA Badge"    value={currentUser?.badgeNumber || '—'} />
           <InfoRow label="Email"        value={currentUser?.email || '—'} />
           <InfoRow label="Phone"        value={currentUser?.phone || '—'} />
           <InfoRow label="Organisation" value="Observant Security Group UK" last />
@@ -117,7 +119,7 @@ export function ProfileScreen() {
             <ChevronRight size={16} color={P.t3} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.actionRow, styles.actionLast]} onPress={() => setLogoutModal(true)}>
+          <TouchableOpacity style={styles.actionRow} onPress={() => setLogoutModal(true)}>
             <View style={styles.actionLeft}>
               <View style={[styles.actionIcon, { backgroundColor: P.dangerSubtle }]}>
                 <LogOut size={15} color={P.danger} />
@@ -125,6 +127,16 @@ export function ProfileScreen() {
               <Text style={[styles.actionLabel, { color: P.danger }]}>Sign Out</Text>
             </View>
             <ChevronRight size={16} color={P.t3} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.actionRow, styles.actionLast]} onPress={() => setDeleteModal(true)}>
+            <View style={styles.actionLeft}>
+              <View style={[styles.actionIcon, { backgroundColor: 'rgba(239, 68, 68, 0.15)' }]}>
+                <Trash2 size={15} color={P.danger} />
+              </View>
+              <Text style={[styles.actionLabel, { color: P.danger, fontWeight: '700' }]}>Delete Account</Text>
+            </View>
+            <ChevronRight size={16} color={P.danger} />
           </TouchableOpacity>
         </View>
 
@@ -211,6 +223,38 @@ export function ProfileScreen() {
             </TouchableOpacity>
             <TouchableOpacity style={[styles.cancelBtn, { width: '100%' }]} onPress={() => setLogoutModal(false)}>
               <Text style={styles.cancelBtnTxt}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Delete Account confirmation modal */}
+      <Modal visible={deleteModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { alignItems: 'center' }]}>
+            <View style={[styles.actionIcon, { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(239, 68, 68, 0.15)', borderWidth: 1, borderColor: P.dangerBorder, marginBottom: SP.px16 }]}>
+              <AlertTriangle size={24} color={P.danger} />
+            </View>
+            <Text style={[styles.modalTitle, { color: P.danger }]}>Delete Account Permanently?</Text>
+            <Text style={[styles.modalSubTxt, { textAlign: 'center', marginBottom: SP.px16 }]}>
+              This action will deactivate your security officer profile, invalidate all login credentials, and cannot be undone.
+            </Text>
+            <TouchableOpacity
+              style={[btnDanger, { width: '100%', marginBottom: 10, opacity: deleteLoading ? 0.6 : 1 }]}
+              disabled={deleteLoading}
+              onPress={async () => {
+                setDeleteLoading(true);
+                const res = await deleteAccount(currentUser?.id);
+                setDeleteLoading(false);
+                if (!res?.success) {
+                  Alert.alert('Unable to delete account', res?.error || 'Please contact your operations manager.');
+                }
+              }}
+            >
+              <Text style={styles.saveBtnTxt}>{deleteLoading ? 'Deleting Account…' : 'Yes, Permanently Delete My Account'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.cancelBtn, { width: '100%' }]} onPress={() => setDeleteModal(false)}>
+              <Text style={styles.cancelBtnTxt}>Cancel & Keep Account</Text>
             </TouchableOpacity>
           </View>
         </View>

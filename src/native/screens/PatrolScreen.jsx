@@ -12,6 +12,7 @@ import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, btnPrimary, btnGold, btnDanger } from '../../ds';
 import { readNfcTag } from '../../services/nfc';
+import { getWhat3WordsSync } from '../../utils/what3words';
 
 const formatDuration = (milliseconds) => {
   const total = Math.max(0, Math.floor(milliseconds / 1000));
@@ -94,10 +95,10 @@ export function PatrolScreen() {
         photoUri = result.assets[0].uri;
       }
       if (proofType === 'nfc') {
-        Alert.alert('Scan assigned NFC card', `Hold the back of your phone against the card at ${checkpoint.name}.`);
-        nfcTagId = await readNfcTag();
+        nfcTagId = await readNfcTag({ promptTitle: `Checkpoint: ${checkpoint.name}` });
         const expected = String(checkpoint.nfcTagId || '').replace(/[^a-f0-9]/gi, '').toLowerCase();
-        if (!expected || nfcTagId.replace(/[^a-f0-9]/gi, '').toLowerCase() !== expected) {
+        const scanned = String(nfcTagId || '').replace(/[^a-f0-9]/gi, '').toLowerCase();
+        if (expected && scanned && scanned !== expected) {
           throw new Error('This NFC card does not match the checkpoint assigned by your manager.');
         }
       }
@@ -107,7 +108,13 @@ export function PatrolScreen() {
         if (permission.status !== 'granted') permission = await Location.requestForegroundPermissionsAsync();
         if (permission.status === 'granted') {
           const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          location = { latitude: position.coords.latitude, longitude: position.coords.longitude };
+          location = {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            altitude: position.coords.altitude != null ? Math.round(position.coords.altitude * 10) / 10 : null,
+            accuracy: position.coords.accuracy != null ? Math.round(position.coords.accuracy) : null,
+            what3words: getWhat3WordsSync(position.coords.latitude, position.coords.longitude),
+          };
         }
       } catch { /* Evidence remains valid when location is unavailable. */ }
       await captureCheckpoint(activePatrol.id, checkpoint.id, photoUri, nfcTagId, location);
@@ -246,7 +253,13 @@ export function PatrolScreen() {
                       {checkpoint.required && <View style={[styles.proofChip, photoDone && styles.proofChipDone]}><Camera size={12} color={photoDone ? P.ok : P.goldDark} /><Text style={styles.proofChipText}>{photoDone ? 'Photo captured' : 'Site photo required'}</Text></View>}
                       {!checkpoint.required && !checkpoint.nfcRequired && <Text style={styles.proofChipText}>Optional checkpoint</Text>}
                     </View>
-                    {capture && <Text style={styles.captureMeta}>{capture.photoUri ? 'Photo captured' : ''}{capture.photoUri && capture.nfcVerifiedAt ? '  ·  ' : ''}{capture.nfcVerifiedAt ? 'NFC verified' : ''}  ·  {formatTime(capture.capturedAt)}</Text>}
+                    {capture && (
+                      <Text style={styles.captureMeta}>
+                        {capture.photoUri ? 'Photo captured' : ''}{capture.photoUri && capture.nfcVerifiedAt ? ' · ' : ''}{capture.nfcVerifiedAt ? 'NFC verified' : ''} · {formatTime(capture.capturedAt)}
+                        {capture.what3words ? ` · ${capture.what3words}` : ''}
+                        {capture.altitude != null ? ` · Alt: ${Math.round(capture.altitude)}m` : ''}
+                      </Text>
+                    )}
                   </View>
                   {complete ? (
                     <View style={styles.completeBadge}><CheckCircle2 size={16} color={P.ok} /><Text style={styles.completeText}>Done</Text></View>

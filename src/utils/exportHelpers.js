@@ -55,7 +55,7 @@ export const openPrintablePDF = ({
       const rowsForShift = checklistRows.filter(row => row.shift === shift);
       const hours = hoursFor(shift);
       return `<h2 class="band-title">${shift} Check Calls <span>${shift === 'Day' ? '0700–1900' : '1900–0700'}</span></h2>
-        <table class="checklist"><thead><tr><th>Site Name</th><th>Security Officer</th><th>ID No</th><th>Shift</th>${headerCells(hours)}<th>Incident / Notes</th></tr></thead>
+        <table class="checklist"><thead><tr><th>Site Name</th><th>Security Officer</th><th>SIA Badge</th><th>Shift</th>${headerCells(hours)}<th>Incident / Notes</th></tr></thead>
         <tbody>${rowsForShift.map(row => `<tr><td>${escapeHtml(row.siteName)}</td><td>${escapeHtml(row.guardName)}</td><td>${escapeHtml(row.badgeNumber)}</td><td>${escapeHtml(row.shiftTime)}</td>${hours.map(hour => {
           const value = row.slots[hour] || '—';
           const cls = value.includes('MISSED') ? 'critical' : value.includes('LATE') ? 'late' : '';

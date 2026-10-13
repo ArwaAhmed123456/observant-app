@@ -80,7 +80,7 @@ export function StatusTile({
             <View style={[styles.statusDot, { backgroundColor: accentColor }]} />
             <View>
               <Text style={styles.guardName} numberOfLines={1}>{guard.name}</Text>
-              <Text style={styles.badgeNumber}>{guard.badgeNumber || 'ID: —'}</Text>
+              <Text style={styles.badgeNumber}>SIA: {guard.badgeNumber || '—'}</Text>
             </View>
           </View>
 
@@ -89,12 +89,24 @@ export function StatusTile({
           </View>
         </View>
 
-        {/* Site Location */}
+        {/* Site Location & W3W / Altitude Telemetry */}
         <View style={styles.siteRow}>
           <MapPin size={12} color={P.blueLight} />
           <Text style={styles.siteText} numberOfLines={1}>
             {site?.name || 'Unassigned Site'}
           </Text>
+          {(lastCC?.what3words || session?.what3words) && (
+            <View style={styles.w3wPill}>
+              <Text style={styles.w3wText} numberOfLines={1}>
+                {lastCC?.what3words || session?.what3words}
+              </Text>
+            </View>
+          )}
+          {(lastCC?.altitude != null || session?.altitude != null) && (
+            <Text style={styles.altitudeText}>
+              Alt: {Math.round(lastCC?.altitude ?? session?.altitude)}m
+            </Text>
+          )}
         </View>
 
         {/* Shift Timing Details */}
@@ -349,5 +361,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#D97706',
+  },
+  w3wPill: {
+    backgroundColor: 'rgba(225, 29, 72, 0.08)',
+    borderColor: 'rgba(225, 29, 72, 0.25)',
+    borderWidth: 1,
+    borderRadius: BR.sm,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginLeft: 4,
+  },
+  w3wText: {
+    ...FONT.mono,
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#e11d48',
+  },
+  altitudeText: {
+    ...FONT.mono,
+    fontSize: 10,
+    color: P.t3,
+    marginLeft: 4,
   },
 });

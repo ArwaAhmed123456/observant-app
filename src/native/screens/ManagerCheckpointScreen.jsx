@@ -72,10 +72,10 @@ export function ManagerCheckpointScreen() {
   const pairTag = async (checkpoint) => {
     setPairingId(checkpoint.id);
     try {
-      const nfcTagId = await readNfcTag();
+      const nfcTagId = await readNfcTag({ promptTitle: `Pair Tag: ${checkpoint.name}` });
       const updated = checkpoints.map(cp => cp.id === checkpoint.id ? { ...cp, nfcTagId, nfcRequired: true } : cp);
       await saveCheckpoints(updated);
-      Alert.alert('NFC checkpoint paired', `${checkpoint.name} will require this card during patrols.`);
+      Alert.alert('NFC checkpoint paired', `${checkpoint.name} will require this card (${nfcTagId.slice(-6)}) during patrols.`);
     } catch (error) { Alert.alert('NFC scan', error.message); }
     finally { setPairingId(null); }
   };

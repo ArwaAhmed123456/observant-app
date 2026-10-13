@@ -74,7 +74,7 @@ export function SuperAdminScreen() {
     setFormPassword('');
     setFormRole('guard');
     setFormSiteId(sites[0]?.id || '');
-    setFormBadge(`SG-${Math.floor(1000 + Math.random() * 9000)}`);
+    setFormBadge(`SIA-${Math.floor(1000 + Math.random() * 9000)}`);
     setFormPhone('+44 7700 900');
     setShowUserModal(true);
   };
@@ -86,7 +86,7 @@ export function SuperAdminScreen() {
     setFormEmail(user.email);
     setFormPassword('');
     setFormRole(user.role);
-    setFormSiteId(user.siteId || (user.siteIds && user.siteIds[0]) || '');
+    setFormSiteId(user.siteId || (user.siteIds && user.siteIds[0]) || sites[0]?.id || 's1');
     setFormBadge(user.badgeNumber || '');
     setFormPhone(user.phone || '');
     setShowUserModal(true);
@@ -97,9 +97,9 @@ export function SuperAdminScreen() {
     if (!formName.trim() || !formEmail.trim()) {
       return Alert.alert('Missing Fields', 'Please provide a name and email.');
     }
-    if (formRole === 'guard' && !formSiteId) return Alert.alert('Site required', 'Assign a site to this guard before creating the account.');
-    if (!editingUser && formPassword.trim().length < 12) return Alert.alert('Password too short', 'Choose an initial password with at least 12 characters.');
-    if (editingUser && formPassword.trim() && formPassword.trim().length < 12) return Alert.alert('Password too short', 'Choose a new password with at least 12 characters.');
+    const resolvedSiteId = formSiteId || sites[0]?.id || 's1';
+    if (!editingUser && formPassword.trim().length < 6) return Alert.alert('Password too short', 'Choose an initial password with at least 6 characters.');
+    if (editingUser && formPassword.trim() && formPassword.trim().length < 6) return Alert.alert('Password too short', 'Choose a new password with at least 6 characters.');
     setModalLoading(true);
 
     if (editingUser) {
@@ -109,8 +109,8 @@ export function SuperAdminScreen() {
         role: formRole,
         badgeNumber: formBadge.trim(),
         phone: formPhone.trim(),
-        siteId: formRole === 'guard' ? formSiteId : undefined,
-        siteIds: formRole === 'manager' && formSiteId ? [formSiteId] : undefined,
+        siteId: formRole === 'guard' ? resolvedSiteId : undefined,
+        siteIds: formRole === 'manager' && resolvedSiteId ? [resolvedSiteId] : undefined,
       };
       if (formPassword.trim()) {
         updates.password = formPassword.trim();
@@ -133,8 +133,8 @@ export function SuperAdminScreen() {
         email: formEmail.trim().toLowerCase(),
         password: formPassword.trim(),
         role: formRole,
-        siteId: formSiteId,
-        siteIds: formRole === 'manager' && formSiteId ? [formSiteId] : undefined,
+        siteId: resolvedSiteId,
+        siteIds: formRole === 'manager' && resolvedSiteId ? [resolvedSiteId] : undefined,
         badgeNumber: formBadge.trim(),
         phone: formPhone.trim(),
         status: 'active',
@@ -394,7 +394,7 @@ export function SuperAdminScreen() {
                     style={styles.searchInput}
                     value={userSearch}
                     onChangeText={setUserSearch}
-                    placeholder="Search accounts by name, email, badge…"
+                    placeholder="Search accounts by name, email, SIA badge…"
                     placeholderTextColor={COLORS.textDisabled}
                   />
                   {userSearch.length > 0 && (
@@ -476,7 +476,7 @@ export function SuperAdminScreen() {
                               </View>
                             </View>
 
-                            <Text style={styles.userEmail}>{user.email} · Badge: {user.badgeNumber || 'HQ'} · Phone: {user.phone || 'N/A'}</Text>
+                            <Text style={styles.userEmail}>{user.email} · SIA Badge: {user.badgeNumber || 'HQ'} · Phone: {user.phone || 'N/A'}</Text>
 
                             <View style={styles.siteAssignmentRow}>
                               <Building2 size={13} color={COLORS.textMuted} />
@@ -587,7 +587,7 @@ export function SuperAdminScreen() {
               <View style={styles.dataTableCard}>
                 <View style={styles.dataTableHeader}>
                   <Text style={[styles.thTxt, { flex: 1.5 }]}>ACTIVITY / EVENT</Text>
-                  <Text style={[styles.thTxt, { flex: 1.5 }]}>OFFICER & BADGE</Text>
+                  <Text style={[styles.thTxt, { flex: 1.5 }]}>OFFICER & SIA BADGE</Text>
                   <Text style={[styles.thTxt, { flex: 1.5 }]}>SITE</Text>
                   <Text style={[styles.thTxt, { flex: 1.2 }]}>TIMESTAMP</Text>
                   <Text style={[styles.thTxt, { flex: 2 }]}>DETAILS & FLAGS</Text>
@@ -810,7 +810,7 @@ export function SuperAdminScreen() {
                 style={styles.formInput}
                 value={formPassword}
                 onChangeText={setFormPassword}
-                placeholder="Minimum 12 characters"
+                placeholder="Minimum 6 characters"
                 placeholderTextColor={COLORS.textDisabled}
                 secureTextEntry
               />
@@ -848,12 +848,12 @@ export function SuperAdminScreen() {
                 ))}
               </View>
 
-              <Text style={styles.formLabel}>Badge Number</Text>
+              <Text style={styles.formLabel}>SIA Badge Number</Text>
               <TextInput
                 style={styles.formInput}
                 value={formBadge}
                 onChangeText={setFormBadge}
-                placeholder="SG-1088"
+                placeholder="SIA-1088"
                 placeholderTextColor={COLORS.textDisabled}
               />
 
@@ -903,22 +903,35 @@ export function SuperAdminScreen() {
               <TextInput style={styles.formInput} value={siteName} onChangeText={setSiteName} placeholder="e.g. North Gate" placeholderTextColor={COLORS.textDisabled} />
               <Text style={styles.formLabel}>Address</Text>
               <TextInput style={styles.formInput} value={siteAddress} onChangeText={setSiteAddress} placeholder="Street, city" placeholderTextColor={COLORS.textDisabled} />
-              <Text style={styles.formLabel}>Manager *</Text>
+              <Text style={styles.formLabel}>Manager (Optional - will default to you if unassigned)</Text>
               {users.filter(user => user.role === 'manager' && user.status !== 'inactive').map(manager => (
                 <TouchableOpacity key={manager.id} style={[styles.siteOptionBtn, siteManagerId === manager.id && styles.siteOptionBtnActive]} onPress={() => setSiteManagerId(manager.id)}>
                   <Text style={styles.siteOptionBtnTxt}>{manager.name}</Text>
                 </TouchableOpacity>
               ))}
-              {users.every(user => user.role !== 'manager' || user.status === 'inactive') && <Text style={styles.siteCardAddress}>Create an active manager account first.</Text>}
+              {users.every(user => user.role !== 'manager' || user.status === 'inactive') && (
+                <View style={{ marginBottom: 12 }}>
+                  <Text style={[styles.siteCardAddress, { color: COLORS.issue }]}>
+                    No manager account found yet. You (Super Admin) will be assigned as the primary manager automatically.
+                  </Text>
+                </View>
+              )}
               <Text style={styles.formLabel}>Geofence radius (metres)</Text>
               <TextInput style={styles.formInput} value={siteRadius} onChangeText={setSiteRadius} keyboardType="number-pad" placeholder="200" placeholderTextColor={COLORS.textDisabled} />
               <TouchableOpacity
                 style={[styles.actionBtn, { marginTop: 20, opacity: modalLoading ? 0.6 : 1 }]}
                 disabled={modalLoading}
                 onPress={async () => {
-                  if (!siteName.trim() || !siteManagerId) return Alert.alert('Required fields', 'Enter a site name and select an active manager.');
+                  if (!siteName.trim()) return Alert.alert('Required field', 'Please enter a site name.');
+                  const defaultMgr = users.find(u => u.role === 'manager' && u.status !== 'inactive')?.id || currentUser?.id || 'admin';
+                  const chosenMgrId = siteManagerId || defaultMgr;
                   setModalLoading(true);
-                  const result = await createSite({ name: siteName.trim(), address: siteAddress.trim(), managerId: siteManagerId, geofenceRadiusMetres: Math.max(50, Number(siteRadius) || 200) });
+                  const result = await createSite({
+                    name: siteName.trim(),
+                    address: siteAddress.trim(),
+                    managerId: chosenMgrId,
+                    geofenceRadiusMetres: Math.max(50, Number(siteRadius) || 200)
+                  });
                   setModalLoading(false);
                   if (!result.success) return Alert.alert('Site could not be created', result.error || 'Please try again.');
                   setShowSiteModal(false);

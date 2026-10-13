@@ -57,6 +57,9 @@ export function ManagerRosterScreen() {
   const [publishing, setPublishing]       = useState(false);
   const [guardPickerVisible, setGuardPickerVisible] = useState(false);
   const [timePickerOpen, setTimePickerOpen] = useState(null);
+  const [checkCallInterval, setCheckCallInterval] = useState(60);
+  const [recurringWeekly, setRecurringWeekly] = useState(true);
+  const [shiftInstructions, setShiftInstructions] = useState('');
 
   const guards  = users.filter(u => u.role === 'guard' && (currentUser.role === 'superadmin' || currentUser.role === 'admin' || currentUser.siteIds?.some(siteId => String(siteId) === String(u.siteId))));
   const weekKey = toWeekKey(weekStart);
@@ -69,8 +72,23 @@ export function ManagerRosterScreen() {
     const existing = getGuardRoster(guard.id, weekKey);
     setEditDays(existing?.days ? { ...DEFAULT_DAYS, ...existing.days } : { ...DEFAULT_DAYS });
     setEditCheckpointIds(existing?.checkpointIds || []);
+    setCheckCallInterval(existing?.checkCallInterval || 60);
+    setRecurringWeekly(existing?.recurringWeekly ?? true);
+    setShiftInstructions(existing?.shiftInstructions || '');
     setGuardPickerVisible(false);
     setEditModalVisible(true);
+  };
+
+  const applyPreset = (start, end) => {
+    setEditDays({
+      mon: { start, end },
+      tue: { start, end },
+      wed: { start, end },
+      thu: { start, end },
+      fri: { start, end },
+      sat: null,
+      sun: null,
+    });
   };
 
   const toggleDay = (key) => setEditDays(previous => ({
@@ -106,6 +124,9 @@ export function ManagerRosterScreen() {
         weekStartDate: weekKey,
         days: editDays,
         checkpointIds: editCheckpointIds,
+        checkCallInterval,
+        recurringWeekly,
+        shiftInstructions: shiftInstructions.trim(),
         publishedBy: currentUser.id,
         publishedAt: new Date().toISOString(),
       });
@@ -286,6 +307,61 @@ export function ManagerRosterScreen() {
                     </View>
                   );
                 })}
+                {/* Quick Presets */}
+                <View style={{ marginTop: 10, marginBottom: 8 }}>
+                  <Text style={[styles.fieldLabel, { marginBottom: 6 }]}>QUICK SHIFT PRESETS</Text>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity style={[styles.daySelectorPill, { flex: 1, paddingVertical: 6 }]} onPress={() => applyPreset('07:00', '19:00')}>
+                      <Text style={[styles.daySelectorText, { fontSize: 10 }]}>Day 12h (07-19)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.daySelectorPill, { flex: 1, paddingVertical: 6 }]} onPress={() => applyPreset('19:00', '07:00')}>
+                      <Text style={[styles.daySelectorText, { fontSize: 10 }]}>Night 12h (19-07)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.daySelectorPill, { flex: 1, paddingVertical: 6 }]} onPress={() => applyPreset('08:00', '16:00')}>
+                      <Text style={[styles.daySelectorText, { fontSize: 10 }]}>Standard 8h</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Check-Call SLA Interval */}
+                <View style={{ marginVertical: 8 }}>
+                  <Text style={[styles.fieldLabel, { marginBottom: 6 }]}>CHECK-CALL SLA INTERVAL</Text>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    {[30, 60, 90, 120].map(mins => (
+                      <TouchableOpacity
+                        key={mins}
+                        style={[styles.daySelectorPill, checkCallInterval === mins && styles.daySelectorPillActive, { flex: 1, paddingVertical: 6 }]}
+                        onPress={() => setCheckCallInterval(mins)}
+                      >
+                        <Text style={[styles.daySelectorText, checkCallInterval === mins && styles.daySelectorTextActive, { fontSize: 11 }]}>
+                          {mins} mins
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+
+                {/* Recurring weekly toggle */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginVertical: 8, paddingVertical: 4 }}>
+                  <View>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: P.t1 }}>Recurring Schedule</Text>
+                    <Text style={{ fontSize: 11, color: P.t3 }}>Auto-repeat this rota every week</Text>
+                  </View>
+                  <Switch value={recurringWeekly} onValueChange={setRecurringWeekly} />
+                </View>
+
+                {/* Shift Instructions / Post orders */}
+                <View style={{ marginVertical: 8 }}>
+                  <Text style={[styles.fieldLabel, { marginBottom: 4 }]}>SHIFT INSTRUCTIONS / POST ORDERS</Text>
+                  <TextInput
+                    style={[input, { color: P.t1, fontSize: 12, paddingVertical: 6, minHeight: 38 }]}
+                    placeholder="e.g. Inspect all emergency exits on hourly patrols"
+                    placeholderTextColor={P.t3}
+                    value={shiftInstructions}
+                    onChangeText={setShiftInstructions}
+                  />
+                </View>
+
                 <View style={styles.checkpointSection}>
                   <View style={styles.checkpointHeading}>
                     <Text style={styles.modalSub}>SITE CHECKPOINTS</Text>
@@ -361,7 +437,10 @@ export function ManagerRosterScreen() {
                 {guards.length ? guards.map(guard => (
                   <TouchableOpacity key={guard.id} style={styles.guardOption} onPress={() => openEditForGuard(guard)}>
                     <View style={styles.guardDropdownIcon}><UserRound size={17} color={P.blue} /></View>
-                    <View style={{ flex: 1 }}><Text style={styles.guardDropdownName}>{guard.name}</Text><Text style={styles.guardDropdownMeta}>{sites.find(site => site.id === guard.siteId)?.name || 'Assigned site'}</Text></View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.guardDropdownName}>{guard.name}</Text>
+                      <Text style={styles.guardDropdownMeta}>{sites.find(site => site.id === guard.siteId)?.name || 'Assigned site'} · SIA: {guard.badgeNumber || '—'}</Text>
+                    </View>
                     <ChevronRight size={17} color={P.t3} />
                   </TouchableOpacity>
                 )) : <Text style={styles.emptyHint}>No active guards are assigned to your sites.</Text>}

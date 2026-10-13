@@ -15,9 +15,19 @@ import { useApp, formatTime } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
 import { P, SP, BR, FONT, SH_TOKENS, TAB_H, statusToken } from '../../ds';
 import { enqueue } from '../../services/offlineQueue';
+import { getWhat3WordsSync } from '../../utils/what3words';
 
 const WINDOW_SECS  = 600; // 10 min
-const CATEGORIES   = ['Intruder / Suspicious Person', 'Equipment Fault', 'Medical Emergency', 'Fire / Safety Hazard', 'Perimeter Breach', 'Other'];
+const CATEGORIES   = [
+  'Trespassing / Intruder',
+  'Perimeter Breach',
+  'Equipment Fault',
+  'Fire / Hazard',
+  'Medical Emergency',
+  'Maintenance Issue',
+  'Suspicious Activity',
+  'Other Incident',
+];
 const RING_R       = 54;
 const RING_CIRC    = 2 * Math.PI * RING_R;
 
@@ -360,14 +370,25 @@ export function CheckCallScreen() {
                 </View>
                 <Text style={s.sheetSub}>Describe what you observed. Your manager will be alerted immediately.</Text>
 
-                {/* Category */}
+                {/* Category Chips */}
                 <Text style={s.fieldLabel}>ISSUE CATEGORY  *</Text>
-                <TouchableOpacity style={s.catBtn} onPress={() => setShowCatPicker(true)}>
-                  <Text style={category ? s.catBtnTxt : s.catBtnPlaceholder}>
-                    {category || 'Select a category…'}
-                  </Text>
-                  <Text style={s.catArrow}>▾</Text>
-                </TouchableOpacity>
+                <View style={s.catChipRow}>
+                  {CATEGORIES.map(cat => {
+                    const isSelected = category === cat;
+                    return (
+                      <TouchableOpacity
+                        key={cat}
+                        style={[s.catChip, isSelected && s.catChipActive]}
+                        onPress={() => setCategory(cat)}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={[s.catChipTxt, isSelected && s.catChipTxtActive]}>
+                          {isSelected ? '✓ ' : ''}{cat}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
 
                 {/* Note */}
                 <Text style={s.fieldLabel}>NOTES (optional)</Text>
@@ -414,30 +435,6 @@ export function CheckCallScreen() {
         </View>
       </Modal>
 
-      {/* ── Category Picker ── */}
-      <Modal visible={showCatPicker} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setShowCatPicker(false)}>
-        <View style={s.sheetOverlay}>
-          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowCatPicker(false)} />
-          <View style={s.sheetCard}>
-            <View style={s.sheetHandle} />
-            <Text style={s.sheetTitle}>Select Category</Text>
-            {CATEGORIES.map(cat => (
-              <TouchableOpacity
-                key={cat}
-                style={[s.catOption, cat === category && s.catOptionActive]}
-                onPress={() => { setCategory(cat); setShowCatPicker(false); }}
-              >
-                {cat === category && <View style={s.catOptionCheck}><Text style={{ color: P.blue, fontSize: 14 }}>✓</Text></View>}
-                <Text style={[s.catOptionTxt, cat === category && { color: P.blueLight }]}>{cat}</Text>
-              </TouchableOpacity>
-            ))}
-            <TouchableOpacity style={s.cancelBtn} onPress={() => setShowCatPicker(false)}>
-              <Text style={s.cancelTxt}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
       {/* ── Detail Modal (Tactical Centered HUD) ── */}
       <Modal visible={!!detailCC} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setDetailCC(null)}>
         <View style={s.modalBackdrop}>
@@ -467,6 +464,18 @@ export function CheckCallScreen() {
                       value={detailCC.response === 'yes' ? '✓ All okay on site' : detailCC.response === 'missed' ? '✗ Response window expired' : detailCC.response === 'no' ? '⚠️ Issue reported' : 'Awaiting officer response'}
                       valueColor={tok.color}
                     />
+                    {detailCC.category && (
+                      <DetailRow label="Issue Category" value={detailCC.category} valueColor={P.warn} />
+                    )}
+                    {detailCC.location && (
+                      <>
+                        <DetailRow label="GPS Coordinates" value={`${Number(detailCC.location.latitude).toFixed(4)}°, ${Number(detailCC.location.longitude).toFixed(4)}°`} />
+                        {detailCC.location.altitude != null && (
+                          <DetailRow label="GPS Altitude" value={`${Math.round(detailCC.location.altitude)}m`} />
+                        )}
+                        <DetailRow label="What3Words" value={detailCC.location.what3words || getWhat3WordsSync(detailCC.location.latitude, detailCC.location.longitude)} valueColor={P.blueLight} />
+                      </>
+                    )}
                     {detailCC.isManualLog && (
                       <DetailRow label="Submission Mode" value="Direct Officer Check-In" />
                     )}
@@ -577,6 +586,12 @@ const s = StyleSheet.create({
   sheetTitle:      { fontSize: 18, fontWeight: '800', color: P.t1, marginBottom: SP.px4 },
   sheetSub:        { fontSize: 13, color: P.t3, lineHeight: 20, marginBottom: SP.px16 },
   fieldLabel:      { fontSize: 9, fontWeight: '800', color: P.t4, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: SP.px8, marginTop: SP.px12 },
+
+  catChipRow:      { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: SP.px8 },
+  catChip:         { paddingHorizontal: 12, paddingVertical: 9, borderRadius: BR.sm, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#CBD5E1' },
+  catChipActive:   { backgroundColor: 'rgba(217, 119, 6, 0.15)', borderColor: P.warn },
+  catChipTxt:      { fontSize: 12, color: P.t2, fontWeight: '600' },
+  catChipTxtActive:{ color: P.warn, fontWeight: '800' },
 
   catBtn:          { backgroundColor: P.bg3, borderWidth: 1, borderColor: P.b2, borderRadius: BR.sm, padding: SP.px16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   catBtnTxt:       { color: P.t1, fontSize: 14 },

@@ -59,15 +59,21 @@ router.post('/users',
   [
     body('name').trim().notEmpty(),
     body('email').isEmail().normalizeEmail(),
-    body('password').isLength({ min: 12 }),
+    body('password').isLength({ min: 6 }),
     body('role').isIn(['guard','manager']),
     body('badgeNumber').optional().trim(),
-    body('siteId').optional().isMongoId(),
+    body('siteId').optional(),
   ],
   validate,
   asyncHandler(async (req, res) => {
-    const { name, email, password, role, badgeNumber, siteId, managedSiteIds, phone } = req.body;
-    if (role === 'guard' && !siteId) return res.status(400).json({ error: 'A guard account must be assigned to a site.' });
+    let { name, email, password, role, badgeNumber, siteId, managedSiteIds, phone } = req.body;
+    if (siteId === '' || siteId === undefined) siteId = null;
+    if (role === 'guard' && !siteId) {
+      // If no site provided, auto-assign to first active site in organisation if available
+      const firstSite = await Site.findOne({ organisationId: req.user.organisationId, active: true });
+      if (firstSite) siteId = firstSite._id;
+      else return res.status(400).json({ error: 'A guard account must be assigned to a site. Please create a site first.' });
+    }
     if (siteId) {
       const site = await Site.findOne({ _id: siteId, organisationId: req.user.organisationId, active: true });
       if (!site) return res.status(400).json({ error: 'The selected site is not active in this organisation.' });
@@ -143,19 +149,23 @@ router.patch('/users/:id',
 );
 
 router.delete('/users/:id',
-  authenticate, requireRole('manager','admin'),
+  authenticate,
   asyncHandler(async (req, res) => {
+    const isSelf = String(req.user._id) === String(req.params.id);
+    if (!isSelf && !['manager', 'admin'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'You do not have permission to delete this account.' });
+    }
     const user = await User.findOne({ _id: req.params.id, organisationId: req.user.organisationId });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (req.user.role === 'manager' && user.role !== 'admin') {
+    if (!isSelf && req.user.role === 'manager' && user.role !== 'admin') {
       const targetSiteIds = [user.siteId, ...(user.managedSiteIds || [])].filter(Boolean);
       if (!targetSiteIds.some(id => userCanAccessSite(req.user, id))) return res.status(403).json({ error: 'Account is outside your assigned sites.' });
     }
-    if (user.role === 'admin' && req.user.role !== 'admin') return res.status(403).json({ error: 'Managers cannot deactivate administrator accounts.' });
+    if (!isSelf && user.role === 'admin' && req.user.role !== 'admin') return res.status(403).json({ error: 'Managers cannot deactivate administrator accounts.' });
     user.active = false;
     await user.save();
-    await audit({ req, action: 'account_deactivated', targetModel: 'User', targetId: user._id, targetName: user.name });
-    res.json({ message: 'User deactivated' });
+    await audit({ req, action: isSelf ? 'account_self_deleted' : 'account_deactivated', targetModel: 'User', targetId: user._id, targetName: user.name });
+    res.json({ message: 'User account deactivated' });
   })
 );
 
@@ -204,21 +214,33 @@ router.post('/sites',
   [
     body('name').trim().notEmpty(),
     body('address').optional().trim(),
-    body('managerId').optional().isMongoId(),
+    body('managerId').optional(),
   ],
   validate,
   asyncHandler(async (req, res) => {
-    const { name, address, postcode, managerId: requestedManagerId, location, geofenceRadiusMetres, notes } = req.body;
-    const managerId = requestedManagerId || (req.user.role === 'manager' ? req.user._id : null);
-    if (!managerId) return res.status(400).json({ error: 'Select a manager for this site.' });
-    if (req.user.role === 'manager' && String(managerId) !== String(req.user._id)) return res.status(403).json({ error: 'You may only create sites assigned to yourself.' });
-    const manager = await User.findOne({ _id: managerId, organisationId: req.user.organisationId, role: 'manager', active: true });
-    if (!manager) return res.status(400).json({ error: 'The selected site manager is not an active manager in this organisation.' });
+    let { name, address, postcode, managerId: requestedManagerId, latitude, longitude, location, geofenceRadiusMetres, notes } = req.body;
+    let managerId = requestedManagerId || (req.user.role === 'manager' ? req.user._id : null);
+    if (!managerId) {
+      const defaultMgr = await User.findOne({ organisationId: req.user.organisationId, role: { $in: ['manager', 'admin'] }, active: true });
+      managerId = defaultMgr ? defaultMgr._id : req.user._id;
+    }
+    if (req.user.role === 'manager' && String(managerId) !== String(req.user._id)) {
+      return res.status(403).json({ error: 'You may only create sites assigned to yourself.' });
+    }
+
+    let siteLocation = location;
+    if (!siteLocation && latitude != null && longitude != null) {
+      siteLocation = {
+        type: 'Point',
+        coordinates: [Number(longitude), Number(latitude)],
+      };
+    }
+
     const site = await Site.create({
       organisationId: req.user.organisationId,
       managerId,
       name, address: address || null, postcode: postcode || null,
-      location: location || undefined,
+      location: siteLocation || undefined,
       geofenceRadiusMetres: geofenceRadiusMetres || 200,
       notes: notes || null,
     });
