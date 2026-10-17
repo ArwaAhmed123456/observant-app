@@ -29,7 +29,7 @@ export const SecurityProvider = ({ children }) => {
     }
   };
 
-  const [users] = useState(() => getInitial('users', INITIAL_USERS));
+  const [users, setUsers] = useState(() => getInitial('users', INITIAL_USERS));
   const [sites, setSites] = useState(() => getInitial('sites', INITIAL_SITES));
   const [rosters, setRosters] = useState(() => getInitial('rosters', INITIAL_ROSTERS));
   const [templates, setTemplates] = useState(() => getInitial('templates', INITIAL_TEMPLATES));
@@ -208,8 +208,15 @@ export const SecurityProvider = ({ children }) => {
   };
 
   // 2. BOOK OFF
-  const bookOff = () => {
-    if (!activeShiftSession) return;
+  const bookOff = (options = {}) => {
+    if (!activeShiftSession) return { success: false, error: 'No active shift found.' };
+
+    if (activeShiftSession.scheduledEndAt && !options.isEarlyOverride) {
+      if (new Date() < new Date(activeShiftSession.scheduledEndAt)) {
+        Alert.alert('Shift Incomplete', 'You cannot book off before your time.');
+        return { success: false, error: 'You cannot book off before your time.' };
+      }
+    }
 
     const siteObj = sites.find(s => s.id === activeShiftSession.siteId);
     const updated = {
@@ -238,6 +245,8 @@ export const SecurityProvider = ({ children }) => {
       message: `You booked off from ${siteObj?.name}. Total session logged.`,
       type: 'shift'
     });
+
+    return { success: true };
   };
 
   // 3. TRIGGER CHECK CALL (Hourly or Random)
@@ -690,6 +699,48 @@ export const SecurityProvider = ({ children }) => {
     });
   };
 
+  // 16. USER & SITE MANAGEMENT (SUPER ADMIN / MANAGER)
+  const updateUser = (userId, updates) => {
+    setUsers(prev => prev.map(u => (u.id === userId || u._id === userId) ? { ...u, ...updates } : u));
+    if (currentUser?.id === userId || currentUser?._id === userId) {
+      setCurrentUser(prev => ({ ...prev, ...updates }));
+    }
+    return { success: true };
+  };
+
+  const deleteUser = (userId) => {
+    setUsers(prev => prev.map(u => (u.id === userId || u._id === userId) ? { ...u, status: 'inactive', active: false } : u));
+    return { success: true };
+  };
+
+  const createSite = (siteData) => {
+    const newSite = {
+      id: `site-${Date.now()}`,
+      name: siteData.name,
+      address: siteData.address || '',
+      postcode: siteData.postcode || '',
+      managerId: siteData.managerId || currentUser?.id,
+      what3words: siteData.what3words || '',
+      latitude: siteData.latitude || 51.505,
+      longitude: siteData.longitude || -0.019,
+      geofenceRadiusMeters: siteData.geofenceRadiusMetres || 200,
+      active: true,
+      ...siteData
+    };
+    setSites(prev => [...prev, newSite]);
+    return { success: true, site: newSite };
+  };
+
+  const updateSite = (siteId, updates) => {
+    setSites(prev => prev.map(s => (s.id === siteId || s._id === siteId) ? { ...s, ...updates } : s));
+    return { success: true };
+  };
+
+  const deleteSite = (siteId) => {
+    setSites(prev => prev.map(s => (s.id === siteId || s._id === siteId) ? { ...s, active: false } : s));
+    return { success: true };
+  };
+
   return (
     <SecurityContext.Provider
       value={{
@@ -735,7 +786,13 @@ export const SecurityProvider = ({ children }) => {
         saveRosterTemplate,
         applyRosterTemplate,
         updateSiteCheckpoints,
-        addNotification
+        addNotification,
+        updateUser,
+        deleteUser,
+        createSite,
+        updateSite,
+        editSite: updateSite,
+        deleteSite,
       }}
     >
       {children}

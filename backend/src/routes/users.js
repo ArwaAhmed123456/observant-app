@@ -117,28 +117,60 @@ router.get('/users/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 router.patch('/users/:id',
-  authenticate, requireRole('manager','admin'),
-  [body('role').optional().isIn(['guard','manager']), body('password').optional().isLength({ min: 12 })],
+  authenticate, requireRole('manager','admin','superadmin'),
+  [
+    body('role').optional().isIn(['guard','manager','admin','superadmin']),
+    body('password').optional().isLength({ min: 6 }),
+    body('email').optional().isEmail().normalizeEmail(),
+  ],
   validate,
   asyncHandler(async (req, res) => {
     const user = await User.findOne({ _id: req.params.id, organisationId: req.user.organisationId }).select('+password +refreshTokenHash');
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (req.user.role === 'manager' && user.role !== 'admin') {
+    
+    // Role & site access restrictions for managers
+    if (req.user.role === 'manager') {
+      if (['admin', 'superadmin'].includes(user.role)) {
+        return res.status(403).json({ error: 'Managers cannot edit administrator accounts.' });
+      }
       const targetSiteIds = [user.siteId, ...(user.managedSiteIds || [])].filter(Boolean).map(String);
       if (!targetSiteIds.some(id => req.user.managedSiteIds.map(String).includes(id))) {
         return res.status(403).json({ error: 'You cannot manage this account outside your assigned sites.' });
       }
+      if (req.body.siteId && !userCanAccessSite(req.user, req.body.siteId)) {
+        return res.status(403).json({ error: 'You cannot assign users outside your sites.' });
+      }
+      if (req.body.managedSiteIds?.some(id => !userCanAccessSite(req.user, id))) {
+        return res.status(403).json({ error: 'You cannot assign managers outside your sites.' });
+      }
     }
-    if (user.role === 'admin' && req.user.role !== 'admin') return res.status(403).json({ error: 'Managers cannot edit administrator accounts.' });
-    if (req.user.role === 'manager' && req.body.siteId && !userCanAccessSite(req.user, req.body.siteId)) return res.status(403).json({ error: 'You cannot assign users outside your sites.' });
-    if (req.user.role === 'manager' && req.body.managedSiteIds?.some(id => !userCanAccessSite(req.user, id))) return res.status(403).json({ error: 'You cannot assign managers outside your sites.' });
-    const allowed = ['name','phone','badgeNumber','siteId','managedSiteIds','active','avatarUrl','role'];
+    
+    if (user.role === 'superadmin' && req.user.role !== 'superadmin') {
+      return res.status(403).json({ error: 'Only Super Administrators can edit Super Administrator accounts.' });
+    }
+
+    if (req.body.email && req.body.email !== user.email) {
+      const existing = await User.findOne({
+        organisationId: req.user.organisationId,
+        email: req.body.email,
+        _id: { $ne: user._id }
+      });
+      if (existing) return res.status(400).json({ error: 'Email already registered to another user.' });
+      user.email = req.body.email;
+    }
+
+    const allowed = ['name','email','phone','badgeNumber','siteId','managedSiteIds','active','avatarUrl','role'];
     allowed.forEach(key => { if (req.body[key] !== undefined) user[key] = req.body[key]; });
+    
     if (req.body.password) {
       user.password = req.body.password;
       user.refreshTokenHash = null;
     }
-    if (user.role === 'guard' && !user.siteId) return res.status(400).json({ error: 'A guard account must be assigned to a site.' });
+    
+    if (user.role === 'guard' && !user.siteId && req.body.siteId === null) {
+      return res.status(400).json({ error: 'A guard account must be assigned to a site.' });
+    }
+    
     await user.save();
     await audit({ req, action: req.body.password ? 'password_changed' : 'account_edited', targetModel: 'User', targetId: user._id, targetName: user.name });
     const safe = user.toObject();
@@ -210,18 +242,27 @@ router.get('/sites', authenticate, asyncHandler(async (req, res) => {
 }));
 
 router.post('/sites',
-  authenticate, requireRole('manager','admin'),
+  authenticate, requireRole('manager','admin','superadmin'),
   [
     body('name').trim().notEmpty(),
     body('address').optional().trim(),
     body('managerId').optional(),
+    body('what3words').optional().trim(),
+    body('latitude').optional().isFloat({ min: -90, max: 90 }),
+    body('longitude').optional().isFloat({ min: -180, max: 180 }),
+    body('altitude').optional().isNumeric(),
   ],
   validate,
   asyncHandler(async (req, res) => {
-    let { name, address, postcode, managerId: requestedManagerId, latitude, longitude, location, geofenceRadiusMetres, notes } = req.body;
+    let {
+      name, address, postcode, managerId: requestedManagerId,
+      latitude, longitude, altitude, what3words, location,
+      geofenceRadiusMetres, notes
+    } = req.body;
+
     let managerId = requestedManagerId || (req.user.role === 'manager' ? req.user._id : null);
     if (!managerId) {
-      const defaultMgr = await User.findOne({ organisationId: req.user.organisationId, role: { $in: ['manager', 'admin'] }, active: true });
+      const defaultMgr = await User.findOne({ organisationId: req.user.organisationId, role: { $in: ['manager', 'admin', 'superadmin'] }, active: true });
       managerId = defaultMgr ? defaultMgr._id : req.user._id;
     }
     if (req.user.role === 'manager' && String(managerId) !== String(req.user._id)) {
@@ -229,17 +270,27 @@ router.post('/sites',
     }
 
     let siteLocation = location;
-    if (!siteLocation && latitude != null && longitude != null) {
+    const latNum = latitude != null ? Number(latitude) : null;
+    const lngNum = longitude != null ? Number(longitude) : null;
+    const altNum = altitude != null ? Number(altitude) : null;
+
+    if (!siteLocation && latNum != null && lngNum != null) {
       siteLocation = {
         type: 'Point',
-        coordinates: [Number(longitude), Number(latitude)],
+        coordinates: [lngNum, latNum],
       };
     }
 
     const site = await Site.create({
       organisationId: req.user.organisationId,
       managerId,
-      name, address: address || null, postcode: postcode || null,
+      name,
+      address: address || null,
+      postcode: postcode || null,
+      what3words: what3words ? String(what3words).trim() : null,
+      latitude: latNum,
+      longitude: lngNum,
+      altitude: altNum,
       location: siteLocation || undefined,
       geofenceRadiusMetres: geofenceRadiusMetres || 200,
       notes: notes || null,
@@ -258,21 +309,53 @@ router.get('/sites/:id', authenticate, asyncHandler(async (req, res) => {
 }));
 
 router.patch('/sites/:id',
-  authenticate, requireRole('manager','admin'),
+  authenticate, requireRole('manager','admin','superadmin'),
+  [
+    body('latitude').optional().isFloat({ min: -90, max: 90 }),
+    body('longitude').optional().isFloat({ min: -180, max: 180 }),
+    body('altitude').optional().isNumeric(),
+  ],
+  validate,
   asyncHandler(async (req, res) => {
-    const allowed = ['name','address','postcode','location','geofenceRadiusMetres','notes','active','managerId'];
+    const allowed = [
+      'name','address','postcode','what3words','latitude','longitude','altitude',
+      'location','geofenceRadiusMetres','notes','active','managerId'
+    ];
     const updates = {};
     allowed.forEach(k => { if (req.body[k] !== undefined) updates[k] = req.body[k]; });
+
     if (req.user.role === 'manager') {
-      if (updates.managerId && String(updates.managerId) !== String(req.user._id)) return res.status(403).json({ error: 'You may only assign sites to yourself.' });
-      if (!userCanAccessSite(req.user, req.params.id)) return res.status(403).json({ error: 'Site is outside your assigned area.' });
+      if (updates.managerId && String(updates.managerId) !== String(req.user._id)) {
+        return res.status(403).json({ error: 'You may only assign sites to yourself.' });
+      }
+      if (!userCanAccessSite(req.user, req.params.id)) {
+        return res.status(403).json({ error: 'Site is outside your assigned area.' });
+      }
     }
     if (updates.managerId) {
-      const assignedManager = await User.findOne({ _id: updates.managerId, organisationId: req.user.organisationId, role: 'manager', active: true });
+      const assignedManager = await User.findOne({
+        _id: updates.managerId,
+        organisationId: req.user.organisationId,
+        role: { $in: ['manager', 'admin', 'superadmin'] },
+        active: true
+      });
       if (!assignedManager) return res.status(400).json({ error: 'The selected site manager is not active in this organisation.' });
     }
+
+    if (updates.latitude != null || updates.longitude != null) {
+      const lat = updates.latitude != null ? Number(updates.latitude) : undefined;
+      const lng = updates.longitude != null ? Number(updates.longitude) : undefined;
+      if (lat !== undefined && lng !== undefined) {
+        updates.location = {
+          type: 'Point',
+          coordinates: [lng, lat],
+        };
+      }
+    }
+
     const previous = await Site.findOne({ _id: req.params.id, organisationId: req.user.organisationId });
     if (!previous) return res.status(404).json({ error: 'Site not found' });
+
     const site = await Site.findOneAndUpdate(
       { _id: req.params.id, organisationId: req.user.organisationId },
       updates, { new: true }
@@ -281,6 +364,7 @@ router.patch('/sites/:id',
       await User.findByIdAndUpdate(previous.managerId, { $pull: { managedSiteIds: site._id } });
       await User.findByIdAndUpdate(updates.managerId, { $addToSet: { managedSiteIds: site._id } });
     }
+    await audit({ req, action: 'site_updated', targetModel: 'Site', targetId: site._id, targetName: site.name });
     res.json({ site });
   })
 );

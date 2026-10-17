@@ -32,9 +32,14 @@ const authenticate = async (req, res, next) => {
 
 // ── Role guard ────────────────────────────────────────────────────────────────
 const requireRole = (...roles) => (req, res, next) => {
-  if (!roles.includes(req.user.role))
-    return res.status(403).json({ error: `Requires role: ${roles.join(' or ')}` });
-  next();
+  if (!req.user) {
+    return res.status(401).json({ error: 'Unauthenticated' });
+  }
+  // superadmin has full access to all roles
+  if (req.user.role === 'superadmin' || roles.includes(req.user.role)) {
+    return next();
+  }
+  return res.status(403).json({ error: `Requires role: ${roles.join(' or ')}` });
 };
 
 // ── Tenant isolation helper ───────────────────────────────────────────────────
@@ -49,7 +54,7 @@ const requireSameTenant = (orgId) => {
 const requireTenantParam = (req, res, next) => {
   const paramOrgId = req.params.orgId || req.body.organisationId;
   if (
-    req.user.role !== 'admin' &&
+    !['admin', 'superadmin'].includes(req.user.role) &&
     paramOrgId &&
     paramOrgId.toString() !== req.user.organisationId.toString()
   ) {

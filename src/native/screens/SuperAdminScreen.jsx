@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Image,
-  TextInput, Modal, Alert, Dimensions, Platform
+  TextInput, Modal, Alert, Dimensions, Platform, Linking
 } from 'react-native';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
@@ -12,8 +12,12 @@ import {
   Users, Shield, AlertTriangle, FileText, CheckCircle,
   XCircle, Plus, Edit2, Trash2, Power, Search, Filter,
   Download, ChevronRight, LogOut, MapPin, Clock, Zap,
-  Activity, Building2, Key, RefreshCw, X
+  Activity, Building2, Key, RefreshCw, X, ExternalLink, Globe
 } from 'lucide-react-native';
+import {
+  isValidWhat3Words, isValidCoordinates, getCoordinatesFromWhat3Words,
+  getWhat3WordsSync, getMapUrl
+} from '../../utils/what3words';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const IS_DESKTOP_VIEW = SCREEN_WIDTH > 768 || Platform.OS === 'web';
@@ -28,7 +32,7 @@ const SECTIONS = [
 export function SuperAdminScreen() {
   const insets = useSafeAreaInsets();
   const {
-    currentUser, users, sites, logout, createSite,
+    currentUser, users, sites, logout, createSite, updateSite, deleteSite,
     auditLogs, createUser, updateUser, toggleUserStatus, deleteUser,
     shiftSessions, checkCalls, patrolSessions, alerts
   } = useApp();
@@ -51,11 +55,18 @@ export function SuperAdminScreen() {
   const [formBadge, setFormBadge]         = useState('');
   const [formPhone, setFormPhone]         = useState('');
   const [modalLoading, setModalLoading]   = useState(false);
+  // Site Modal (Create / Edit)
   const [showSiteModal, setShowSiteModal] = useState(false);
-  const [siteName, setSiteName] = useState('');
-  const [siteAddress, setSiteAddress] = useState('');
+  const [editingSite, setEditingSite]     = useState(null);
+  const [siteName, setSiteName]           = useState('');
+  const [siteAddress, setSiteAddress]     = useState('');
+  const [sitePostcode, setSitePostcode]   = useState('');
   const [siteManagerId, setSiteManagerId] = useState('');
-  const [siteRadius, setSiteRadius] = useState('200');
+  const [siteW3w, setSiteW3w]             = useState('');
+  const [siteLat, setSiteLat]             = useState('');
+  const [siteLng, setSiteLng]             = useState('');
+  const [siteAltitude, setSiteAltitude]   = useState('');
+  const [siteRadius, setSiteRadius]       = useState('200');
 
   // System-wide Data Filters
   const [dateFilter, setDateFilter]     = useState('all'); // all | today | this_week
@@ -184,6 +195,126 @@ export function SuperAdminScreen() {
         },
       ]
     );
+  };
+
+  // ── Site Management Handlers ──────────────────────────────────────────────
+  const handleOpenCreateSite = () => {
+    setEditingSite(null);
+    setSiteName('');
+    setSiteAddress('');
+    setSitePostcode('');
+    setSiteW3w('');
+    setSiteLat('51.5050');
+    setSiteLng('-0.0195');
+    setSiteAltitude('15');
+    setSiteRadius('200');
+    const firstMgr = users.find(u => u.role === 'manager' && u.status !== 'inactive')?.id || currentUser?.id || '';
+    setSiteManagerId(firstMgr);
+    setShowSiteModal(true);
+  };
+
+  const handleOpenEditSite = (site) => {
+    setEditingSite(site);
+    setSiteName(site.name || '');
+    setSiteAddress(site.address || '');
+    setSitePostcode(site.postcode || '');
+    const w3wVal = site.what3words || (site.latitude && site.longitude ? getWhat3WordsSync(site.latitude, site.longitude) : '');
+    setSiteW3w(w3wVal || '');
+    setSiteLat(site.latitude != null ? String(site.latitude) : '51.5050');
+    setSiteLng(site.longitude != null ? String(site.longitude) : '-0.0195');
+    setSiteAltitude(site.altitude != null ? String(site.altitude) : '');
+    setSiteRadius(String(site.geofenceRadiusMeters || site.geofenceRadiusMetres || 200));
+    setSiteManagerId(site.managerId || '');
+    setShowSiteModal(true);
+  };
+
+  const handleDeleteSite = (site) => {
+    Alert.alert(
+      'Deactivate Site?',
+      `Are you sure you want to deactivate ${site.name}? Active shifts and rosters at this location will be paused.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Deactivate',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await deleteSite(site.id || site._id);
+            if (res?.success) {
+              Alert.alert('Site Deactivated', `${site.name} has been marked inactive.`);
+            } else {
+              Alert.alert('Error', res?.error || 'Failed to deactivate site.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleSaveSite = async () => {
+    if (!siteName.trim()) {
+      return Alert.alert('Required field', 'Please enter a site name.');
+    }
+    let latNum = parseFloat(siteLat);
+    let lngNum = parseFloat(siteLng);
+    const altNum = parseFloat(siteAltitude);
+
+    // If What3Words is supplied and valid, attempt conversion if coords missing
+    if (siteW3w.trim()) {
+      if (!isValidWhat3Words(siteW3w.trim())) {
+        return Alert.alert('Invalid What3Words', 'Please enter a valid format such as word.word.word or ///word.word.word.');
+      }
+      if (isNaN(latNum) || isNaN(lngNum)) {
+        const coords = await getCoordinatesFromWhat3Words(siteW3w.trim());
+        if (coords) {
+          latNum = coords.latitude;
+          lngNum = coords.longitude;
+        }
+      }
+    }
+
+    if (!isNaN(latNum) && (latNum < -90 || latNum > 90)) {
+      return Alert.alert('Invalid Latitude', 'Latitude must be between -90 and 90.');
+    }
+    if (!isNaN(lngNum) && (lngNum < -180 || lngNum > 180)) {
+      return Alert.alert('Invalid Longitude', 'Longitude must be between -180 and 180.');
+    }
+
+    const defaultMgr = users.find(u => u.role === 'manager' && u.status !== 'inactive')?.id || currentUser?.id || 'admin';
+    const chosenMgrId = siteManagerId || defaultMgr;
+    const finalW3w = siteW3w.trim() || (!isNaN(latNum) && !isNaN(lngNum) ? getWhat3WordsSync(latNum, lngNum) : null);
+
+    setModalLoading(true);
+    const siteData = {
+      name: siteName.trim(),
+      address: siteAddress.trim() || null,
+      postcode: sitePostcode.trim() || null,
+      managerId: chosenMgrId,
+      what3words: finalW3w,
+      latitude: !isNaN(latNum) ? latNum : undefined,
+      longitude: !isNaN(lngNum) ? lngNum : undefined,
+      altitude: !isNaN(altNum) ? altNum : undefined,
+      geofenceRadiusMetres: Math.max(50, Number(siteRadius) || 200),
+    };
+
+    if (editingSite) {
+      const res = await updateSite(editingSite.id || editingSite._id, siteData);
+      setModalLoading(false);
+      if (res?.success) {
+        setShowSiteModal(false);
+        Alert.alert('Site Updated', `${siteName} details have been updated successfully.`);
+      } else {
+        Alert.alert('Update Failed', res?.error || 'Could not update site.');
+      }
+    } else {
+      const res = await createSite(siteData);
+      setModalLoading(false);
+      if (res?.success) {
+        setShowSiteModal(false);
+        Alert.alert('Site Created', `${siteName} is registered and active for guard rosters.`);
+      } else {
+        Alert.alert('Creation Failed', res?.error || 'Could not create site.');
+      }
+    }
   };
 
   // ── Filtered Users ────────────────────────────────────────────────────────
@@ -715,51 +846,102 @@ export function SuperAdminScreen() {
           ══════════════════════════════════════════════════════════════════ */}
           {activeSection === 'sites' && (
             <>
-              <TouchableOpacity
-                style={[styles.actionBtn, { alignSelf: 'flex-start', marginBottom: 16 }]}
-                onPress={() => {
-                  setSiteName(''); setSiteAddress(''); setSiteRadius('200');
-                  setSiteManagerId(users.find(user => user.role === 'manager' && user.status !== 'inactive')?.id || '');
-                  setShowSiteModal(true);
-                }}
-              >
-                <Plus color={COLORS.white} size={16} />
-                <Text style={styles.actionBtnTxt}>Add Site</Text>
-              </TouchableOpacity>
-              <View style={styles.sitesGrid}>
-              {sites.map(site => {
-                const manager = users.find(u => u.id === site.managerId);
-                const assignedGuards = users.filter(u => u.siteId === site.id);
-                return (
-                  <View key={site.id} style={styles.siteCard}>
-                    <View style={styles.siteHeader}>
-                      <Building2 color={COLORS.brand} size={22} />
-                      <Text style={styles.siteCardTitle}>{site.name}</Text>
-                    </View>
-                    <Text style={styles.siteCardAddress}>{site.address}</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <Text style={{ color: COLORS.textMuted, fontSize: 13 }}>
+                  Total active sites: {sites.length}
+                </Text>
+                <TouchableOpacity
+                  style={[styles.actionBtn, { backgroundColor: COLORS.brand }]}
+                  onPress={handleOpenCreateSite}
+                >
+                  <Plus color={COLORS.white} size={16} />
+                  <Text style={[styles.actionBtnTxt, { color: COLORS.white }]}>Add Operational Site</Text>
+                </TouchableOpacity>
+              </View>
 
-                    <View style={styles.siteInfoBlock}>
-                      <Text style={styles.siteInfoRow}>
-                        <Text style={styles.siteInfoLabel}>Manager: </Text>
-                        {manager?.name || 'Elena Rostova'}
+              <View style={styles.sitesGrid}>
+                {sites.map(site => {
+                  const manager = users.find(u => u.id === site.managerId);
+                  const assignedGuards = users.filter(u => u.siteId === site.id || (u.siteIds && u.siteIds.includes(site.id)));
+                  const mapUrl = getMapUrl(site.latitude, site.longitude, site.what3words);
+                  const displayW3w = site.what3words || (site.latitude && site.longitude ? getWhat3WordsSync(site.latitude, site.longitude) : null);
+
+                  return (
+                    <View key={site.id || site._id} style={styles.siteCard}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, marginRight: 8 }}>
+                          <Building2 color={COLORS.brand} size={22} />
+                          <Text style={styles.siteCardTitle} numberOfLines={1}>{site.name}</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          {mapUrl && (
+                            <TouchableOpacity
+                              style={[styles.actionBtn, { paddingHorizontal: 8 }]}
+                              onPress={() => Linking.openURL(mapUrl)}
+                              accessibilityLabel="Open site on map"
+                            >
+                              <ExternalLink size={14} color={COLORS.info} />
+                            </TouchableOpacity>
+                          )}
+                          <TouchableOpacity
+                            style={[styles.actionBtn, { paddingHorizontal: 8 }]}
+                            onPress={() => handleOpenEditSite(site)}
+                            accessibilityLabel="Edit site"
+                          >
+                            <Edit2 size={14} color={COLORS.textPrimary} />
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.actionBtn, { paddingHorizontal: 8 }]}
+                            onPress={() => handleDeleteSite(site)}
+                            accessibilityLabel="Deactivate site"
+                          >
+                            <Trash2 size={14} color={COLORS.missed} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      <Text style={styles.siteCardAddress}>
+                        {site.address || 'No address specified'}{site.postcode ? ` • ${site.postcode}` : ''}
                       </Text>
-                      <Text style={styles.siteInfoRow}>
-                        <Text style={styles.siteInfoLabel}>Assigned Guards: </Text>
-                        {assignedGuards.length} Officers
-                      </Text>
-                      <Text style={styles.siteInfoRow}>
-                        <Text style={styles.siteInfoLabel}>Geofence Radius: </Text>
-                        {site.geofenceRadiusMeters || 500} metres (Verified GPS Enforced)
-                      </Text>
-                      <Text style={styles.siteInfoRow}>
-                        <Text style={styles.siteInfoLabel}>GPS Coordinates: </Text>
-                        {site.latitude || '51.5050'}°, {site.longitude || '-0.0195'}°
-                      </Text>
+
+                      {displayW3w && (
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12, backgroundColor: 'rgba(225,29,72,0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, alignSelf: 'flex-start' }}>
+                          <Globe size={13} color="#E11D48" />
+                          <Text style={{ color: '#E11D48', fontSize: 11, fontWeight: '800' }}>
+                            {displayW3w.startsWith('///') ? displayW3w : `///${displayW3w}`}
+                          </Text>
+                        </View>
+                      )}
+
+                      <View style={styles.siteInfoBlock}>
+                        <Text style={styles.siteInfoRow}>
+                          <Text style={styles.siteInfoLabel}>Manager: </Text>
+                          {manager?.name || 'Assigned to Super Admin'}
+                        </Text>
+                        <Text style={styles.siteInfoRow}>
+                          <Text style={styles.siteInfoLabel}>Assigned Guards: </Text>
+                          {assignedGuards.length} Officers
+                        </Text>
+                        <Text style={styles.siteInfoRow}>
+                          <Text style={styles.siteInfoLabel}>Geofence Radius: </Text>
+                          {site.geofenceRadiusMeters || site.geofenceRadiusMetres || 200} metres (GPS Verified)
+                        </Text>
+                        <Text style={styles.siteInfoRow}>
+                          <Text style={styles.siteInfoLabel}>GPS Coordinates: </Text>
+                          {site.latitude != null ? Number(site.latitude).toFixed(4) : '51.5050'}°, {site.longitude != null ? Number(site.longitude).toFixed(4) : '-0.0195'}°
+                          {site.altitude != null ? ` • Alt: ${site.altitude}m` : ''}
+                        </Text>
+                      </View>
                     </View>
+                  );
+                })}
+                {sites.length === 0 && (
+                  <View style={[styles.emptyCard, { width: '100%' }]}>
+                    <Building2 size={36} color={COLORS.textDisabled} />
+                    <Text style={styles.emptyCardTitle}>No Sites Configured</Text>
+                    <Text style={styles.emptyCardSub}>Create operational sites with GPS coordinates or What3Words to enable guard rosters and mobile geofencing.</Text>
                   </View>
-                );
-              })}
-              {sites.length === 0 && <Text style={styles.siteCardAddress}>No sites configured. Add a site, then assign managers and guards.</Text>}
+                )}
               </View>
             </>
           )}
@@ -895,52 +1077,144 @@ export function SuperAdminScreen() {
         <View style={styles.modalBackdrop}>
           <View style={styles.modalBox}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitleText}>Create Operational Site</Text>
-              <TouchableOpacity onPress={() => setShowSiteModal(false)}><X color={COLORS.textMuted} size={20} /></TouchableOpacity>
+              <Text style={styles.modalTitleText}>
+                {editingSite ? 'Edit Operational Site' : 'Create Operational Site'}
+              </Text>
+              <TouchableOpacity onPress={() => setShowSiteModal(false)}>
+                <X color={COLORS.textMuted} size={20} />
+              </TouchableOpacity>
             </View>
-            <ScrollView keyboardShouldPersistTaps="handled">
-              <Text style={styles.formLabel}>Site name *</Text>
-              <TextInput style={styles.formInput} value={siteName} onChangeText={setSiteName} placeholder="e.g. North Gate" placeholderTextColor={COLORS.textDisabled} />
+            <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 520 }} keyboardShouldPersistTaps="handled">
+              <Text style={styles.formLabel}>Site Name *</Text>
+              <TextInput
+                style={styles.formInput}
+                value={siteName}
+                onChangeText={setSiteName}
+                placeholder="e.g. Canary Wharf North Gate"
+                placeholderTextColor={COLORS.textDisabled}
+              />
+
               <Text style={styles.formLabel}>Address</Text>
-              <TextInput style={styles.formInput} value={siteAddress} onChangeText={setSiteAddress} placeholder="Street, city" placeholderTextColor={COLORS.textDisabled} />
-              <Text style={styles.formLabel}>Manager (Optional - will default to you if unassigned)</Text>
-              {users.filter(user => user.role === 'manager' && user.status !== 'inactive').map(manager => (
-                <TouchableOpacity key={manager.id} style={[styles.siteOptionBtn, siteManagerId === manager.id && styles.siteOptionBtnActive]} onPress={() => setSiteManagerId(manager.id)}>
-                  <Text style={styles.siteOptionBtnTxt}>{manager.name}</Text>
-                </TouchableOpacity>
-              ))}
+              <TextInput
+                style={styles.formInput}
+                value={siteAddress}
+                onChangeText={setSiteAddress}
+                placeholder="1 Canada Square, London"
+                placeholderTextColor={COLORS.textDisabled}
+              />
+
+              <Text style={styles.formLabel}>UK Postcode</Text>
+              <TextInput
+                style={styles.formInput}
+                value={sitePostcode}
+                onChangeText={setSitePostcode}
+                placeholder="E14 5AA"
+                placeholderTextColor={COLORS.textDisabled}
+                autoCapitalize="characters"
+              />
+
+              <Text style={styles.formLabel}>What3Words Address (Optional)</Text>
+              <TextInput
+                style={styles.formInput}
+                value={siteW3w}
+                onChangeText={setSiteW3w}
+                placeholder="e.g. filled.count.soap"
+                placeholderTextColor={COLORS.textDisabled}
+                autoCapitalize="none"
+              />
+
+              <View style={{ flexDirection: 'row', gap: S.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.formLabel}>Latitude</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={siteLat}
+                    onChangeText={setSiteLat}
+                    placeholder="51.5050"
+                    placeholderTextColor={COLORS.textDisabled}
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.formLabel}>Longitude</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={siteLng}
+                    onChangeText={setSiteLng}
+                    placeholder="-0.0195"
+                    placeholderTextColor={COLORS.textDisabled}
+                    keyboardType="numeric"
+                  />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', gap: S.md }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.formLabel}>Altitude (Metres ASL)</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={siteAltitude}
+                    onChangeText={setSiteAltitude}
+                    placeholder="e.g. 15"
+                    placeholderTextColor={COLORS.textDisabled}
+                    keyboardType="numeric"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.formLabel}>Geofence Radius (m)</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    value={siteRadius}
+                    onChangeText={setSiteRadius}
+                    placeholder="200"
+                    placeholderTextColor={COLORS.textDisabled}
+                    keyboardType="number-pad"
+                  />
+                </View>
+              </View>
+
+              <Text style={styles.formLabel}>Operations Manager</Text>
+              <View style={styles.siteSelectGroup}>
+                {users.filter(user => user.role === 'manager' && user.status !== 'inactive').map(manager => (
+                  <TouchableOpacity
+                    key={manager.id}
+                    style={[styles.siteOptionBtn, siteManagerId === manager.id && styles.siteOptionBtnActive]}
+                    onPress={() => setSiteManagerId(manager.id)}
+                  >
+                    <Text style={[styles.siteOptionBtnTxt, siteManagerId === manager.id && styles.siteOptionBtnTxtActive]}>
+                      {manager.name} ({manager.email})
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
               {users.every(user => user.role !== 'manager' || user.status === 'inactive') && (
-                <View style={{ marginBottom: 12 }}>
+                <View style={{ marginTop: 6, marginBottom: 8 }}>
                   <Text style={[styles.siteCardAddress, { color: COLORS.issue }]}>
-                    No manager account found yet. You (Super Admin) will be assigned as the primary manager automatically.
+                    No manager account configured. You (Super Admin) will manage this site directly.
                   </Text>
                 </View>
               )}
-              <Text style={styles.formLabel}>Geofence radius (metres)</Text>
-              <TextInput style={styles.formInput} value={siteRadius} onChangeText={setSiteRadius} keyboardType="number-pad" placeholder="200" placeholderTextColor={COLORS.textDisabled} />
-              <TouchableOpacity
-                style={[styles.actionBtn, { marginTop: 20, opacity: modalLoading ? 0.6 : 1 }]}
-                disabled={modalLoading}
-                onPress={async () => {
-                  if (!siteName.trim()) return Alert.alert('Required field', 'Please enter a site name.');
-                  const defaultMgr = users.find(u => u.role === 'manager' && u.status !== 'inactive')?.id || currentUser?.id || 'admin';
-                  const chosenMgrId = siteManagerId || defaultMgr;
-                  setModalLoading(true);
-                  const result = await createSite({
-                    name: siteName.trim(),
-                    address: siteAddress.trim(),
-                    managerId: chosenMgrId,
-                    geofenceRadiusMetres: Math.max(50, Number(siteRadius) || 200)
-                  });
-                  setModalLoading(false);
-                  if (!result.success) return Alert.alert('Site could not be created', result.error || 'Please try again.');
-                  setShowSiteModal(false);
-                  Alert.alert('Site created', `${result.site.name} is ready for guard and checkpoint setup.`);
-                }}
-              >
-                <Text style={styles.actionBtnTxt}>{modalLoading ? 'Saving…' : 'Create Site'}</Text>
-              </TouchableOpacity>
             </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setShowSiteModal(false)}
+                disabled={modalLoading}
+              >
+                <Text style={styles.modalCancelBtnTxt}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalSubmitBtn, modalLoading && styles.btnDisabled]}
+                onPress={handleSaveSite}
+                disabled={modalLoading}
+              >
+                <Text style={styles.modalSubmitBtnTxt}>
+                  {modalLoading ? 'Saving…' : editingSite ? 'Save Changes' : 'Create Site'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

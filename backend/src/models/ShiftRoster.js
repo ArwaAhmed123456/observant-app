@@ -34,7 +34,7 @@ const shiftRosterSchema = new mongoose.Schema({
   publishedAt: { type: Date, default: Date.now },
 }, { timestamps: true });
 
-// One roster per guard per week
-shiftRosterSchema.index({ organisationId: 1, guardId: 1, weekStartDate: 1 }, { unique: true });
+// One roster per guard per site per week (allows guards to work multiple sites)
+shiftRosterSchema.index({ organisationId: 1, guardId: 1, siteId: 1, weekStartDate: 1 }, { unique: true });
 
 module.exports = mongoose.model('ShiftRoster', shiftRosterSchema);

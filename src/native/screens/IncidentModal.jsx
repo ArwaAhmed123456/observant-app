@@ -28,8 +28,14 @@ export const IncidentModal = ({ visible, onClose }) => {
       Alert.alert('Required Field', 'Please enter an incident title.');
       return;
     }
+    if (!notes.trim()) {
+      Alert.alert('Required Field', 'Please provide a detailed description of the incident.');
+      return;
+    }
     logIncident({
-      title, category, severity, notes,
+      title: title.trim(),
+      notes: notes.trim(),
+      severity,
       guardId:   currentUser.id,
       guardName: currentUser.name,
       siteId:    activeShiftSession?.siteId || currentUser.assignedSiteId || 'site-1',
@@ -80,21 +86,17 @@ export const IncidentModal = ({ visible, onClose }) => {
               onChangeText={setTitle}
             />
 
-            {/* Category */}
-            <Text style={styles.label}>Category</Text>
-            <View style={styles.chipRow}>
-              {CATEGORIES.map(cat => (
-                <TouchableOpacity
-                  key={cat}
-                  onPress={() => setCategory(cat)}
-                  style={[styles.chip, category === cat && styles.chipActive]}
-                >
-                  <Text style={[styles.chipText, category === cat && styles.chipTextActive]}>
-                    {cat}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            {/* Detailed Description */}
+            <Text style={styles.label}>Issue Description (required) *</Text>
+            <TextInput
+              style={[input, styles.inputField, styles.textArea]}
+              placeholder="Describe what occurred in detail in your own words (required)…"
+              placeholderTextColor={P.t4}
+              value={notes}
+              onChangeText={setNotes}
+              multiline
+              numberOfLines={4}
+            />
 
             {/* Severity */}
             <Text style={styles.label}>Severity Level</Text>
@@ -137,17 +139,6 @@ export const IncidentModal = ({ visible, onClose }) => {
               )}
             </TouchableOpacity>
 
-            {/* Notes */}
-            <Text style={styles.label}>Detailed Observations</Text>
-            <TextInput
-              style={[input, styles.inputField, styles.textArea]}
-              placeholder="Describe exact location, suspect details, actions taken..."
-              placeholderTextColor={P.t4}
-              value={notes}
-              onChangeText={setNotes}
-              multiline
-              numberOfLines={4}
-            />
           </ScrollView>
 
           {/* Footer */}

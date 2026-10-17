@@ -143,13 +143,15 @@ export function CheckCallScreen() {
 
   // ── Submit issue ──────────────────────────────────────────────────────────
   const handleSubmitIssue = async () => {
-    if (!category) { Alert.alert('Select Category', 'Please choose an issue category before submitting.'); return; }
-    // Build note text early so it's available for both manual and automated paths
-    const noteText = `[${category}]${note ? ' ' + note : ''}`;
+    if (!note || !note.trim()) {
+      Alert.alert('Description Required', 'Please enter a description of the issue before submitting.');
+      return;
+    }
+    const noteText = note.trim();
     setResponding(true);
     if (!activeCheckCall) {
       try {
-        await recordManualGuardCheckCall('no', noteText, category);
+        await recordManualGuardCheckCall('no', noteText);
         setShowIssueForm(false);
         resetForm();
         showSuccess();
@@ -170,10 +172,10 @@ export function CheckCallScreen() {
 
     try {
       if (!isOnline) {
-        await enqueue({ url: `/api/check-calls/${ccId}/respond`, method: 'POST', body: { response: 'no', note: noteText }, label: 'Check call issue' });
+        await enqueue({ url: `/api/check-calls/${ccId}/respond`, method: 'POST', body: { response: 'no', note: noteText, description: noteText }, label: 'Check call issue' });
         setPendingSync(true);
       } else {
-        await respondToCheckCall(ccId, 'no', noteText, { category, photoUri: issuePhoto });
+        await respondToCheckCall(ccId, 'no', noteText, { description: noteText, photoUri: issuePhoto });
       }
       setShowIssueForm(false);
       resetForm();
@@ -370,36 +372,16 @@ export function CheckCallScreen() {
                 </View>
                 <Text style={s.sheetSub}>Describe what you observed. Your manager will be alerted immediately.</Text>
 
-                {/* Category Chips */}
-                <Text style={s.fieldLabel}>ISSUE CATEGORY  *</Text>
-                <View style={s.catChipRow}>
-                  {CATEGORIES.map(cat => {
-                    const isSelected = category === cat;
-                    return (
-                      <TouchableOpacity
-                        key={cat}
-                        style={[s.catChip, isSelected && s.catChipActive]}
-                        onPress={() => setCategory(cat)}
-                        activeOpacity={0.75}
-                      >
-                        <Text style={[s.catChipTxt, isSelected && s.catChipTxtActive]}>
-                          {isSelected ? '✓ ' : ''}{cat}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                {/* Note */}
-                <Text style={s.fieldLabel}>NOTES (optional)</Text>
+                {/* Issue Description */}
+                <Text style={s.fieldLabel}>ISSUE DESCRIPTION  *</Text>
                 <TextInput
-                  style={s.noteInput}
+                  style={[s.noteInput, { minHeight: 90 }]}
                   value={note}
                   onChangeText={setNote}
-                  placeholder="Describe what you observed…"
+                  placeholder="Describe the issue in detail in your own words (required)…"
                   placeholderTextColor={P.t4}
                   multiline
-                  numberOfLines={3}
+                  numberOfLines={4}
                   textAlignVertical="top"
                   returnKeyType="done"
                   blurOnSubmit
@@ -418,9 +400,9 @@ export function CheckCallScreen() {
 
                 {/* Submit */}
                 <TouchableOpacity
-                  style={[s.submitBtn, (!category || responding) && s.btnDisabled]}
+                  style={[s.submitBtn, (!note?.trim() || responding) && s.btnDisabled]}
                   onPress={handleSubmitIssue}
-                  disabled={!category || responding}
+                  disabled={!note?.trim() || responding}
                 >
                   <LinearGradient colors={[P.warn, P.warnDark]} start={{x:0,y:0}} end={{x:1,y:0}} style={s.btnGrad}>
                     <Text style={s.submitTxt}>{responding ? 'SENDING…' : 'SUBMIT ISSUE REPORT'}</Text>

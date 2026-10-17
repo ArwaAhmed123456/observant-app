@@ -359,18 +359,21 @@ export function AppProvider({ children }) {
   }, [addAuditLog]);
 
   const createSite = useCallback(async (siteData) => {
+    const payload = {
+      name: siteData.name.trim(),
+      address: siteData.address?.trim() || null,
+      postcode: siteData.postcode?.trim() || null,
+      managerId: siteData.managerId || currentUser?.id || null,
+      what3words: siteData.what3words?.trim() || null,
+      latitude: siteData.latitude != null ? Number(siteData.latitude) : undefined,
+      longitude: siteData.longitude != null ? Number(siteData.longitude) : undefined,
+      altitude: siteData.altitude != null ? Number(siteData.altitude) : undefined,
+      geofenceRadiusMetres: Number(siteData.geofenceRadiusMetres || siteData.geofenceRadius) || 250,
+      notes: siteData.notes || null,
+    };
     if (API_ENABLED) {
       try {
-        const response = await apiPost('/api/sites', {
-          name: siteData.name.trim(),
-          address: siteData.address?.trim() || null,
-          postcode: siteData.postcode?.trim() || null,
-          managerId: siteData.managerId || currentUser?.id || null,
-          latitude: siteData.latitude != null ? Number(siteData.latitude) : undefined,
-          longitude: siteData.longitude != null ? Number(siteData.longitude) : undefined,
-          geofenceRadiusMetres: Number(siteData.geofenceRadiusMetres || siteData.geofenceRadius) || 250,
-          notes: siteData.notes || null,
-        });
+        const response = await apiPost('/api/sites', payload);
         const site = normalizeSite(response.site);
         setSites(previous => [site, ...previous]);
         return { success: true, site };
@@ -381,14 +384,16 @@ export function AppProvider({ children }) {
     const allSites = await load(KEYS.SITES) || [];
     const newSite = {
       id: `s_${Date.now()}`,
-      name: siteData.name.trim(),
-      address: siteData.address?.trim() || '',
-      postcode: siteData.postcode?.trim() || '',
-      managerId: siteData.managerId || currentUser?.id || 'u2',
-      latitude: siteData.latitude != null ? Number(siteData.latitude) : 51.5050,
-      longitude: siteData.longitude != null ? Number(siteData.longitude) : -0.0195,
-      geofenceRadiusMeters: Number(siteData.geofenceRadiusMetres || siteData.geofenceRadius) || 250,
-      notes: siteData.notes || '',
+      name: payload.name,
+      address: payload.address || '',
+      postcode: payload.postcode || '',
+      managerId: payload.managerId || currentUser?.id || 'u2',
+      what3words: payload.what3words || null,
+      latitude: payload.latitude != null ? payload.latitude : 51.5050,
+      longitude: payload.longitude != null ? payload.longitude : -0.0195,
+      altitude: payload.altitude != null ? payload.altitude : null,
+      geofenceRadiusMeters: payload.geofenceRadiusMetres,
+      notes: payload.notes || '',
       active: true,
       createdAt: new Date().toISOString(),
     };
@@ -398,11 +403,84 @@ export function AppProvider({ children }) {
     await addAuditLog({
       action: 'SITE_CREATED',
       targetName: newSite.name,
-      details: `New site registered with perimeter geofence ${newSite.geofenceRadiusMeters}m.`,
+      details: `New site registered: ${newSite.name} with perimeter geofence ${newSite.geofenceRadiusMeters}m.`,
       severity: 'info',
     });
     return { success: true, site: newSite };
   }, [currentUser, addAuditLog]);
+
+  const updateSite = useCallback(async (siteId, updates) => {
+    if (API_ENABLED) {
+      try {
+        const response = await apiPatch(`/api/sites/${siteId}`, updates);
+        const updated = normalizeSite(response.site);
+        setSites(previous => previous.map(s => (s.id === siteId || s._id === siteId) ? updated : s));
+        return { success: true, site: updated };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+    const allSites = await load(KEYS.SITES) || [];
+    const target = allSites.find(s => s.id === siteId || s._id === siteId);
+    if (!target) return { success: false, error: 'Site not found' };
+    const updated = { ...target, ...updates, updatedAt: new Date().toISOString() };
+    const updatedList = allSites.map(s => (s.id === siteId || s._id === siteId) ? updated : s);
+    await save(KEYS.SITES, updatedList);
+    setSites(updatedList);
+    await addAuditLog({
+      action: 'SITE_UPDATED',
+      targetName: updated.name,
+      details: `Site fields updated: ${Object.keys(updates).join(', ')}.`,
+      severity: 'info',
+    });
+    return { success: true, site: updated };
+  }, [addAuditLog]);
+
+  const deleteSite = useCallback(async (siteId) => {
+    if (API_ENABLED) {
+      try {
+        await apiDelete(`/api/sites/${siteId}`);
+        setSites(previous => previous.map(s => (s.id === siteId || s._id === siteId) ? { ...s, active: false } : s));
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+    const allSites = await load(KEYS.SITES) || [];
+    const target = allSites.find(s => s.id === siteId || s._id === siteId);
+    if (!target) return { success: false, error: 'Site not found' };
+    const updatedList = allSites.map(s => (s.id === siteId || s._id === siteId) ? { ...s, active: false } : s);
+    await save(KEYS.SITES, updatedList);
+    setSites(updatedList);
+    await addAuditLog({
+      action: 'SITE_DEACTIVATED',
+      targetName: target.name,
+      details: `Site ${target.name} deactivated.`,
+      severity: 'warning',
+    });
+    return { success: true };
+  }, [addAuditLog]);
+
+  const editShift = useCallback(async (shiftId, updates) => {
+    if (API_ENABLED) {
+      try {
+        const response = await apiPatch(`/api/shifts/${shiftId}`, updates);
+        const updated = normalizeSession(response.session);
+        setShiftSessions(previous => previous.map(s => (s.id === shiftId || s._id === shiftId) ? updated : s));
+        return { success: true, session: updated };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    }
+    const allSessions = await load(KEYS.SHIFT_SESSIONS) || [];
+    const target = allSessions.find(s => s.id === shiftId || s._id === shiftId);
+    if (!target) return { success: false, error: 'Session not found' };
+    const updated = { ...target, ...updates, updatedAt: new Date().toISOString() };
+    const updatedList = allSessions.map(s => (s.id === shiftId || s._id === shiftId) ? updated : s);
+    await save(KEYS.SHIFT_SESSIONS, updatedList);
+    setShiftSessions(updatedList);
+    return { success: true, session: updated };
+  }, []);
 
   const updateUser = useCallback(async (userId, updates) => {
     if (API_ENABLED) {
@@ -696,31 +774,45 @@ export function AppProvider({ children }) {
   }, [getTodayRoster, shiftSessions, startCheckCallTimer, startShiftEndTimer, scheduleNextPatrolTimer]);
 
   // ─── Shift: Book Off ──────────────────────────────────────────────────────
-  const bookOff = useCallback(async (sessionId) => {
+  const bookOff = useCallback(async (sessionId, options = {}) => {
     if (API_ENABLED) {
-      const { session: remoteSession } = await apiPost('/api/shifts/book-off', {});
-      clearAllTimers();
-      setActiveCheckCall(null);
-      setActivePatrol(null);
-      setAntiIdlePrompt(false);
-      setShiftEndWarning(false);
-      if (remoteSession) {
-        const session = normalizeSession(remoteSession);
-        setShiftSessions(previous => previous.map(item => item.id === session.id ? session : item));
+      try {
+        const { session: remoteSession } = await apiPost('/api/shifts/book-off', {
+          isEarlyOverride: options.isEarlyOverride,
+          overrideReason: options.overrideReason
+        });
+        clearAllTimers();
+        setActiveCheckCall(null);
+        setActivePatrol(null);
+        setAntiIdlePrompt(false);
+        setShiftEndWarning(false);
+        if (remoteSession) {
+          const session = normalizeSession(remoteSession);
+          setShiftSessions(previous => previous.map(item => item.id === session.id ? session : item));
+        }
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: err.message || 'You cannot book off before your time.' };
       }
-      return;
+    }
+    const allSessions = await load(KEYS.SHIFT_SESSIONS) || [];
+    const targetSession = allSessions.find(s => s.id === sessionId);
+    if (targetSession && targetSession.scheduledEndAt && !options.isEarlyOverride) {
+      if (new Date() < new Date(targetSession.scheduledEndAt)) {
+        return { success: false, error: 'You cannot book off before your time.' };
+      }
     }
     clearAllTimers();
     setActiveCheckCall(null);
     setActivePatrol(null);
     setAntiIdlePrompt(false);
     setShiftEndWarning(false);
-    const allSessions = await load(KEYS.SHIFT_SESSIONS) || [];
     const updated = allSessions.map(s =>
       s.id === sessionId ? { ...s, bookedOffAt: new Date().toISOString() } : s
     );
     await save(KEYS.SHIFT_SESSIONS, updated);
     setShiftSessions(updated);
+    return { success: true };
   }, []);
 
   // ─── Check Call Timers ────────────────────────────────────────────────────
@@ -1610,47 +1702,56 @@ export function AppProvider({ children }) {
     setUsers(u || []);
   }, []);
 
-  const createSite = useCallback(async (siteData) => {
-    if (API_ENABLED) {
-      const { site } = await apiPost('/api/sites', siteData);
-      const saved = normalizeSite(site);
-      setSites(previous => [...previous, saved]);
-      if (saved.managerId) {
-        const mgrId = String(saved.managerId);
-        setUsers(previous => previous.map(user => (String(user.id) === mgrId || String(user._id) === mgrId)
-          ? { ...user, siteIds: [...new Set([...(user.siteIds || []), saved.id])] }
-          : user));
-        setCurrentUser(prev => {
-          if (prev && (String(prev.id) === mgrId || String(prev._id) === mgrId)) {
-            const nextSiteIds = [...new Set([...(prev.siteIds || []), saved.id])];
-            save(KEYS.CURRENT_USER, { ...prev, siteIds: nextSiteIds }).catch(() => {});
-            return { ...prev, siteIds: nextSiteIds };
-          }
-          return prev;
+  const getGuardRosters = useCallback((guardId, weekStartDate) => {
+    return (rosters || []).filter(r => {
+      const gMatch = (r.guardId === guardId || r.guardId?._id === guardId || r.guardId?.id === guardId);
+      if (!gMatch) return false;
+      if (weekStartDate) return r.weekStartDate === weekStartDate;
+      return true;
+    });
+  }, [rosters]);
+
+  const getGuardTodayShifts = useCallback((guardId) => {
+    const day = todayKey();
+    const gRosters = (rosters || []).filter(r => {
+      const gMatch = (r.guardId === guardId || r.guardId?._id === guardId || r.guardId?.id === guardId);
+      return gMatch;
+    });
+
+    const todayDate = todayDateStr();
+    const assignedShifts = [];
+
+    gRosters.forEach(r => {
+      const shift = r.days?.[day];
+      if (shift && (shift.start || shift.end)) {
+        const siteIdStr = String(r.siteId?._id || r.siteId?.id || r.siteId || '');
+        const matchedSite = (sites || []).find(s => String(s.id || s._id) === siteIdStr);
+        const session = (shiftSessions || []).find(s =>
+          String(s.guardId) === String(guardId) &&
+          String(s.siteId?._id || s.siteId?.id || s.siteId || '') === siteIdStr &&
+          !s.bookedOffAt
+        );
+
+        assignedShifts.push({
+          id: `shift_${r.id || r._id}_${day}`,
+          rosterId: r.id || r._id,
+          siteId: siteIdStr,
+          site: matchedSite || { id: siteIdStr, name: 'Assigned Site' },
+          siteName: matchedSite?.name || 'Assigned Site',
+          siteAddress: matchedSite?.address || '',
+          what3words: matchedSite?.what3words || '',
+          latitude: matchedSite?.latitude,
+          longitude: matchedSite?.longitude,
+          start: shift.start,
+          end: shift.end,
+          status: session ? 'Active (On Shift)' : 'Scheduled',
+          activeSession: session || null,
         });
       }
-      return { success: true, site: saved };
-    }
-    const saved = { id: `site_${Date.now()}`, active: true, geofenceRadiusMeters: 200, ...siteData };
-    const updated = [...(await load(KEYS.SITES) || []), saved];
-    await save(KEYS.SITES, updated);
-    setSites(updated);
-    if (saved.managerId) {
-      const mgrId = String(saved.managerId);
-      setUsers(previous => previous.map(user => (String(user.id) === mgrId || String(user._id) === mgrId)
-        ? { ...user, siteIds: [...new Set([...(user.siteIds || []), saved.id])] }
-        : user));
-      setCurrentUser(prev => {
-        if (prev && (String(prev.id) === mgrId || String(prev._id) === mgrId)) {
-          const nextSiteIds = [...new Set([...(prev.siteIds || []), saved.id])];
-          save(KEYS.CURRENT_USER, { ...prev, siteIds: nextSiteIds }).catch(() => {});
-          return { ...prev, siteIds: nextSiteIds };
-        }
-        return prev;
-      });
-    }
-    return { success: true, site: saved };
-  }, []);
+    });
+
+    return assignedShifts;
+  }, [rosters, sites, shiftSessions]);
 
   // ─── Computed helpers ─────────────────────────────────────────────────────
   const getGuardActiveSession = useCallback((guardId) =>
@@ -1695,7 +1796,7 @@ export function AppProvider({ children }) {
 
   const value = {
     // Auth
-    currentUser, authLoading, login, logout, createSite, deleteAccount,
+    currentUser, authLoading, login, logout, createSite, updateSite, editSite: updateSite, deleteSite, deleteAccount,
     updatePassword, resetPasswordWithCode,
     // Reference data
     users, sites, checkpoints, refreshUsers,
@@ -1704,7 +1805,7 @@ export function AppProvider({ children }) {
     // Geographic Movement & Telemetry
     guardMovements, recordMovementBreadcrumb, getGuardMovementTrail,
     // Sessions
-    shiftSessions, getGuardActiveSession, bookOn, bookOff,
+    shiftSessions, getGuardActiveSession, bookOn, bookOff, editShift,
     // Check calls
     checkCalls, activeCheckCall, respondToCheckCall, recordManualGuardCheckCall,
     getTodayCheckCalls, addManualCheckCall,
@@ -1719,9 +1820,9 @@ export function AppProvider({ children }) {
     shiftEndWarning, setShiftEndWarning,
     // Alerts
     alerts, getUnreadAlerts, markAlertRead, markAllAlertsRead, addAlert,
-    // Rosters
+    // Rosters & Multi-shift
     rosters, rosterTemplates, publishRoster, refreshRosters, saveRosterTemplate,
-    deleteRosterTemplate, getWeekRosters, getGuardRoster, getTodayRoster,
+    deleteRosterTemplate, getWeekRosters, getGuardRoster, getGuardRosters, getGuardTodayShifts, getTodayRoster,
     // Checkpoints
     saveCheckpoints,
   };

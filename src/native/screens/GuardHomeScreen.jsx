@@ -31,6 +31,7 @@ export function GuardHomeScreen({ navigation }) {
     activeCheckCall, shiftEndWarning, setShiftEndWarning,
     antiIdlePrompt,
     rosters, addAlert, checkCalls,
+    getGuardTodayShifts, getGuardRosters,
   } = useApp();
 
   const [now, setNow]                       = useState(new Date());
@@ -40,6 +41,7 @@ export function GuardHomeScreen({ navigation }) {
   const [showSosConfirm, setShowSosConfirm] = useState(false);
   const [sosLoading, setSosLoading]         = useState(false);
   const [sosSent, setSosSent]               = useState(false);
+  const [selectedShiftSiteId, setSelectedShiftSiteId] = useState(null);
 
   // Animations
   const clockGlow   = useRef(new Animated.Value(0)).current;
@@ -49,7 +51,9 @@ export function GuardHomeScreen({ navigation }) {
 
   const gId = currentUser?.id || currentUser?._id;
   const activeSession = getGuardActiveSession(gId);
-  const site          = sites.find(s => s.id === currentUser?.siteId || s._id === currentUser?.siteId);
+  const todayShifts   = getGuardTodayShifts ? getGuardTodayShifts(gId) : [];
+  const effectiveSiteId = activeSession ? activeSession.siteId : (selectedShiftSiteId || todayShifts[0]?.siteId || currentUser?.siteId || sites[0]?.id);
+  const site          = sites.find(s => s.id === effectiveSiteId || s._id === effectiveSiteId);
   const todayCC       = getTodayCheckCalls(gId);
   const todayPatrols  = getTodayPatrols(gId);
   const donePatrols   = todayPatrols.filter(p => p.finishedAt).length;
@@ -120,21 +124,29 @@ export function GuardHomeScreen({ navigation }) {
   }, []);
 
   const handleBookOn = async () => {
-    if (!currentUser?.siteId) {
+    if (!effectiveSiteId) {
       Alert.alert('No Site Assigned', 'Contact your manager to be assigned to a site.');
       return;
     }
     setBookingLoading(true);
-    await bookOn(gId, currentUser.siteId);
+    await bookOn(gId, effectiveSiteId);
     setBookingLoading(false);
   };
 
   const handleBookOff = async () => {
     if (!activeSession) return;
+    if (activeSession.scheduledEndAt && new Date() < new Date(activeSession.scheduledEndAt)) {
+      setShowBookOff(false);
+      Alert.alert('Shift Incomplete', 'You cannot book off before your time.');
+      return;
+    }
     setShowBookOff(false);
     setBookingLoading(true);
-    await bookOff(activeSession.id || activeSession._id);
+    const res = await bookOff(activeSession.id || activeSession._id);
     setBookingLoading(false);
+    if (res && !res.success) {
+      Alert.alert('Cannot Book Off', res.error || 'You cannot book off before your time.');
+    }
   };
 
   const triggerSosShake = () => {
@@ -296,10 +308,56 @@ export function GuardHomeScreen({ navigation }) {
           <View style={s.offDutyCard}>
             <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
             <Text style={s.offDutyLabel}>CURRENTLY OFF DUTY</Text>
-            {shiftToday
-              ? <Text style={s.offDutyTime}>Next shift: {shiftToday.start} – {shiftToday.end}</Text>
-              : <Text style={s.offDutyTime}>No shift scheduled today</Text>
-            }
+            {todayShifts.length > 0 ? (
+              <View style={{ marginTop: 10, width: '100%', gap: 8 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: P.sub, letterSpacing: 0.5 }}>
+                  TODAY'S SCHEDULED SHIFTS ({todayShifts.length}):
+                </Text>
+                {todayShifts.map((sh, idx) => {
+                  const isSelected = (selectedShiftSiteId || todayShifts[0]?.siteId) === sh.siteId;
+                  return (
+                    <TouchableOpacity
+                      key={(sh.siteId || idx) + sh.start}
+                      onPress={() => setSelectedShiftSiteId(sh.siteId)}
+                      activeOpacity={0.7}
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: 12,
+                        borderRadius: 10,
+                        backgroundColor: isSelected ? 'rgba(56,189,248,0.12)' : '#F8FAFC',
+                        borderWidth: 1.5,
+                        borderColor: isSelected ? '#0284C7' : '#E2E8F0',
+                      }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text style={{ fontWeight: '800', color: isSelected ? '#0284C7' : '#1E293B', fontSize: 13 }}>
+                          {sh.siteName}
+                        </Text>
+                        <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }} numberOfLines={1}>
+                          {sh.siteAddress || 'Site assigned'}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={{ fontWeight: '800', color: '#0F172A', fontSize: 13 }}>
+                          {sh.start} – {sh.end}
+                        </Text>
+                        {isSelected && (
+                          <Text style={{ fontSize: 10, fontWeight: '800', color: '#0284C7', marginTop: 2 }}>
+                            READY TO BOOK ON
+                          </Text>
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ) : shiftToday ? (
+              <Text style={s.offDutyTime}>Next shift: {shiftToday.start} – {shiftToday.end}</Text>
+            ) : (
+              <Text style={s.offDutyTime}>No shift scheduled today</Text>
+            )}
           </View>
         )}
 
@@ -313,7 +371,13 @@ export function GuardHomeScreen({ navigation }) {
         {/* ── Book On / Book Off CTA ── */}
         <TouchableOpacity
           style={[s.bookBtn, activeSession ? s.bookOffBtn : s.bookOnBtn, bookingLoading && s.btnDisabled]}
-          onPress={activeSession ? () => setShowBookOff(true) : handleBookOn}
+          onPress={activeSession ? () => {
+            if (activeSession.scheduledEndAt && new Date() < new Date(activeSession.scheduledEndAt)) {
+              Alert.alert('Shift Incomplete', 'You cannot book off before your time.');
+              return;
+            }
+            setShowBookOff(true);
+          } : handleBookOn}
           disabled={bookingLoading}
           activeOpacity={0.85}
         >

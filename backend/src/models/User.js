@@ -11,7 +11,7 @@ const userSchema = new mongoose.Schema({
   name:        { type: String, required: true, trim: true },
   email:       { type: String, required: true, lowercase: true, trim: true },
   password:    { type: String, required: true, select: false },
-  role:        { type: String, enum: ['guard', 'manager', 'admin'], required: true },
+  role:        { type: String, enum: ['guard', 'manager', 'admin', 'superadmin'], required: true },
   badgeNumber: { type: String, default: null },
   phone:       { type: String, default: null },
   avatarUrl:   { type: String, default: null },

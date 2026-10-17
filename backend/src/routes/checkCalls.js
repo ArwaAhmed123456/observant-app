@@ -23,6 +23,7 @@ const { audit } = require('../utils/auditLogger');
 router.post('/manual', authenticate, requireRole('guard'), [
   body('response').isIn(['yes', 'no']).withMessage('Response must be yes or no'),
   body('note').optional().trim().isLength({ max: 500 }),
+  body('description').optional().trim().isLength({ max: 500 }),
   body('category').optional().trim().isLength({ max: 100 }),
 ], validate, asyncHandler(async (req, res) => {
   const now = new Date();
@@ -32,10 +33,11 @@ router.post('/manual', authenticate, requireRole('guard'), [
   const nextHour = new Date(hourStart.getTime() + 60 * 60 * 1000);
   const existing = await CheckCall.findOne({ sessionId: session._id, firedAt: { $gte: hourStart, $lt: nextHour } }).sort({ firedAt: -1 });
   if (existing) return res.status(409).json({ error: 'A check call is already recorded for this hour.', checkCall: existing });
+  const noteText = req.body.description || req.body.note || null;
   const call = await CheckCall.create({
     organisationId: req.user.organisationId, sessionId: session._id, guardId: req.user._id,
     siteId: session.siteId, firedAt: now, scheduledFor: hourStart, expiresAt: now,
-    respondedAt: now, response: req.body.response, note: req.body.note || null,
+    respondedAt: now, response: req.body.response, note: noteText,
     category: req.body.category || null, isManualLog: true,
   });
   await ShiftSession.findByIdAndUpdate(session._id, {
@@ -89,13 +91,14 @@ router.post('/:id/respond',
   [
     body('response').isIn(['yes', 'no']).withMessage('Response must be yes or no'),
     body('note').optional().trim().isLength({ max: 500 }),
+    body('description').optional().trim().isLength({ max: 500 }),
     body('category').optional().trim().isLength({ max: 100 }),
     body('latitude').optional().isFloat(),
     body('longitude').optional().isFloat(),
   ],
   validate,
   asyncHandler(async (req, res) => {
-    const { response, note } = req.body;
+    const { response, note, description } = req.body;
     const orgId   = req.user.organisationId;
     const guardId = req.user._id;
     const now     = new Date();
@@ -136,7 +139,7 @@ router.post('/:id/respond',
 
     cc.response    = response;
     cc.respondedAt = now;
-    cc.note        = note || null;
+    cc.note        = description || note || null;
     cc.category    = req.body.category || null;
     await cc.save();
 

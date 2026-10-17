@@ -171,7 +171,61 @@ export function formatLocationTelemetry(location) {
     latStr,
     lonStr,
     displayCoords: `${lat.toFixed(5)}, ${lon.toFixed(5)}`,
-    displayAltitude: altStr ? `Alt: ${altStr}` : 'Alt: —',
     summary: `${w3w} · ${altStr ? `${altStr} · ` : ''}${lat.toFixed(4)}, ${lon.toFixed(4)}`,
   };
 }
+
+/**
+ * Validates What3Words format (word.word.word or ///word.word.word)
+ */
+export function isValidWhat3Words(w3w) {
+  if (!w3w || typeof w3w !== 'string') return false;
+  const clean = w3w.trim().replace(/^\/\/\//, '');
+  return /^[a-zA-Z0-9]+\.[a-zA-Z0-9]+\.[a-zA-Z0-9]+$/.test(clean);
+}
+
+/**
+ * Validates Latitude (-90 to 90) and Longitude (-180 to 180)
+ */
+export function isValidCoordinates(lat, lng) {
+  if (lat == null || lng == null) return false;
+  const nLat = Number(lat);
+  const nLng = Number(lng);
+  if (isNaN(nLat) || isNaN(nLng)) return false;
+  return nLat >= -90 && nLat <= 90 && nLng >= -180 && nLng <= 180;
+}
+
+/**
+ * Converts What3Words to coordinates using official API if API key is provided
+ */
+export async function getCoordinatesFromWhat3Words(words) {
+  if (!isValidWhat3Words(words)) return null;
+  const cleanWords = words.trim().replace(/^\/\/\//, '');
+  const apiKey = (typeof process !== 'undefined' && process.env?.EXPO_PUBLIC_W3W_API_KEY) ||
+                 (typeof process !== 'undefined' && process.env?.W3W_API_KEY) || null;
+
+  if (apiKey) {
+    try {
+      const res = await fetch(`https://api.what3words.com/v3/convertToCoordinates?words=${cleanWords}&key=${apiKey}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.coordinates?.lat != null && data?.coordinates?.lng != null) {
+          return {
+            latitude: data.coordinates.lat,
+            longitude: data.coordinates.lng,
+          };
+        }
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
+/**
+ * Returns Google Maps URL for coordinates
+ */
+export function getMapUrl(lat, lng) {
+  if (lat == null || lng == null) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${Number(lat)},${Number(lng)}`;
+}
+

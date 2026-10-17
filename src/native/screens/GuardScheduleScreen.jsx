@@ -30,16 +30,17 @@ function toWeekKey(date) {
 }
 
 export function GuardScheduleScreen() {
-  const { currentUser, sites, getGuardRoster, shiftSessions, refreshRosters } = useApp();
+  const { currentUser, sites, getGuardRoster, getGuardRosters, shiftSessions, refreshRosters } = useApp();
   const [weekStart, setWeekStart] = useState(getMondayOfWeek(new Date()));
 
   useFocusEffect(useCallback(() => {
     refreshRosters?.().catch(error => console.warn('[Observant] Could not refresh guard rota:', error.message));
   }, [refreshRosters]));
 
-  const site          = sites.find(s => s.id === currentUser.siteId);
   const weekKey       = toWeekKey(weekStart);
-  const roster        = getGuardRoster(currentUser.id, weekKey);
+  const rostersForWeek = getGuardRosters ? getGuardRosters(currentUser?.id, weekKey) : [];
+  const singleRoster  = getGuardRoster(currentUser?.id, weekKey);
+  const allWeekRosters = rostersForWeek.length > 0 ? rostersForWeek : (singleRoster ? [singleRoster] : []);
   const today         = toWeekKey(new Date());
   const isCurrentWeek = toWeekKey(getMondayOfWeek(new Date())) === weekKey;
 
@@ -72,21 +73,26 @@ export function GuardScheduleScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Site row */}
-        {site && (
-          <View style={styles.siteRow}>
-            <MapPin color={P.info} size={13} />
-            <Text style={styles.siteNameTxt}>{site.name}</Text>
-          </View>
-        )}
-
-        {roster ? (
+        {allWeekRosters.length > 0 ? (
           <ScrollView showsVerticalScrollIndicator={false}>
             {DAY_KEYS.map((key, i) => {
               const dayDate = addDays(weekStart, i);
               const dayStr  = toWeekKey(dayDate);
-              const shift   = roster.days?.[key];
               const isToday = dayStr === today;
+
+              const dayShifts = allWeekRosters
+                .map(r => {
+                  const s = r.days?.[key];
+                  if (!s || !s.start || !s.end) return null;
+                  const siteObj = sites.find(st => st.id === r.siteId || st._id === r.siteId);
+                  return {
+                    siteId: r.siteId,
+                    siteName: siteObj?.name || 'Assigned Site',
+                    start: s.start,
+                    end: s.end,
+                  };
+                })
+                .filter(Boolean);
 
               const session = shiftSessions.find(s =>
                 s.guardId === currentUser.id && s.bookedOnAt?.startsWith(dayStr)
@@ -98,7 +104,7 @@ export function GuardScheduleScreen() {
                   style={[
                     styles.dayCard,
                     isToday && styles.dayCardToday,
-                    !shift && styles.dayCardOff,
+                    dayShifts.length === 0 && styles.dayCardOff,
                   ]}
                 >
                   {/* Today accent bar */}
@@ -114,12 +120,19 @@ export function GuardScheduleScreen() {
                     </Text>
                   </View>
 
-                  {shift ? (
+                  {dayShifts.length > 0 ? (
                     <View style={styles.shiftBlock}>
-                      <View style={styles.shiftTimeRow}>
-                        <Clock color={P.ok} size={13} />
-                        <Text style={styles.shiftTime}>{shift.start} – {shift.end}</Text>
-                      </View>
+                      {dayShifts.map((sh, sIdx) => (
+                        <View key={sh.siteId + sIdx} style={{ marginBottom: sIdx < dayShifts.length - 1 ? 8 : 0 }}>
+                          <View style={styles.shiftTimeRow}>
+                            <Clock color={P.ok} size={13} />
+                            <Text style={styles.shiftTime}>{sh.start} – {sh.end}</Text>
+                            <View style={{ backgroundColor: P.bg2, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6, borderWidth: 1, borderColor: P.b2 }}>
+                              <Text style={{ color: P.info, fontSize: 10, fontWeight: '700' }} numberOfLines={1}>{sh.siteName}</Text>
+                            </View>
+                          </View>
+                        </View>
+                      ))}
                       {session && (
                         <View style={styles.sessionInfo}>
                           <Text style={styles.sessionBooked}>

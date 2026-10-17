@@ -11,6 +11,12 @@ const siteSchema = new mongoose.Schema({
   address:     { type: String, default: null },
   postcode:    { type: String, default: null },
 
+  // Geo-location fields
+  what3words: { type: String, default: null, trim: true },
+  latitude:   { type: Number, default: null },
+  longitude:  { type: Number, default: null },
+  altitude:   { type: Number, default: null },
+
   // Optional geo-fence centre point [lng, lat]
   location: {
     type:        { type: String, enum: ['Point'], default: 'Point' },
