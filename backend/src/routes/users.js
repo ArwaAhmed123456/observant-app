@@ -184,20 +184,21 @@ router.delete('/users/:id',
   authenticate,
   asyncHandler(async (req, res) => {
     const isSelf = String(req.user._id) === String(req.params.id);
-    if (!isSelf && !['manager', 'admin'].includes(req.user.role)) {
+    if (!isSelf && !['manager', 'admin', 'superadmin'].includes(req.user.role)) {
       return res.status(403).json({ error: 'You do not have permission to delete this account.' });
     }
     const user = await User.findOne({ _id: req.params.id, organisationId: req.user.organisationId });
     if (!user) return res.status(404).json({ error: 'User not found' });
-    if (!isSelf && req.user.role === 'manager' && user.role !== 'admin') {
+    if (!isSelf && req.user.role === 'manager' && user.role !== 'admin' && user.role !== 'superadmin') {
       const targetSiteIds = [user.siteId, ...(user.managedSiteIds || [])].filter(Boolean);
       if (!targetSiteIds.some(id => userCanAccessSite(req.user, id))) return res.status(403).json({ error: 'Account is outside your assigned sites.' });
     }
-    if (!isSelf && user.role === 'admin' && req.user.role !== 'admin') return res.status(403).json({ error: 'Managers cannot deactivate administrator accounts.' });
-    user.active = false;
-    await user.save();
-    await audit({ req, action: isSelf ? 'account_self_deleted' : 'account_deactivated', targetModel: 'User', targetId: user._id, targetName: user.name });
-    res.json({ message: 'User account deactivated' });
+    if (!isSelf && ['admin', 'superadmin'].includes(user.role) && !['admin', 'superadmin'].includes(req.user.role)) {
+      return res.status(403).json({ error: 'Managers cannot delete administrator accounts.' });
+    }
+    await User.deleteOne({ _id: user._id });
+    await audit({ req, action: isSelf ? 'account_self_deleted' : 'account_deleted', targetModel: 'User', targetId: user._id, targetName: user.name });
+    res.json({ message: 'User account permanently deleted' });
   })
 );
 

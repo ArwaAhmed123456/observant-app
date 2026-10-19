@@ -18,7 +18,7 @@ function getMondayOfWeek(date) {
   const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
-  d.setHours(0,0,0,0);
+  d.setHours(12, 0, 0, 0);
   return d;
 }
 
@@ -29,7 +29,11 @@ function addDays(date, n) {
 }
 
 function toWeekKey(date) {
-  return date.toISOString().slice(0,10);
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 const DEFAULT_DAYS = { mon:null,tue:null,wed:null,thu:null,fri:null,sat:null,sun:null };
@@ -61,7 +65,13 @@ export function ManagerRosterScreen() {
   const [recurringWeekly, setRecurringWeekly] = useState(true);
   const [shiftInstructions, setShiftInstructions] = useState('');
 
-  const guards  = users.filter(u => u.role === 'guard' && (currentUser.role === 'superadmin' || currentUser.role === 'admin' || currentUser.siteIds?.some(siteId => String(siteId) === String(u.siteId))));
+  const guardSiteId = (guard) => String(guard.siteId?._id || guard.siteId?.id || guard.siteId || '');
+  const managerSiteIds = (currentUser.siteIds || currentUser.managedSiteIds || [currentUser.siteId]).filter(Boolean).map(String);
+  const isAllAdmin = currentUser.role === 'superadmin' || currentUser.role === 'admin';
+  const guards = users.filter(u =>
+    u.role === 'guard' &&
+    (isAllAdmin || managerSiteIds.length === 0 || managerSiteIds.includes(guardSiteId(u)))
+  );
   const weekKey = toWeekKey(weekStart);
 
   const prevWeek = () => setWeekStart(prev => addDays(prev, -7));
@@ -69,7 +79,8 @@ export function ManagerRosterScreen() {
 
   const openEditForGuard = (guard) => {
     setSelectedGuard(guard);
-    const existing = getGuardRoster(guard.id, weekKey);
+    const gId = guard.id || guard._id;
+    const existing = getGuardRoster(gId, weekKey);
     setEditDays(existing?.days ? { ...DEFAULT_DAYS, ...existing.days } : { ...DEFAULT_DAYS });
     setEditCheckpointIds(existing?.checkpointIds || []);
     setCheckCallInterval(existing?.checkCallInterval || 60);
@@ -118,16 +129,18 @@ export function ManagerRosterScreen() {
     if (!workDays.length) return Alert.alert('Add a shift first', 'Choose at least one working day before publishing this rota.');
     setPublishing(true);
     try {
+      const guardId = selectedGuard.id || selectedGuard._id;
+      const effectiveSiteId = String(selectedGuard.siteId?._id || selectedGuard.siteId?.id || selectedGuard.siteId || selectedGuard.siteIds?.[0] || sites[0]?.id || sites[0]?._id || '');
       const saved = await publishRoster({
-        guardId: selectedGuard.id,
-        siteId: selectedGuard.siteId,
+        guardId,
+        siteId: effectiveSiteId,
         weekStartDate: weekKey,
         days: editDays,
         checkpointIds: editCheckpointIds,
         checkCallInterval,
         recurringWeekly,
         shiftInstructions: shiftInstructions.trim(),
-        publishedBy: currentUser.id,
+        publishedBy: currentUser.id || currentUser._id,
         publishedAt: new Date().toISOString(),
       });
       setEditModalVisible(false);
@@ -200,13 +213,15 @@ export function ManagerRosterScreen() {
             </View>
           ) : (
             guards.map(guard => {
-              const site      = sites.find(s => s.id === guard.siteId);
-              const roster    = getGuardRoster(guard.id, weekKey);
+              const gId       = guard.id || guard._id;
+              const gSiteId   = guard.siteId?._id || guard.siteId?.id || guard.siteId;
+              const site      = sites.find(s => s.id === gSiteId || s._id === gSiteId || String(s.id || s._id) === String(gSiteId));
+              const roster    = getGuardRoster(gId, weekKey);
               const workedDays = roster ? DAY_KEYS.filter(k => roster.days?.[k]).length : 0;
 
               return (
                 <TouchableOpacity
-                  key={guard.id}
+                  key={gId}
                   style={styles.guardRow}
                   onPress={() => openEditForGuard(guard)}
                 >

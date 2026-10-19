@@ -183,14 +183,18 @@ export function SuperAdminScreen() {
   const handleDeleteUser = (user) => {
     Alert.alert(
       'Delete Account Permanently?',
-      `Are you sure you want to permanently delete ${user.name} (${user.badgeNumber})? This action will be audited and cannot be undone.`,
+      `Are you sure you want to permanently delete ${user.name} (${user.badgeNumber || 'No badge'})? This action will be audited and cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await deleteUser(user.id);
+            const targetId = user.id || user._id;
+            const res = await deleteUser(targetId);
+            if (res && !res.success) {
+              Alert.alert('Unable to delete account', res.error || 'Failed to delete user.');
+            }
           },
         },
       ]

@@ -549,39 +549,42 @@ export function AppProvider({ children }) {
   }, [addAuditLog]);
 
   const deleteUser = useCallback(async (userId) => {
+    if (!userId) return { success: false, error: 'No user selected' };
+    const idStr = String(userId);
     if (API_ENABLED) {
-      const target = users.find(user => user.id === userId);
-      if (!target) return { success: false, error: 'User not found' };
       try {
-        await apiDelete(`/api/users/${userId}`);
-        setUsers(previous => previous.map(user => user.id === userId ? { ...user, status: 'inactive' } : user));
+        await apiDelete(`/api/users/${idStr}`);
+        setUsers(previous => previous.filter(user => String(user.id || user._id || '') !== idStr));
         return { success: true };
       } catch (error) { return { success: false, error: error.message }; }
     }
     const allUsers = await load(KEYS.USERS) || [];
-    const target = allUsers.find(u => u.id === userId);
+    const target = allUsers.find(u => String(u.id || u._id || '') === idStr) || (String(currentUser?.id || currentUser?._id || '') === idStr ? currentUser : null);
     if (!target) return { success: false, error: 'User not found' };
 
-    const updatedList = allUsers.filter(u => u.id !== userId);
+    const updatedList = allUsers.filter(u => String(u.id || u._id || '') !== idStr);
     await save(KEYS.USERS, updatedList);
     setUsers(updatedList);
 
     await addAuditLog({
       action: 'ACCOUNT_DELETED',
-      targetName: `${target.name} (${target.badgeNumber})`,
-      details: `Account permanently removed from system database. Role: ${target.role}.`,
+      targetName: `${target.name || 'User'} (${target.badgeNumber || '—'})`,
+      details: `Account permanently removed from system database. Role: ${target.role || 'user'}.`,
       severity: 'warning',
     });
 
     return { success: true };
-  }, [addAuditLog]);
+  }, [currentUser, addAuditLog]);
 
   const deleteAccount = useCallback(async (userId = null) => {
-    const targetId = userId || currentUser?.id;
+    const targetId = userId || currentUser?.id || currentUser?._id;
     if (!targetId) return { success: false, error: 'No user selected' };
     const res = await deleteUser(targetId);
-    if (res?.success && targetId === currentUser?.id) {
-      await logout();
+    if (res?.success) {
+      const curId = String(currentUser?.id || currentUser?._id || '');
+      if (String(targetId) === curId) {
+        await logout();
+      }
     }
     return res;
   }, [currentUser, deleteUser, logout]);
@@ -1588,11 +1591,20 @@ export function AppProvider({ children }) {
     if (API_ENABLED) {
       const { roster } = await apiPost('/api/rosters', rosterData);
       const saved = normalizeRoster(roster);
-      setRosters(previous => [saved, ...previous.filter(item => !(item.guardId === saved.guardId && item.weekStartDate === saved.weekStartDate))]);
+      setRosters(previous => [saved, ...previous.filter(item => {
+        const sameGuard = String(item.guardId?._id || item.guardId?.id || item.guardId || '') === String(saved.guardId?._id || saved.guardId?.id || saved.guardId || '');
+        const sameSite  = String(item.siteId?._id || item.siteId?.id || item.siteId || '') === String(saved.siteId?._id || saved.siteId?.id || saved.siteId || '');
+        const sameWeek  = item.weekStartDate === saved.weekStartDate;
+        return !(sameGuard && sameSite && sameWeek);
+      })]);
       return saved;
     }
     const all = await load(KEYS.SHIFT_ROSTERS) || [];
-    const existing = all.findIndex(r => r.guardId === rosterData.guardId && r.weekStartDate === rosterData.weekStartDate);
+    const existing = all.findIndex(r =>
+      String(r.guardId || '') === String(rosterData.guardId || '') &&
+      String(r.siteId || '') === String(rosterData.siteId || '') &&
+      r.weekStartDate === rosterData.weekStartDate
+    );
     let updated;
     if (existing >= 0) {
       updated = all.map((r, i) => i === existing ? { ...r, ...rosterData, updatedAt: new Date().toISOString() } : r);
@@ -1703,9 +1715,10 @@ export function AppProvider({ children }) {
   }, []);
 
   const getGuardRosters = useCallback((guardId, weekStartDate) => {
+    const targetGid = String(guardId || '');
     return (rosters || []).filter(r => {
-      const gMatch = (r.guardId === guardId || r.guardId?._id === guardId || r.guardId?.id === guardId);
-      if (!gMatch) return false;
+      const rGid = String(r.guardId?._id || r.guardId?.id || r.guardId || '');
+      if (rGid !== targetGid) return false;
       if (weekStartDate) return r.weekStartDate === weekStartDate;
       return true;
     });
@@ -1713,12 +1726,16 @@ export function AppProvider({ children }) {
 
   const getGuardTodayShifts = useCallback((guardId) => {
     const day = todayKey();
+    const targetGid = String(guardId || '');
     const gRosters = (rosters || []).filter(r => {
-      const gMatch = (r.guardId === guardId || r.guardId?._id === guardId || r.guardId?.id === guardId);
-      return gMatch;
+      const rGid = String(r.guardId?._id || r.guardId?.id || r.guardId || '');
+      if (rGid !== targetGid) return false;
+      if (r.weekStartDate) {
+        return isThisWeek(r.weekStartDate) || r.recurringWeekly;
+      }
+      return true;
     });
 
-    const todayDate = todayDateStr();
     const assignedShifts = [];
 
     gRosters.forEach(r => {
@@ -1727,7 +1744,7 @@ export function AppProvider({ children }) {
         const siteIdStr = String(r.siteId?._id || r.siteId?.id || r.siteId || '');
         const matchedSite = (sites || []).find(s => String(s.id || s._id) === siteIdStr);
         const session = (shiftSessions || []).find(s =>
-          String(s.guardId) === String(guardId) &&
+          String(s.guardId?._id || s.guardId?.id || s.guardId || '') === targetGid &&
           String(s.siteId?._id || s.siteId?.id || s.siteId || '') === siteIdStr &&
           !s.bookedOffAt
         );
@@ -1737,11 +1754,11 @@ export function AppProvider({ children }) {
           rosterId: r.id || r._id,
           siteId: siteIdStr,
           site: matchedSite || { id: siteIdStr, name: 'Assigned Site' },
-          siteName: matchedSite?.name || 'Assigned Site',
-          siteAddress: matchedSite?.address || '',
-          what3words: matchedSite?.what3words || '',
-          latitude: matchedSite?.latitude,
-          longitude: matchedSite?.longitude,
+          siteName: matchedSite?.name || r.siteId?.name || 'Assigned Site',
+          siteAddress: matchedSite?.address || r.siteId?.address || '',
+          what3words: matchedSite?.what3words || r.siteId?.what3words || '',
+          latitude: matchedSite?.latitude ?? r.siteId?.latitude,
+          longitude: matchedSite?.longitude ?? r.siteId?.longitude,
           start: shift.start,
           end: shift.end,
           status: session ? 'Active (On Shift)' : 'Scheduled',
@@ -1755,31 +1772,31 @@ export function AppProvider({ children }) {
 
   // ─── Computed helpers ─────────────────────────────────────────────────────
   const getGuardActiveSession = useCallback((guardId) =>
-    shiftSessions.find(s => s.guardId === guardId && !s.bookedOffAt) || null,
+    shiftSessions.find(s => String(s.guardId?._id || s.guardId?.id || s.guardId || '') === String(guardId || '') && !s.bookedOffAt) || null,
   [shiftSessions]);
 
   const getTodayCheckCalls = useCallback((guardId) => {
     const today = todayDateStr();
     return checkCalls.filter(cc =>
-      cc.guardId === guardId && cc.firedAt.startsWith(today)
+      String(cc.guardId?._id || cc.guardId?.id || cc.guardId || '') === String(guardId || '') && cc.firedAt.startsWith(today)
     );
   }, [checkCalls]);
 
   const getTodayPatrols = useCallback((guardId) => {
     const today = todayDateStr();
     return patrolSessions.filter(ps =>
-      ps.guardId === guardId && ps.startedAt.startsWith(today)
+      String(ps.guardId?._id || ps.guardId?.id || ps.guardId || '') === String(guardId || '') && ps.startedAt.startsWith(today)
     );
   }, [patrolSessions]);
 
   const getUnreadAlerts = useCallback((managerId) => {
-    const mgr = users.find(u => u.id === managerId);
+    const mgr = users.find(u => String(u.id || u._id || '') === String(managerId || ''));
     if (!mgr) return [];
-    return alerts.filter(a => !a.read && (mgr.role === 'admin' || mgr.siteIds?.includes(a.siteId)));
+    return alerts.filter(a => !a.read && (mgr.role === 'admin' || mgr.role === 'superadmin' || mgr.siteIds?.includes(a.siteId)));
   }, [alerts, users]);
 
   const getSiteCheckpoints = useCallback((siteId) =>
-    checkpoints.filter(cp => cp.siteId === siteId).sort((a, b) => a.order - b.order),
+    checkpoints.filter(cp => String(cp.siteId?._id || cp.siteId?.id || cp.siteId || '') === String(siteId || '')).sort((a, b) => a.order - b.order),
   [checkpoints]);
 
   const getPatrolCaptures = useCallback((patrolId) =>
@@ -1791,7 +1808,13 @@ export function AppProvider({ children }) {
   [rosters]);
 
   const getGuardRoster = useCallback((guardId, weekStartDate) =>
-    rosters.find(r => r.guardId === guardId && r.weekStartDate === weekStartDate) || null,
+    rosters.find(r => {
+      const rGid = String(r.guardId?._id || r.guardId?.id || r.guardId || '');
+      const matchGid = rGid === String(guardId || '');
+      if (!matchGid) return false;
+      if (weekStartDate) return r.weekStartDate === weekStartDate;
+      return true;
+    }) || null,
   [rosters]);
 
   const value = {
@@ -1848,7 +1871,11 @@ export function getDistanceFromLatLonInMeters(lat1, lon1, lat2, lon2) {
 }
 
 function todayDateStr() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function todayKey() {
@@ -1857,10 +1884,12 @@ function todayKey() {
 }
 
 function isThisWeek(weekStartDate) {
-  const start = new Date(weekStartDate);
+  if (!weekStartDate) return false;
+  const [y, m, d] = weekStartDate.split('-').map(Number);
+  const start = new Date(y, m - 1, d, 0, 0, 0);
+  const end = new Date(y, m - 1, d + 7, 0, 0, 0);
   const now = new Date();
-  const diff = (now - start) / (1000 * 60 * 60 * 24);
-  return diff >= 0 && diff < 7;
+  return now >= start && now < end;
 }
 
 function getMinutesFromTime(date, timeStr) {

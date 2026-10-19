@@ -244,9 +244,13 @@ export function ProfileScreen() {
               disabled={deleteLoading}
               onPress={async () => {
                 setDeleteLoading(true);
-                const res = await deleteAccount(currentUser?.id);
+                const targetId = currentUser?.id || currentUser?._id;
+                const res = await deleteAccount(targetId);
                 setDeleteLoading(false);
-                if (!res?.success) {
+                if (res?.success) {
+                  setDeleteModal(false);
+                  await logout();
+                } else {
                   Alert.alert('Unable to delete account', res?.error || 'Please contact your operations manager.');
                 }
               }}

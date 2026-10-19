@@ -15,7 +15,7 @@ function getMondayOfWeek(date) {
   const day = d.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   d.setDate(d.getDate() + diff);
-  d.setHours(0,0,0,0);
+  d.setHours(12, 0, 0, 0);
   return d;
 }
 
@@ -26,7 +26,11 @@ function addDays(date, n) {
 }
 
 function toWeekKey(date) {
-  return date.toISOString().slice(0,10);
+  const d = new Date(date);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export function GuardScheduleScreen() {
@@ -37,9 +41,10 @@ export function GuardScheduleScreen() {
     refreshRosters?.().catch(error => console.warn('[Observant] Could not refresh guard rota:', error.message));
   }, [refreshRosters]));
 
+  const gId           = currentUser?.id || currentUser?._id;
   const weekKey       = toWeekKey(weekStart);
-  const rostersForWeek = getGuardRosters ? getGuardRosters(currentUser?.id, weekKey) : [];
-  const singleRoster  = getGuardRoster(currentUser?.id, weekKey);
+  const rostersForWeek = getGuardRosters ? getGuardRosters(gId, weekKey) : [];
+  const singleRoster  = getGuardRoster(gId, weekKey);
   const allWeekRosters = rostersForWeek.length > 0 ? rostersForWeek : (singleRoster ? [singleRoster] : []);
   const today         = toWeekKey(new Date());
   const isCurrentWeek = toWeekKey(getMondayOfWeek(new Date())) === weekKey;
@@ -84,10 +89,11 @@ export function GuardScheduleScreen() {
                 .map(r => {
                   const s = r.days?.[key];
                   if (!s || !s.start || !s.end) return null;
-                  const siteObj = sites.find(st => st.id === r.siteId || st._id === r.siteId);
+                  const siteIdStr = String(r.siteId?._id || r.siteId?.id || r.siteId || '');
+                  const siteObj = sites.find(st => String(st.id || st._id) === siteIdStr);
                   return {
-                    siteId: r.siteId,
-                    siteName: siteObj?.name || 'Assigned Site',
+                    siteId: siteIdStr,
+                    siteName: siteObj?.name || r.siteId?.name || 'Assigned Site',
                     start: s.start,
                     end: s.end,
                   };
@@ -95,7 +101,7 @@ export function GuardScheduleScreen() {
                 .filter(Boolean);
 
               const session = shiftSessions.find(s =>
-                s.guardId === currentUser.id && s.bookedOnAt?.startsWith(dayStr)
+                String(s.guardId?._id || s.guardId?.id || s.guardId || '') === String(gId) && s.bookedOnAt?.startsWith(dayStr)
               );
 
               return (
