@@ -38,7 +38,10 @@ router.get('/checkpoints', authenticate, requireRole('guard','manager','admin'),
   if (!siteId) return res.status(400).json({ error: 'siteId query param required' });
   const site = await require('../models').Site.findOne({ _id: siteId, organisationId: req.user.organisationId, active: true });
   if (!site) return res.status(404).json({ error: 'Site not found.' });
-  if (req.user.role === 'guard' && String(req.user.siteId) !== String(site._id)) return res.status(403).json({ error: 'Site is outside your assignment.' });
+  if (req.user.role === 'guard' && String(req.user.siteId) !== String(site._id)) {
+    const hasRosterOrShift = await ShiftRoster.exists({ organisationId: req.user.organisationId, guardId: req.user._id, siteId: site._id });
+    if (!hasRosterOrShift) return res.status(403).json({ error: 'Site is outside your assignment.' });
+  }
   if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(site._id))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
   const cps = await PatrolCheckpoint.find({
     organisationId: req.user.organisationId,

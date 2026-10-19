@@ -55,18 +55,21 @@ router.get('/users', authenticate, requireRole('manager','admin'),
 );
 
 router.post('/users',
-  authenticate, requireRole('manager','admin'),
+  authenticate, requireRole('manager','admin','superadmin'),
   [
     body('name').trim().notEmpty(),
     body('email').isEmail().normalizeEmail(),
     body('password').isLength({ min: 6 }),
-    body('role').isIn(['guard','manager']),
+    body('role').isIn(['guard','manager','admin','superadmin']),
     body('badgeNumber').optional().trim(),
     body('siteId').optional(),
   ],
   validate,
   asyncHandler(async (req, res) => {
     let { name, email, password, role, badgeNumber, siteId, managedSiteIds, phone } = req.body;
+    if (req.user.role === 'manager' && !['guard', 'manager'].includes(role)) {
+      return res.status(403).json({ error: 'Managers can only create guard or manager accounts.' });
+    }
     if (siteId === '' || siteId === undefined) siteId = null;
     if (role === 'guard' && !siteId) {
       // If no site provided, auto-assign to first active site in organisation if available
@@ -371,7 +374,7 @@ router.patch('/sites/:id',
 );
 
 router.delete('/sites/:id',
-  authenticate, requireRole('manager','admin'),
+  authenticate, requireRole('manager','admin','superadmin'),
   asyncHandler(async (req, res) => {
     if (req.user.role === 'manager' && !userCanAccessSite(req.user, req.params.id)) return res.status(403).json({ error: 'Site is outside your assigned area.' });
     const site = await Site.findOneAndUpdate(

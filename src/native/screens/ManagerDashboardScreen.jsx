@@ -208,8 +208,13 @@ export function ManagerDashboardScreen({ navigation }) {
 
   const mgrAlerts = [...(alerts || [])]
     .filter(a => {
-      const mgr = (users || []).find(u => u.id === (currentUser?.id || currentUser?._id));
-      return mgr?.siteIds?.includes(a.siteId) || (currentUser?.siteIds || []).includes(a.siteId);
+      const role = currentUser?.role;
+      if (role === 'admin' || role === 'superadmin') return true;
+      const userSiteIds = new Set([
+        ...(currentUser?.siteIds || []),
+        ...(currentUser?.managedSiteIds || []),
+      ].map(String));
+      return userSiteIds.has(String(a.siteId || ''));
     })
     .sort((a, b) => {
       // SOS always first

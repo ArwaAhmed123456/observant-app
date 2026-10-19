@@ -249,7 +249,7 @@ export function ProfileScreen() {
                 setDeleteLoading(false);
                 if (res?.success) {
                   setDeleteModal(false);
-                  await logout();
+                  // deleteAccount already calls logout() internally — no need to call again
                 } else {
                   Alert.alert('Unable to delete account', res?.error || 'Please contact your operations manager.');
                 }

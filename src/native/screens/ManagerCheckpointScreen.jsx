@@ -13,7 +13,12 @@ import { readNfcTag } from '../../services/nfc';
 export function ManagerCheckpointScreen() {
   const { currentUser, sites, checkpoints, saveCheckpoints } = useApp();
 
-  const mgrSites       = sites.filter(s => currentUser.siteIds?.includes(s.id));
+  const isAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
+  const mgrSiteIds = new Set([
+    ...(currentUser?.siteIds || []),
+    ...(currentUser?.managedSiteIds || []),
+  ].map(String));
+  const mgrSites = isAdmin ? sites : sites.filter(s => mgrSiteIds.has(String(s.id || s._id || '')));
   const [selectedSite, setSelectedSite] = useState(mgrSites[0]?.id || null);
   const [addModal, setAddModal]         = useState(false);
   const [newName, setNewName]           = useState('');
