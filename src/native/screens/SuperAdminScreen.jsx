@@ -14,6 +14,7 @@ import {
   Download, ChevronRight, LogOut, MapPin, Clock, Zap,
   Activity, Building2, Key, RefreshCw, X, ExternalLink, Globe
 } from 'lucide-react-native';
+import * as Location from 'expo-location';
 import {
   isValidWhat3Words, isValidCoordinates, getCoordinatesFromWhat3Words,
   getWhat3WordsSync, getMapUrl
@@ -285,7 +286,9 @@ export function SuperAdminScreen() {
 
     const defaultMgr = users.find(u => u.role === 'manager' && u.status !== 'inactive')?.id || currentUser?.id || 'admin';
     const chosenMgrId = siteManagerId || defaultMgr;
-    const finalW3w = siteW3w.trim() || (!isNaN(latNum) && !isNaN(lngNum) ? getWhat3WordsSync(latNum, lngNum) : null);
+    const trimmedW3w = siteW3w.trim();
+    const normalizedW3w = trimmedW3w ? (trimmedW3w.startsWith('///') ? trimmedW3w : `///${trimmedW3w}`) : null;
+    const finalW3w = normalizedW3w || (!isNaN(latNum) && !isNaN(lngNum) ? getWhat3WordsSync(latNum, lngNum) : null);
 
     setModalLoading(true);
     const siteData = {
@@ -1117,7 +1120,31 @@ export function SuperAdminScreen() {
                 autoCapitalize="characters"
               />
 
-              <Text style={styles.formLabel}>What3Words Address (Optional)</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={styles.formLabel}>What3Words Address (Optional)</Text>
+                <TouchableOpacity
+                  onPress={async () => {
+                    try {
+                      const perm = await Location.requestForegroundPermissionsAsync();
+                      if (perm.status === 'granted') {
+                        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                        const w3w = getWhat3WordsSync(pos.coords.latitude, pos.coords.longitude);
+                        setSiteW3w(w3w);
+                        setSiteLat(pos.coords.latitude.toFixed(6));
+                        setSiteLng(pos.coords.longitude.toFixed(6));
+                        if (pos.coords.altitude != null) setSiteAltitude(pos.coords.altitude.toFixed(1));
+                        Alert.alert('GPS & W3W Detected', `Coordinates and ${w3w} populated.`);
+                      } else {
+                        Alert.alert('Permission Needed', 'Location permission is required to detect GPS coordinates.');
+                      }
+                    } catch (err) {
+                      Alert.alert('Location Error', err.message);
+                    }
+                  }}
+                >
+                  <Text style={{ color: COLORS.brand, fontSize: 11, fontWeight: '700' }}>📍 Auto-detect GPS</Text>
+                </TouchableOpacity>
+              </View>
               <TextInput
                 style={styles.formInput}
                 value={siteW3w}

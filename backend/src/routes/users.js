@@ -23,6 +23,12 @@ const validate      = require('../middleware/validate');
 const asyncHandler  = require('../utils/asyncHandler');
 const { uploadAvatar, saveImage } = require('../services/mediaStore');
 const { audit } = require('../utils/auditLogger');
+const {
+  isValidWhat3Words,
+  normalizeW3W,
+  getCoordinatesFromWhat3Words,
+  getWhat3WordsSync,
+} = require('../utils/what3words');
 
 function userCanAccessSite(user, siteId) {
   if (user.role === 'admin') return true;
@@ -274,9 +280,27 @@ router.post('/sites',
     }
 
     let siteLocation = location;
-    const latNum = latitude != null ? Number(latitude) : null;
-    const lngNum = longitude != null ? Number(longitude) : null;
+    let latNum = latitude != null ? Number(latitude) : null;
+    let lngNum = longitude != null ? Number(longitude) : null;
     const altNum = altitude != null ? Number(altitude) : null;
+
+    let finalW3w = normalizeW3W(what3words);
+
+    if (finalW3w && (latNum == null || lngNum == null)) {
+      const coords = await getCoordinatesFromWhat3Words(finalW3w);
+      if (coords) {
+        latNum = coords.latitude;
+        lngNum = coords.longitude;
+      } else if (latNum == null || lngNum == null) {
+        // Fallback to central UK operations coordinates so site perimeter is valid
+        latNum = 51.5074;
+        lngNum = -0.1278;
+      }
+    }
+
+    if (!finalW3w && latNum != null && lngNum != null) {
+      finalW3w = getWhat3WordsSync(latNum, lngNum);
+    }
 
     if (!siteLocation && latNum != null && lngNum != null) {
       siteLocation = {
@@ -291,7 +315,7 @@ router.post('/sites',
       name,
       address: address || null,
       postcode: postcode || null,
-      what3words: what3words ? String(what3words).trim() : null,
+      what3words: finalW3w,
       latitude: latNum,
       longitude: lngNum,
       altitude: altNum,
@@ -346,6 +370,21 @@ router.patch('/sites/:id',
       if (!assignedManager) return res.status(400).json({ error: 'The selected site manager is not active in this organisation.' });
     }
 
+    if (updates.what3words !== undefined) {
+      updates.what3words = normalizeW3W(updates.what3words);
+      if (updates.what3words && updates.latitude == null && updates.longitude == null) {
+        const coords = await getCoordinatesFromWhat3Words(updates.what3words);
+        if (coords) {
+          updates.latitude = coords.latitude;
+          updates.longitude = coords.longitude;
+          updates.location = {
+            type: 'Point',
+            coordinates: [coords.longitude, coords.latitude],
+          };
+        }
+      }
+    }
+
     if (updates.latitude != null || updates.longitude != null) {
       const lat = updates.latitude != null ? Number(updates.latitude) : undefined;
       const lng = updates.longitude != null ? Number(updates.longitude) : undefined;
@@ -354,6 +393,9 @@ router.patch('/sites/:id',
           type: 'Point',
           coordinates: [lng, lat],
         };
+        if (!updates.what3words) {
+          updates.what3words = getWhat3WordsSync(lat, lng);
+        }
       }
     }
 

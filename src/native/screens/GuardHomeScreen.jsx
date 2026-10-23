@@ -61,12 +61,18 @@ export function GuardHomeScreen({ navigation }) {
   // Today's roster shift
   const dayKeys     = ['sun','mon','tue','wed','thu','fri','sat'];
   const todayKey    = dayKeys[new Date().getDay()];
-  const todayRoster = (rosters||[]).find(r => {
-    if ((r.guardId !== gId)) return false;
-    const diff = (new Date() - new Date(r.weekStartDate)) / 86400000;
-    return diff >= 0 && diff < 7 && r.days?.[todayKey];
-  });
-  const shiftToday = todayRoster?.days?.[todayKey];
+  const matchedTodayShift = todayShifts.find(s => String(s.siteId) === String(effectiveSiteId)) || todayShifts[0];
+  const shiftToday = matchedTodayShift
+    ? { start: matchedTodayShift.start, end: matchedTodayShift.end }
+    : (() => {
+        const found = (rosters || []).find(r => {
+          const rGid = String(r.guardId?._id || r.guardId?.id || r.guardId || '');
+          if (rGid !== String(gId)) return false;
+          const diff = (new Date() - new Date(r.weekStartDate)) / 86400000;
+          return diff >= 0 && diff < 7 && r.days?.[todayKey];
+        });
+        return found?.days?.[todayKey] || null;
+      })();
 
   // Next check call time
   const nextCheckCallTime = (() => {

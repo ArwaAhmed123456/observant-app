@@ -181,11 +181,13 @@ export const SEED_AUDIT_LOGS = [
 ];
 
 /**
- * Seed the store if it's empty (first launch) or ensure superadmin exists.
+ * Seed the store if it's empty (first launch) or ensure all seed users exist.
+ * This guarantees demo credentials always work regardless of previous app state.
  */
 export async function seedIfEmpty() {
   const existing = await load(KEYS.USERS);
   if (!existing || existing.length === 0) {
+    // First launch — write everything from scratch
     await save(KEYS.USERS, SEED_USERS);
     await save(KEYS.SITES, SEED_SITES);
     await save(KEYS.PATROL_CHECKPOINTS, SEED_CHECKPOINTS);
@@ -201,17 +203,25 @@ export async function seedIfEmpty() {
     return;
   }
 
-  // Ensure superadmin exists in existing users
+  // Subsequent launches — ensure every seed user is present (by email)
+  // so demo credentials always work even if AsyncStorage was partially cleared.
   let updatedUsers = [...existing];
   let changed = false;
-  if (!updatedUsers.some(u => u.email === 'admin@observant.com' || u.role === 'superadmin')) {
-    updatedUsers.unshift(SEED_USERS[0]);
-    changed = true;
+
+  for (const seedUser of SEED_USERS) {
+    const alreadyExists = updatedUsers.some(
+      u => u.email.toLowerCase() === seedUser.email.toLowerCase()
+    );
+    if (!alreadyExists) {
+      updatedUsers.unshift(seedUser);
+      changed = true;
+    }
   }
-  // Ensure status property exists
-  updatedUsers = updatedUsers.map(u => ({ ...u, status: u.status || 'active' }));
-  if (changed || updatedUsers.some(u => !u.status)) {
-    await save(KEYS.USERS, updatedUsers);
+
+  // Ensure status property exists on all users
+  const withStatus = updatedUsers.map(u => ({ ...u, status: u.status || 'active' }));
+  if (changed || withStatus.some(u => !existing.find(e => e.id === u.id)?.status)) {
+    await save(KEYS.USERS, withStatus);
   }
 
   // Ensure sites have coordinates and geofence

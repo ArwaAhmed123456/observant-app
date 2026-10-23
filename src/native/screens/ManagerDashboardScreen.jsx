@@ -11,6 +11,8 @@ import { StatusTile } from '../components/StatusTile';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS } from '../../ds';
 import { COLORS, S, R, TYPE, shadows, cardStyle } from '../../theme';
+import * as Location from 'expo-location';
+import { isValidWhat3Words, getCoordinatesFromWhat3Words, getWhat3WordsSync } from '../../utils/what3words';
 
 const TABS = ['overview', 'alerts'];
 
@@ -44,7 +46,13 @@ export function ManagerDashboardScreen({ navigation }) {
   // Manager-created site
   const [createSiteVisible, setCreateSiteVisible] = useState(false);
   const [createSiteBusy, setCreateSiteBusy] = useState(false);
-  const [siteDraft, setSiteDraft] = useState({ name: '', address: '', geofenceRadius: '250' });
+  const [subFormParent, setSubFormParent] = useState(null); // 'guard' | 'reassign' | null
+  const [siteDraft, setSiteDraft] = useState({
+    name: '',
+    address: '',
+    what3words: '',
+    geofenceRadius: '250',
+  });
 
   // Reassign guard site
   const [reassignGuard, setReassignGuard] = useState(null);
@@ -111,28 +119,68 @@ export function ManagerDashboardScreen({ navigation }) {
   };
 
   const handleCreateSite = async () => {
-    const { name, address, geofenceRadius } = siteDraft;
+    const { name, address, geofenceRadius, what3words } = siteDraft;
     if (!name.trim()) {
       Alert.alert('Site Name Required', 'Please enter a name for the new site.');
       return;
     }
+
+    const trimmedW3W = (what3words || '').trim();
+    if (trimmedW3W && !isValidWhat3Words(trimmedW3W)) {
+      Alert.alert('Invalid What3Words', 'Please enter a valid format such as word.word.word or ///word.word.word.');
+      return;
+    }
+
     setCreateSiteBusy(true);
     try {
+      let coords = null;
+      if (trimmedW3W) {
+        try {
+          coords = await getCoordinatesFromWhat3Words(trimmedW3W);
+        } catch {
+          // If offline or API fails, fallback to local coordinates if available
+        }
+      }
+
+      let finalW3w = trimmedW3W ? (trimmedW3W.startsWith('///') ? trimmedW3W : `///${trimmedW3W}`) : null;
+      let finalLat = coords?.latitude ?? siteDraft.latitude;
+      let finalLng = coords?.longitude ?? siteDraft.longitude;
+
+      if (!finalW3w && finalLat != null && finalLng != null) {
+        finalW3w = getWhat3WordsSync(finalLat, finalLng);
+      }
+
       const result = await createSite({
         name: name.trim(),
         address: address.trim(),
+        what3words: finalW3w,
+        latitude: finalLat ?? undefined,
+        longitude: finalLng ?? undefined,
         managerId: currentUser?.id || currentUser?._id,
         geofenceRadiusMetres: Math.max(50, Number(geofenceRadius) || 250),
       });
+
       if (!result?.success) throw new Error(result?.error || 'Site creation failed.');
-      setCreateSiteVisible(false);
-      setSiteDraft({ name: '', address: '', geofenceRadius: '250' });
+
       const newId = String(result.site?.id || result.site?._id);
       if (newId) {
         setGuardDraft(prev => ({ ...prev, siteId: newId }));
         setReassignSiteId(newId);
       }
-      Alert.alert('Site Created', `${result.site?.name || name} has been registered and is now available to assign to security officers.`);
+
+      setCreateSiteVisible(false);
+      setSiteDraft({ name: '', address: '', what3words: '', latitude: null, longitude: null, geofenceRadius: '250' });
+
+      // If opened from a parent sub-form, restore it with the newly created site selected
+      const parent = subFormParent;
+      setSubFormParent(null);
+      if (parent === 'guard') {
+        setCreateGuardVisible(true);
+      } else if (parent === 'reassign') {
+        // reassignGuard remains set
+      }
+
+      Alert.alert('Site Created', `${result.site?.name || name} has been registered and is now selected.`);
     } catch (error) {
       Alert.alert('Could not create site', error.message || 'Please try again.');
     } finally {
@@ -524,8 +572,17 @@ export function ManagerDashboardScreen({ navigation }) {
 
       {/* Create Site Modal */}
       <Modal visible={createSiteVisible} transparent animationType="slide" onRequestClose={() => setCreateSiteVisible(false)}>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
-          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: safeBottom + S.xl }} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 20}
+        >
+          <ScrollView
+            style={styles.createGuardSheet}
+            contentContainerStyle={{ paddingBottom: safeBottom + 40 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             <Text style={styles.modalTitle}>Register New Security Site</Text>
             <Text style={styles.modalSub}>Add a new site or client facility to your management portfolio. You can assign security officers and check-calls immediately.</Text>
 
@@ -547,6 +604,43 @@ export function ManagerDashboardScreen({ navigation }) {
               placeholderTextColor={COLORS.textDisabled}
             />
 
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+              <Text style={styles.fieldLabel}>What3Words Location (///word.word.word)</Text>
+              <TouchableOpacity
+                onPress={async () => {
+                  try {
+                    const perm = await Location.requestForegroundPermissionsAsync();
+                    if (perm.status === 'granted') {
+                      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                      const w3w = getWhat3WordsSync(pos.coords.latitude, pos.coords.longitude);
+                      setSiteDraft(v => ({
+                        ...v,
+                        what3words: w3w,
+                        latitude: pos.coords.latitude,
+                        longitude: pos.coords.longitude,
+                      }));
+                      Alert.alert('GPS & W3W Captured', `Location set to ${w3w}`);
+                    } else {
+                      Alert.alert('Location Permission', 'Permission needed to capture current GPS coordinates.');
+                    }
+                  } catch (err) {
+                    Alert.alert('Location Error', err.message);
+                  }
+                }}
+              >
+                <Text style={{ color: COLORS.brand, fontSize: 11, fontWeight: '700' }}>📍 Auto-detect GPS</Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={styles.accountInput}
+              value={siteDraft.what3words}
+              onChangeText={what3words => setSiteDraft(v => ({ ...v, what3words }))}
+              placeholder="e.g. ///filled.count.soap"
+              placeholderTextColor={COLORS.textDisabled}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
             <Text style={styles.fieldLabel}>Geofence Perimeter Radius (Metres)</Text>
             <TextInput
               style={styles.accountInput}
@@ -560,7 +654,15 @@ export function ManagerDashboardScreen({ navigation }) {
             <TouchableOpacity style={[styles.submitBtn, createSiteBusy && styles.btnDisabled]} onPress={handleCreateSite} disabled={createSiteBusy}>
               <Text style={styles.submitBtnTxt}>{createSiteBusy ? 'Registering Site…' : 'Register & Enable Site'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.cancelBtn} onPress={() => setCreateSiteVisible(false)}>
+            <TouchableOpacity
+              style={styles.cancelBtn}
+              onPress={() => {
+                setCreateSiteVisible(false);
+                const parent = subFormParent;
+                setSubFormParent(null);
+                if (parent === 'guard') setCreateGuardVisible(true);
+              }}
+            >
               <Text style={styles.cancelBtnTxt}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
@@ -569,8 +671,17 @@ export function ManagerDashboardScreen({ navigation }) {
 
       {/* Create Guard Modal */}
       <Modal visible={createGuardVisible} transparent animationType="slide" onRequestClose={() => setCreateGuardVisible(false)}>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
-          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: safeBottom + S.xl }} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 20}
+        >
+          <ScrollView
+            style={styles.createGuardSheet}
+            contentContainerStyle={{ paddingBottom: safeBottom + 40 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             <Text style={styles.modalTitle}>Create guard account</Text>
             <Text style={styles.modalSub}>Create a sign-in for an officer at one of your assigned sites. You can publish their rota immediately after.</Text>
             <Text style={styles.fieldLabel}>Full name</Text>
@@ -585,7 +696,11 @@ export function ManagerDashboardScreen({ navigation }) {
             </View>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
               <Text style={styles.fieldLabel}>Assign site</Text>
-              <TouchableOpacity onPress={() => setCreateSiteVisible(true)}>
+              <TouchableOpacity onPress={() => {
+                setSubFormParent('guard');
+                setCreateGuardVisible(false);
+                setCreateSiteVisible(true);
+              }}>
                 <Text style={{ color: COLORS.brand, fontSize: 11, fontWeight: '700' }}>+ Add new site</Text>
               </TouchableOpacity>
             </View>
@@ -606,8 +721,17 @@ export function ManagerDashboardScreen({ navigation }) {
 
       {/* Reassign Guard Site Modal */}
       <Modal visible={!!reassignGuard} transparent animationType="slide" onRequestClose={() => setReassignGuard(null)}>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <ScrollView style={styles.createGuardSheet} contentContainerStyle={{ paddingBottom: safeBottom + S.xl }} keyboardShouldPersistTaps="handled">
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 20}
+        >
+          <ScrollView
+            style={styles.createGuardSheet}
+            contentContainerStyle={{ paddingBottom: safeBottom + 40 }}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
             <Text style={styles.modalTitle}>Assign Site to Officer</Text>
             <Text style={styles.modalSub}>
               Assign or transfer <Text style={{ color: COLORS.textPrimary, fontWeight: '700' }}>{reassignGuard?.name}</Text> (SIA: {reassignGuard?.badgeNumber || 'Officer'}) to one of your active security sites.
@@ -615,7 +739,10 @@ export function ManagerDashboardScreen({ navigation }) {
 
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
               <Text style={styles.fieldLabel}>Select Site</Text>
-              <TouchableOpacity onPress={() => { setReassignGuard(null); setCreateSiteVisible(true); }}>
+              <TouchableOpacity onPress={() => {
+                setSubFormParent('reassign');
+                setCreateSiteVisible(true);
+              }}>
                 <Text style={{ color: COLORS.brand, fontSize: 11, fontWeight: '700' }}>+ Register new site</Text>
               </TouchableOpacity>
             </View>

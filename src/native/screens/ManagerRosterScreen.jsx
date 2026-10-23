@@ -261,7 +261,7 @@ export function ManagerRosterScreen() {
 
         {/* Edit Roster Modal */}
         <Modal visible={editModalVisible} animationType="slide" transparent>
-          <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={[styles.modalCard, { paddingBottom: safeBottom + 16 }]}>
               <View style={styles.modalHeader}>
                 <View>
@@ -415,32 +415,61 @@ export function ManagerRosterScreen() {
                 <Text style={styles.publishBtnTxt}>{publishing ? 'Saving…' : 'Save & Assign Shift'}</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         {/* Time Picker Modal */}
         <Modal visible={!!timeModal} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={[styles.modalCard, { paddingBottom: SP.px24 }]}>
               <Text style={styles.modalTitle}>Set Shift Times</Text>
-              <Text style={styles.fieldLabel}>START TIME</Text>
-              <TouchableOpacity style={styles.timePickerButton} onPress={() => setTimePickerOpen(timePickerOpen === 'start' ? null : 'start')}>
-                <Clock size={16} color={P.blue} /><Text style={styles.timePickerValue}>{startTime}</Text><Text style={styles.timePickerHint}>SELECT TIME</Text>
-              </TouchableOpacity>
+              
+              <Text style={styles.fieldLabel}>START TIME (HH:MM)</Text>
+              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                <TextInput
+                  style={[input, { flex: 1, color: P.t1, fontSize: 16, fontWeight: '800', fontFamily: undefined }]}
+                  value={startTime}
+                  onChangeText={setStartTime}
+                  placeholder="07:00"
+                  placeholderTextColor={P.t3}
+                  maxLength={5}
+                />
+                <TouchableOpacity
+                  style={[styles.navBtn, { paddingHorizontal: 12, paddingVertical: 10 }]}
+                  onPress={() => setTimePickerOpen(timePickerOpen === 'start' ? null : 'start')}
+                >
+                  <Clock size={16} color={P.blue} />
+                </TouchableOpacity>
+              </View>
               {timePickerOpen === 'start' && <TimeWheel value={startTime} onChange={setStartTime} />}
-              <Text style={[styles.fieldLabel, { marginTop: SP.px16 }]}>END TIME</Text>
-              <TouchableOpacity style={styles.timePickerButton} onPress={() => setTimePickerOpen(timePickerOpen === 'end' ? null : 'end')}>
-                <Clock size={16} color={P.blue} /><Text style={styles.timePickerValue}>{endTime}</Text><Text style={styles.timePickerHint}>SELECT TIME</Text>
-              </TouchableOpacity>
+
+              <Text style={[styles.fieldLabel, { marginTop: SP.px16 }]}>END TIME (HH:MM)</Text>
+              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                <TextInput
+                  style={[input, { flex: 1, color: P.t1, fontSize: 16, fontWeight: '800', fontFamily: undefined }]}
+                  value={endTime}
+                  onChangeText={setEndTime}
+                  placeholder="19:00"
+                  placeholderTextColor={P.t3}
+                  maxLength={5}
+                />
+                <TouchableOpacity
+                  style={[styles.navBtn, { paddingHorizontal: 12, paddingVertical: 10 }]}
+                  onPress={() => setTimePickerOpen(timePickerOpen === 'end' ? null : 'end')}
+                >
+                  <Clock size={16} color={P.blue} />
+                </TouchableOpacity>
+              </View>
               {timePickerOpen === 'end' && <TimeWheel value={endTime} onChange={setEndTime} />}
-              <TouchableOpacity style={btnPrimary} onPress={confirmTime}>
-                <Text style={{ color: P.white, fontSize: 15, fontWeight: '800' }}>Confirm</Text>
+
+              <TouchableOpacity style={[btnPrimary, { marginTop: SP.px20 }]} onPress={confirmTime}>
+                <Text style={{ color: P.white, fontSize: 15, fontWeight: '800' }}>Confirm Shift Time</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.cancelBtn} onPress={() => { setTimeModal(null); setTimePickerOpen(null); }}>
                 <Text style={styles.cancelBtnTxt}>Cancel</Text>
               </TouchableOpacity>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         <Modal visible={guardPickerVisible} transparent animationType="fade" onRequestClose={() => setGuardPickerVisible(false)}>
