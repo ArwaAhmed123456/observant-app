@@ -142,27 +142,31 @@ export default function SchedulesPage({ session }) {
     setEditingRoster(roster);
     const gId = roster.guardId?._id || roster.guardId?.id || roster.guardId || '';
     const sId = roster.siteId?._id || roster.siteId?.id || roster.siteId || '';
+
+    // days values are either null OR {start, end} objects — not booleans
     const daysActive = {
-      mon: Boolean(roster.days?.mon),
-      tue: Boolean(roster.days?.tue),
-      wed: Boolean(roster.days?.wed),
-      thu: Boolean(roster.days?.thu),
-      fri: Boolean(roster.days?.fri),
-      sat: Boolean(roster.days?.sat),
-      sun: Boolean(roster.days?.sun),
+      mon: Boolean(roster.days?.mon?.start),
+      tue: Boolean(roster.days?.tue?.start),
+      wed: Boolean(roster.days?.wed?.start),
+      thu: Boolean(roster.days?.thu?.start),
+      fri: Boolean(roster.days?.fri?.start),
+      sat: Boolean(roster.days?.sat?.start),
+      sun: Boolean(roster.days?.sun?.start),
     };
-    const firstShift = Object.values(roster.days || {}).find(Boolean) || { start: '07:00', end: '19:00' };
+    // Extract start/end times from first active day
+    const firstShiftObj = Object.values(roster.days || {}).find(d => d && d.start);
 
     setFormData({
       guardId: gId,
       siteId: sId,
       days: daysActive,
-      start: firstShift.start || '07:00',
-      end: firstShift.end || '19:00',
+      start: firstShiftObj?.start || '07:00',
+      end: firstShiftObj?.end || '19:00',
     });
     setFormError('');
     setShowModal(true);
   };
+
 
   const handleSaveRoster = async (e) => {
     e.preventDefault();

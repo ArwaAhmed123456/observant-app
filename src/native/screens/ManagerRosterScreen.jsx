@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Modal, TextInput, Alert, Switch,
+  Modal, TextInput, Alert, Switch, Platform, KeyboardAvoidingView,
 } from 'react-native';
 import { useApp, formatDate } from '../../context/AppContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

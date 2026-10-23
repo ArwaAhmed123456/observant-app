@@ -60,8 +60,14 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
 
   if (req.user.role === 'manager') {
     const allowed = req.user.managedSiteIds.map(String);
-    if (siteId && !allowed.includes(String(siteId))) filter.siteId = null;
-    else filter.siteId = siteId || { $in: req.user.managedSiteIds };
+    if (siteId) {
+      if (!allowed.includes(String(siteId))) {
+        return res.status(403).json({ error: 'Site is outside your assigned area.' });
+      }
+      filter.siteId = siteId;
+    } else {
+      filter.siteId = { $in: req.user.managedSiteIds };
+    }
   } else if (siteId) {
     filter.siteId = siteId;
   }
