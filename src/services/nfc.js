@@ -9,6 +9,7 @@ import { Platform, Alert, Linking } from 'react-native';
 
 let NfcManagerModule = null;
 let NfcTechModule = null;
+let scanInProgress = false;
 
 try {
   const nfc = require('react-native-nfc-manager');
@@ -24,7 +25,7 @@ try {
  */
 export function normalizeNfcTag(rawId) {
   if (!rawId) return '';
-  return String(rawId).replace(/[^a-z0-9]/gi, '').toLowerCase();
+  return String(rawId).replace(/[^a-f0-9]/gi, '').toLowerCase();
 }
 
 /**
@@ -53,7 +54,9 @@ export async function getNfcState() {
     }
 
     await NfcManagerModule.start().catch(() => {});
-    const enabled = await NfcManagerModule.isEnabled().catch(() => false);
+    const enabled = Platform.OS === 'android'
+      ? await NfcManagerModule.isEnabled().catch(() => false)
+      : true;
     if (!enabled) {
       return {
         status: 'DISABLED',
@@ -103,7 +106,7 @@ export async function isNfcAvailable() {
  * Reads an NFC tag from the device's NFC sensor with state detection,
  * automatic settings prompt if disabled, and clear success/failure feedback.
  */
-export async function readNfcTag(options = {}) {
+async function performNfcTagScan(options = {}) {
   const { simulatedId = null, promptTitle = 'NFC Checkpoint Scan' } = options;
 
   if (simulatedId) {
@@ -137,49 +140,39 @@ export async function readNfcTag(options = {}) {
     });
   }
 
-  // 1. Try Native NFC hardware if active
-  if (state.status === 'READY' && NfcManagerModule) {
-    try {
-      await NfcManagerModule.start();
-      try {
-        const techs = NfcTechModule ? [NfcTechModule.Ndef, NfcTechModule.NfcA, NfcTechModule.IsoDep] : [];
-        if (techs.length) await NfcManagerModule.requestTechnology(techs);
-        const tag = await NfcManagerModule.getTag();
-        if (tag?.id) {
-          return normalizeNfcTag(tag.id);
-        }
-      } finally {
-        await NfcManagerModule.cancelTechnologyRequest().catch(() => {});
-      }
-    } catch (err) {
-      if (err?.message?.includes('cancelled') || err?.message?.includes('user')) {
-        throw new Error('NFC scan cancelled.');
-      }
-      console.warn('Native NFC scan attempt:', err?.message);
-    }
+  if (state.status !== 'READY' || !NfcManagerModule || !NfcTechModule) {
+    throw new Error('This device or app build cannot scan NFC cards. Use an NFC-capable phone and install the NFC-enabled app build.');
   }
 
-  // 2. Fallback when NFC hardware is truly unsupported, on iOS development simulator, or testing without physical card
-  return new Promise((resolve, reject) => {
-    const sampleTagId = 'nfc_' + Math.floor(100000 + Math.random() * 900000).toString(16);
-
-    Alert.alert(
-      promptTitle,
-      state.status === 'UNSUPPORTED'
-        ? 'NFC hardware is not present on this device. You can verify checkpoint using simulated tag verification or barcode/photo.'
-        : 'Hold the assigned NFC card against the back of your phone.\n\n(NFC sensor standby mode active)',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-          onPress: () => reject(new Error('NFC card scan cancelled.')),
-        },
-        {
-          text: state.status === 'UNSUPPORTED' ? 'Verify Checkpoint' : 'Verify Tag',
-          style: 'default',
-          onPress: () => resolve(sampleTagId),
-        },
-      ]
+  let requestStarted = false;
+  try {
+    await NfcManagerModule.start();
+    requestStarted = true;
+    const techs = Platform.OS === 'ios'
+      ? [NfcTechModule.Ndef]
+      : [NfcTechModule.Ndef, NfcTechModule.NfcA, NfcTechModule.IsoDep];
+    await NfcManagerModule.requestTechnology(
+      techs,
+      { alertMessage: promptTitle },
     );
-  });
+    const tag = await NfcManagerModule.getTag();
+    const tagId = normalizeNfcTag(tag?.id);
+    if (!tagId) throw new Error('The NFC card was detected but did not provide a readable card ID.');
+    return tagId;
+  } catch (err) {
+    if (/cancel/i.test(err?.message || '')) throw new Error('NFC scan cancelled.');
+    throw new Error(err?.message || 'NFC scan failed. Hold the card against the phone and try again.');
+  } finally {
+    if (requestStarted) await NfcManagerModule.cancelTechnologyRequest().catch(() => {});
+  }
+}
+
+export async function readNfcTag(options = {}) {
+  if (scanInProgress) throw new Error('An NFC scan is already in progress. Finish or cancel it before scanning another card.');
+  scanInProgress = true;
+  try {
+    return await performNfcTagScan(options);
+  } finally {
+    scanInProgress = false;
+  }
 }

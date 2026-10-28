@@ -10,11 +10,18 @@
     },
     "preview": {
       "distribution": "internal",
+      "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://observant-api-zl49.onrender.com"
       },
       "android": {
         "buildType": "apk"
+      }
+    },
+    "simulator": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://observant-api-zl49.onrender.com"
       },
       "ios": {
         "simulator": true
@@ -22,14 +29,12 @@
     },
     "preview-device": {
       "distribution": "internal",
+      "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://observant-api-zl49.onrender.com"
       },
       "android": {
         "buildType": "apk"
-      },
-      "ios": {
-        "enterpriseProvisioning": "adhoc"
       }
     },
     "production": {

@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { apiPatch } from './api';
@@ -13,12 +14,14 @@ Notifications.setNotificationHandler({
 
 export async function registerPushNotifications() {
   try {
-    await Notifications.setNotificationChannelAsync('observant_alerts', {
-      name: 'Security operations alerts',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      sound: 'default',
-    });
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('observant_alerts', {
+        name: 'Security operations alerts',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        sound: 'default',
+      });
+    }
     let permission = await Notifications.getPermissionsAsync();
     if (!permission.granted) permission = await Notifications.requestPermissionsAsync();
     if (!permission.granted) return false;
