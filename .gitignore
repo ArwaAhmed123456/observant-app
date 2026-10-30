@@ -35,3 +35,4 @@ web-archive/
 *.sln
 *.sw?
 *.p8
+android/app/debug.keystore
