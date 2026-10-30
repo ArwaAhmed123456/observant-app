@@ -151,7 +151,7 @@ export function CheckCallScreen() {
     setResponding(true);
     if (!activeCheckCall) {
       try {
-        await recordManualGuardCheckCall('no', noteText);
+        await recordManualGuardCheckCall('no', noteText, { description: noteText, photoUri: issuePhoto, category });
         setShowIssueForm(false);
         resetForm();
         showSuccess();

@@ -1,18 +1,18 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
-  Modal, TextInput, KeyboardAvoidingView, Platform
+  Modal, TextInput, KeyboardAvoidingView, Platform, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, formatTime } from '../../context/AppContext';
-import { LogOut, Bell, MapPin, CheckCircle, AlertTriangle, Clock, Users, Zap, ClipboardList, Shield, PlusCircle, ChevronRight, X } from 'lucide-react-native';
+import { LogOut, Bell, MapPin, CheckCircle, AlertTriangle, Clock, Users, Zap, ClipboardList, Shield, PlusCircle, ChevronRight, X, Trash2, Camera } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { StatusTile } from '../components/StatusTile';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS } from '../../ds';
 import { COLORS, S, R, TYPE, shadows, cardStyle } from '../../theme';
 import * as Location from 'expo-location';
-import { isValidWhat3Words, getCoordinatesFromWhat3Words, getWhat3WordsSync } from '../../utils/what3words';
+import { isValidWhat3Words, normalizeWhat3Words, getCoordinatesFromWhat3Words, getWhat3WordsSync } from '../../utils/what3words';
 
 const TABS = ['overview', 'alerts'];
 
@@ -20,7 +20,7 @@ export function ManagerDashboardScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const safeBottom = Math.max(insets.bottom, 16);
   const {
-    currentUser, users, sites, logout, createUser, updateUser, createSite,
+    currentUser, users, sites, logout, createUser, updateUser, deleteUser, createSite,
     shiftSessions, checkCalls, patrolSessions,
     alerts, markAlertRead, markAllAlertsRead, getUnreadAlerts,
     addAlert, addManualCheckCall, addManualPatrol,
@@ -30,6 +30,12 @@ export function ManagerDashboardScreen({ navigation }) {
 
   // Alert detail modal
   const [selectedAlert, setSelectedAlert] = useState(null);
+  const [fullEvidencePhoto, setFullEvidencePhoto] = useState(null);
+
+  // Worker deletion state with validation
+  const [deleteWorkerTarget, setDeleteWorkerTarget] = useState(null);
+  const [deleteWorkerInput, setDeleteWorkerInput] = useState('');
+  const [deleteWorkerLoading, setDeleteWorkerLoading] = useState(false);
 
   // Manual log modal
   const [manualGuard, setManualGuard]   = useState(null);
@@ -41,11 +47,12 @@ export function ManagerDashboardScreen({ navigation }) {
   // Manager-created guard account
   const [createGuardVisible, setCreateGuardVisible] = useState(false);
   const [createGuardBusy, setCreateGuardBusy] = useState(false);
-  const [guardDraft, setGuardDraft] = useState({ name: '', email: '', password: '', badgeNumber: '', phone: '', siteId: '' });
+  const [guardDraft, setGuardDraft] = useState({ name: '', email: '', password: '', badgeNumber: '', phone: '', assignedSiteIds: [] });
 
   // Manager-created site
   const [createSiteVisible, setCreateSiteVisible] = useState(false);
   const [createSiteBusy, setCreateSiteBusy] = useState(false);
+  const createSiteInFlight = useRef(false);
   const [subFormParent, setSubFormParent] = useState(null); // 'guard' | 'reassign' | null
   const [siteDraft, setSiteDraft] = useState({
     name: '',
@@ -56,7 +63,7 @@ export function ManagerDashboardScreen({ navigation }) {
 
   // Reassign guard site
   const [reassignGuard, setReassignGuard] = useState(null);
-  const [reassignSiteId, setReassignSiteId] = useState('');
+  const [reassignSiteIds, setReassignSiteIds] = useState([]);
   const [reassignBusy, setReassignBusy] = useState(false);
 
   const managerSiteIds = (currentUser?.siteIds || []).map(String);
@@ -71,7 +78,8 @@ export function ManagerDashboardScreen({ navigation }) {
     return false;
   };
   const availableSites = (sites || []).filter(site => canSeeSite(site.id || site._id, site));
-  const guards   = (users || []).filter(u => u.role === 'guard' && canSeeSite(u.siteId));
+  const guardSiteIds = u => [...new Set([u.siteId, ...(u.assignedSiteIds || [])].filter(Boolean).map(String))];
+  const guards   = (users || []).filter(u => u.role === 'guard' && guardSiteIds(u).some(id => canSeeSite(id)));
   const unread   = getUnreadAlerts(currentUser?.id || currentUser?._id);
   const todayStr = new Date().toISOString().slice(0,10);
 
@@ -89,9 +97,9 @@ export function ManagerDashboardScreen({ navigation }) {
   };
 
   const handleCreateGuard = async () => {
-    const { name, email, password, badgeNumber, phone, siteId } = guardDraft;
-    if (!name.trim() || !email.trim() || !siteId) {
-      Alert.alert('Complete guard details', 'Enter the guard name and work email, then assign a site.');
+    const { name, email, password, badgeNumber, phone, assignedSiteIds } = guardDraft;
+    if (!name.trim() || !email.trim() || !assignedSiteIds.length) {
+      Alert.alert('Complete guard details', 'Enter the guard name and work email, then assign at least one site.');
       return;
     }
     if (password.length < 6) {
@@ -102,12 +110,12 @@ export function ManagerDashboardScreen({ navigation }) {
     try {
       const result = await createUser({
         name: name.trim(), email: email.trim().toLowerCase(), password,
-        role: 'guard', badgeNumber: badgeNumber.trim(), phone: phone.trim(), siteId,
+        role: 'guard', badgeNumber: badgeNumber.trim(), phone: phone.trim(), siteId: assignedSiteIds[0], assignedSiteIds,
       });
       if (!result?.success) throw new Error(result?.error || 'The guard account could not be created.');
       setCreateGuardVisible(false);
-      setGuardDraft({ name: '', email: '', password: '', badgeNumber: '', phone: '', siteId: '' });
-      Alert.alert('Guard account created', `${result.user?.name || name} is assigned to ${availableSites.find(site => String(site.id || site._id) === String(siteId))?.name || 'the selected site'}. Assign their shifts next.`, [
+      setGuardDraft({ name: '', email: '', password: '', badgeNumber: '', phone: '', assignedSiteIds: [] });
+      Alert.alert('Guard account created', `${result.user?.name || name} is assigned to ${assignedSiteIds.length} site${assignedSiteIds.length === 1 ? '' : 's'}. Assign their shifts next.`, [
         { text: 'Assign schedule', onPress: () => navigation?.navigate('Schedule') },
         { text: 'Done' },
       ]);
@@ -119,6 +127,7 @@ export function ManagerDashboardScreen({ navigation }) {
   };
 
   const handleCreateSite = async () => {
+    if (createSiteInFlight.current) return;
     const { name, address, geofenceRadius, what3words } = siteDraft;
     if (!name.trim()) {
       Alert.alert('Site Name Required', 'Please enter a name for the new site.');
@@ -131,6 +140,7 @@ export function ManagerDashboardScreen({ navigation }) {
       return;
     }
 
+    createSiteInFlight.current = true;
     setCreateSiteBusy(true);
     try {
       let coords = null;
@@ -142,13 +152,9 @@ export function ManagerDashboardScreen({ navigation }) {
         }
       }
 
-      let finalW3w = trimmedW3W ? (trimmedW3W.startsWith('///') ? trimmedW3W : `///${trimmedW3W}`) : null;
+      let finalW3w = trimmedW3W ? normalizeWhat3Words(trimmedW3W) : null;
       let finalLat = coords?.latitude ?? siteDraft.latitude;
       let finalLng = coords?.longitude ?? siteDraft.longitude;
-
-      if (!finalW3w && finalLat != null && finalLng != null) {
-        finalW3w = getWhat3WordsSync(finalLat, finalLng);
-      }
 
       const result = await createSite({
         name: name.trim(),
@@ -162,17 +168,17 @@ export function ManagerDashboardScreen({ navigation }) {
 
       if (!result?.success) throw new Error(result?.error || 'Site creation failed.');
 
-      const newId = String(result.site?.id || result.site?._id);
+      const newId = String(result.site?.id || result.site?._id || '');
+      const parent = subFormParent;
       if (newId) {
-        setGuardDraft(prev => ({ ...prev, siteId: newId }));
-        setReassignSiteId(newId);
+        if (parent === 'guard') setGuardDraft(prev => ({ ...prev, assignedSiteIds: [...new Set([...prev.assignedSiteIds, newId])] }));
+        if (parent === 'reassign') setReassignSiteIds(previous => [...new Set([...previous, newId])]);
       }
 
       setCreateSiteVisible(false);
       setSiteDraft({ name: '', address: '', what3words: '', latitude: null, longitude: null, geofenceRadius: '250' });
 
       // If opened from a parent sub-form, restore it with the newly created site selected
-      const parent = subFormParent;
       setSubFormParent(null);
       if (parent === 'guard') {
         setCreateGuardVisible(true);
@@ -180,22 +186,25 @@ export function ManagerDashboardScreen({ navigation }) {
         // reassignGuard remains set
       }
 
-      Alert.alert('Site Created', `${result.site?.name || name} has been registered and is now selected.`);
+      const w3wNote = result.what3wordsLookupUnavailable
+        ? '\n\nThe What3Words lookup could not complete. Check the API key/network or add the address manually in site details.'
+        : '';
+      Alert.alert(result.alreadyRegistered ? 'Site Already Registered' : 'Site Created', `${result.site?.name || name} is available and selected.${w3wNote}`);
     } catch (error) {
       Alert.alert('Could not create site', error.message || 'Please try again.');
     } finally {
+      createSiteInFlight.current = false;
       setCreateSiteBusy(false);
     }
   };
 
   const handleReassignSite = async () => {
-    if (!reassignGuard || !reassignSiteId) return;
+    if (!reassignGuard || !reassignSiteIds.length) return;
     setReassignBusy(true);
     try {
-      const targetSite = (sites || []).find(s => String(s.id || s._id) === String(reassignSiteId));
-      const res = await updateUser(reassignGuard.id || reassignGuard._id, { siteId: reassignSiteId });
+      const res = await updateUser(reassignGuard.id || reassignGuard._id, { siteId: reassignSiteIds[0], assignedSiteIds: reassignSiteIds });
       if (!res?.success) throw new Error(res?.error || 'Failed to update site assignment.');
-      Alert.alert('Site Assigned', `${reassignGuard.name} has been assigned to ${targetSite?.name || 'the selected site'}.`);
+      Alert.alert('Sites Assigned', `${reassignGuard.name} has been assigned to ${reassignSiteIds.length} site${reassignSiteIds.length === 1 ? '' : 's'}.`);
       setReassignGuard(null);
     } catch (err) {
       Alert.alert('Could not update site', err.message || 'Please try again.');
@@ -379,7 +388,7 @@ export function ManagerDashboardScreen({ navigation }) {
                   ]);
                   return;
                 }
-                setGuardDraft(previous => ({ ...previous, siteId: previous.siteId || String(availableSites[0].id || availableSites[0]._id) }));
+                setGuardDraft(previous => ({ ...previous, assignedSiteIds: previous.assignedSiteIds.length ? previous.assignedSiteIds : [String(availableSites[0].id || availableSites[0]._id)] }));
                 setCreateGuardVisible(true);
               }}>
                 <Text style={styles.addGuardButtonText}>+ Add guard</Text>
@@ -417,7 +426,11 @@ export function ManagerDashboardScreen({ navigation }) {
                   onManualLog={(g) => setManualGuard(g)}
                   onReassignSite={(g) => {
                     setReassignGuard(g);
-                    setReassignSiteId(String(g.siteId || ''));
+                    setReassignSiteIds(guardSiteIds(g));
+                  }}
+                  onDeleteGuard={(g) => {
+                    setDeleteWorkerTarget(g);
+                    setDeleteWorkerInput('');
                   }}
                 />
               );
@@ -532,6 +545,30 @@ export function ManagerDashboardScreen({ navigation }) {
                     </View>
                   )}
 
+                  {/* Attached Photo Evidence */}
+                  {Boolean(selectedAlert.photoUrl || selectedAlert.photoUri) && (
+                    <View style={styles.alertPhotoSection}>
+                      <View style={styles.alertPhotoHeader}>
+                        <Camera size={14} color={P.blueLight} />
+                        <Text style={styles.alertPhotoTitle}>ATTACHED PHOTO EVIDENCE</Text>
+                      </View>
+                      <TouchableOpacity
+                        activeOpacity={0.9}
+                        onPress={() => setFullEvidencePhoto(selectedAlert.photoUrl || selectedAlert.photoUri)}
+                        style={styles.alertPhotoWrap}
+                      >
+                        <Image
+                          source={{ uri: selectedAlert.photoUrl || selectedAlert.photoUri }}
+                          style={styles.alertPhotoImg}
+                          resizeMode="cover"
+                        />
+                        <View style={styles.alertPhotoZoomBadge}>
+                          <Text style={styles.alertPhotoZoomTxt}>🔍 Tap to view full size</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+
                   {/* Action Buttons */}
                   <View style={{ gap: 10, marginTop: 16 }}>
                     {selectedAlert.guardId && (
@@ -612,14 +649,19 @@ export function ManagerDashboardScreen({ navigation }) {
                     const perm = await Location.requestForegroundPermissionsAsync();
                     if (perm.status === 'granted') {
                       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-                      const w3w = getWhat3WordsSync(pos.coords.latitude, pos.coords.longitude);
+                      const lat = pos.coords.latitude;
+                      const lon = pos.coords.longitude;
+                      const w3w = getWhat3WordsSync(lat, lon);
                       setSiteDraft(v => ({
                         ...v,
-                        what3words: w3w,
-                        latitude: pos.coords.latitude,
-                        longitude: pos.coords.longitude,
+                        what3words: w3w || '',
+                        latitude: lat,
+                        longitude: lon,
                       }));
-                      Alert.alert('GPS & W3W Captured', `Location set to ${w3w}`);
+                      Alert.alert(
+                        'GPS Location Recorded',
+                        `Coordinates saved: ${lat.toFixed(4)}°, ${lon.toFixed(4)}°.\n\nThe app will request an official What3Words address when you save the site. If lookup is unavailable, you can enter the address manually.`
+                      );
                     } else {
                       Alert.alert('Location Permission', 'Permission needed to capture current GPS coordinates.');
                     }
@@ -707,8 +749,8 @@ export function ManagerDashboardScreen({ navigation }) {
             <View style={styles.typeRow}>
               {availableSites.map(site => {
                 const id = String(site.id || site._id);
-                const active = String(guardDraft.siteId) === id;
-                return <TouchableOpacity key={id} style={[styles.typePill, active && styles.typePillActive]} onPress={() => setGuardDraft(value => ({ ...value, siteId: id }))}><Text style={[styles.typePillTxt, active && styles.typePillTxtActive]}>{site.name}</Text></TouchableOpacity>;
+                const active = guardDraft.assignedSiteIds.includes(id);
+                return <TouchableOpacity key={id} style={[styles.typePill, active && styles.typePillActive]} onPress={() => setGuardDraft(value => ({ ...value, assignedSiteIds: active ? value.assignedSiteIds.filter(siteId => siteId !== id) : [...value.assignedSiteIds, id] }))}><Text style={[styles.typePillTxt, active && styles.typePillTxtActive]}>{active ? '✓ ' : ''}{site.name}</Text></TouchableOpacity>;
               })}
             </View>
             <TouchableOpacity style={[styles.submitBtn, createGuardBusy && styles.btnDisabled]} onPress={handleCreateGuard} disabled={createGuardBusy}>
@@ -750,12 +792,12 @@ export function ManagerDashboardScreen({ navigation }) {
             <View style={styles.typeRow}>
               {availableSites.map(site => {
                 const id = String(site.id || site._id);
-                const active = String(reassignSiteId) === id;
+                const active = reassignSiteIds.includes(id);
                 return (
                   <TouchableOpacity
                     key={id}
                     style={[styles.typePill, active && styles.typePillActive]}
-                    onPress={() => setReassignSiteId(id)}
+                    onPress={() => setReassignSiteIds(previous => active ? previous.filter(siteId => siteId !== id) : [...previous, id])}
                   >
                     <Text style={[styles.typePillTxt, active && styles.typePillTxtActive]}>{site.name}</Text>
                   </TouchableOpacity>
@@ -764,9 +806,9 @@ export function ManagerDashboardScreen({ navigation }) {
             </View>
 
             <TouchableOpacity
-              style={[styles.submitBtn, (!reassignSiteId || reassignBusy) && styles.btnDisabled]}
+              style={[styles.submitBtn, (!reassignSiteIds.length || reassignBusy) && styles.btnDisabled]}
               onPress={handleReassignSite}
-              disabled={!reassignSiteId || reassignBusy}
+              disabled={!reassignSiteIds.length || reassignBusy}
             >
               <Text style={styles.submitBtnTxt}>{reassignBusy ? 'Updating Assignment…' : 'Confirm Site Assignment'}</Text>
             </TouchableOpacity>
@@ -834,6 +876,113 @@ export function ManagerDashboardScreen({ navigation }) {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Delete Worker Confirmation Modal with Exact Name Typing Validation */}
+      <Modal visible={!!deleteWorkerTarget} transparent animationType="fade" onRequestClose={() => setDeleteWorkerTarget(null)}>
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
+            <View style={styles.deleteWorkerCard}>
+              <View style={styles.deleteWorkerHeader}>
+                <View style={styles.deleteWorkerIconWrap}>
+                  <Trash2 size={24} color={P.danger} />
+                </View>
+                <TouchableOpacity onPress={() => { setDeleteWorkerTarget(null); setDeleteWorkerInput(''); }} style={{ padding: 6 }}>
+                  <X size={20} color={P.t3} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.deleteWorkerTitle}>Permanently Delete Officer Account</Text>
+              <Text style={styles.deleteWorkerSub}>
+                This action cannot be undone. All login credentials and shift allocations for this officer will be terminated.
+              </Text>
+
+              <View style={styles.deleteWorkerSummary}>
+                <Text style={styles.deleteWorkerName}>{deleteWorkerTarget?.name}</Text>
+                <Text style={styles.deleteWorkerBadge}>SIA Badge: {deleteWorkerTarget?.badgeNumber || '—'}</Text>
+              </View>
+
+              <Text style={styles.deleteWorkerPrompt}>
+                To confirm deletion, please type the officer's exact full name below:
+              </Text>
+              <Text style={styles.deleteWorkerExpectedName}>"{deleteWorkerTarget?.name}"</Text>
+
+              <TextInput
+                style={[
+                  styles.accountInput,
+                  {
+                    borderColor: deleteWorkerInput.trim().toLowerCase() === (deleteWorkerTarget?.name || '').trim().toLowerCase() ? P.danger : COLORS.borderSubtle,
+                    borderWidth: 1.5,
+                    marginBottom: 16,
+                  }
+                ]}
+                value={deleteWorkerInput}
+                onChangeText={setDeleteWorkerInput}
+                placeholder={`Type ${deleteWorkerTarget?.name} to confirm`}
+                placeholderTextColor={COLORS.textDisabled}
+                autoCapitalize="words"
+              />
+
+              {(() => {
+                const isMatched = deleteWorkerInput.trim().toLowerCase() === (deleteWorkerTarget?.name || '').trim().toLowerCase();
+                return (
+                  <TouchableOpacity
+                    style={[styles.confirmDeleteBtn, (!isMatched || deleteWorkerLoading) && styles.confirmDeleteBtnDisabled]}
+                    disabled={!isMatched || deleteWorkerLoading}
+                    onPress={async () => {
+                      setDeleteWorkerLoading(true);
+                      try {
+                        const targetId = deleteWorkerTarget.id || deleteWorkerTarget._id;
+                        const res = await deleteUser(targetId);
+                        if (res?.success) {
+                          const deletedName = deleteWorkerTarget.name;
+                          setDeleteWorkerTarget(null);
+                          setDeleteWorkerInput('');
+                          Alert.alert('Worker Account Deleted', `The officer account for ${deletedName} has been permanently deleted from the system.`);
+                        } else {
+                          Alert.alert('Could not delete account', res?.error || 'Please contact system support.');
+                        }
+                      } catch (err) {
+                        Alert.alert('Error', err.message || 'Failed to delete worker account.');
+                      } finally {
+                        setDeleteWorkerLoading(false);
+                      }
+                    }}
+                  >
+                    <Text style={styles.confirmDeleteBtnTxt}>
+                      {deleteWorkerLoading ? 'Deleting Account…' : 'Permanently Delete Officer Account'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })()}
+
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => { setDeleteWorkerTarget(null); setDeleteWorkerInput(''); }}
+              >
+                <Text style={styles.cancelBtnTxt}>Cancel & Keep Account</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* Enlarged Evidence Photo Modal */}
+      {fullEvidencePhoto && (
+        <Modal visible={!!fullEvidencePhoto} transparent animationType="fade" onRequestClose={() => setFullEvidencePhoto(null)}>
+          <View style={styles.photoOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setFullEvidencePhoto(null)} />
+            <View style={styles.photoModalCard}>
+              <View style={styles.photoModalHeader}>
+                <Text style={styles.photoModalTitle}>Attached Incident Evidence</Text>
+                <TouchableOpacity onPress={() => setFullEvidencePhoto(null)} style={styles.closePhotoBtn}>
+                  <X size={20} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+              <Image source={{ uri: fullEvidencePhoto }} style={styles.fullEvidenceImg} resizeMode="contain" />
+            </View>
+          </View>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -953,4 +1102,30 @@ const styles = StyleSheet.create({
   actionPrimaryTxt: { color: COLORS.white, fontSize: 14, fontWeight: '800' },
   actionSecondaryBtn: { backgroundColor: COLORS.bgInput, borderRadius: R.md, paddingVertical: 13, alignItems: 'center', borderWidth: 1, borderColor: COLORS.brand },
   actionSecondaryTxt: { color: COLORS.brand, fontSize: 13, fontWeight: '700' },
+  alertPhotoSection: { backgroundColor: COLORS.bgInput, borderRadius: R.md, padding: S.md, borderWidth: 1, borderColor: COLORS.borderSubtle, marginBottom: S.md },
+  alertPhotoHeader: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 },
+  alertPhotoTitle: { fontSize: 11, fontWeight: '800', color: P.blueLight, letterSpacing: 0.5 },
+  alertPhotoWrap: { borderRadius: R.sm, overflow: 'hidden', borderWidth: 1, borderColor: COLORS.borderMid, position: 'relative' },
+  alertPhotoImg: { width: '100%', height: 180 },
+  alertPhotoZoomBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(15,23,42,0.8)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: R.xs },
+  alertPhotoZoomTxt: { color: COLORS.white, fontSize: 10, fontWeight: '700' },
+  deleteWorkerCard: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.borderSubtle, width: '100%', ...shadows.lg },
+  deleteWorkerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.md },
+  deleteWorkerIconWrap: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(239, 68, 68, 0.15)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' },
+  deleteWorkerTitle: { fontSize: 18, fontWeight: '800', color: P.danger, marginBottom: 4 },
+  deleteWorkerSub: { color: COLORS.textMuted, fontSize: 12, lineHeight: 18, marginBottom: S.md },
+  deleteWorkerSummary: { backgroundColor: COLORS.bgInput, borderRadius: R.md, padding: S.md, borderWidth: 1, borderColor: COLORS.borderSubtle, marginBottom: S.md },
+  deleteWorkerName: { fontSize: 15, fontWeight: '800', color: COLORS.textPrimary },
+  deleteWorkerBadge: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
+  deleteWorkerPrompt: { fontSize: 12, color: COLORS.textSecondary, marginBottom: 4 },
+  deleteWorkerExpectedName: { fontSize: 13, fontWeight: '800', color: COLORS.textPrimary, marginBottom: S.md },
+  confirmDeleteBtn: { backgroundColor: P.danger, borderRadius: R.md, paddingVertical: 14, alignItems: 'center', marginBottom: 4 },
+  confirmDeleteBtnDisabled: { opacity: 0.4 },
+  confirmDeleteBtnTxt: { color: COLORS.white, fontSize: 14, fontWeight: '800' },
+  photoOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center', padding: S.lg },
+  photoModalCard: { width: '100%', maxHeight: '90%', alignItems: 'center' },
+  photoModalHeader: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  photoModalTitle: { color: COLORS.white, fontSize: 16, fontWeight: '800' },
+  closePhotoBtn: { padding: 6, borderRadius: R.full, backgroundColor: 'rgba(255,255,255,0.2)' },
+  fullEvidenceImg: { width: '100%', height: 380, borderRadius: R.md },
 });

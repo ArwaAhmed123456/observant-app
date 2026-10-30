@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { MapPin, Clock, CheckCircle2, AlertTriangle, Shield, ChevronRight, ClipboardList } from 'lucide-react-native';
+import { MapPin, Clock, CheckCircle2, AlertTriangle, Shield, ChevronRight, ClipboardList, Trash2 } from 'lucide-react-native';
 import { P, SP, BR, FONT, SH_TOKENS, card } from '../../ds';
 import { formatTime } from '../../context/AppContext';
 
@@ -17,6 +17,7 @@ export function StatusTile({
   onPress,
   onManualLog,
   onReassignSite,
+  onDeleteGuard,
 }) {
   const missedCount = todayCheckCalls.filter(cc => cc.response === 'missed').length;
   const issueCount = todayCheckCalls.filter(cc => cc.response === 'no').length;
@@ -186,6 +187,19 @@ export function StatusTile({
               >
                 <ClipboardList size={11} color={P.blueLight} />
                 <Text style={styles.manualBtnText}>Manual Log</Text>
+              </TouchableOpacity>
+            )}
+
+            {onDeleteGuard && (
+              <TouchableOpacity
+                style={styles.deleteGuardBtn}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  onDeleteGuard(guard);
+                }}
+                activeOpacity={0.7}
+              >
+                <Trash2 size={11} color={P.danger} />
               </TouchableOpacity>
             )}
           </View>
@@ -361,6 +375,16 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     color: '#D97706',
+  },
+  deleteGuardBtn: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderRadius: BR.sm,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   w3wPill: {
     backgroundColor: 'rgba(225, 29, 72, 0.08)',

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Modal, TextInput, Alert, Switch,
@@ -10,6 +10,8 @@ import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, input, btnPrimary } from '../../ds';
 import { readNfcTag } from '../../services/nfc';
 
+const isPhysicalNfcTag = value => /^[a-f0-9]{8,32}$/i.test(String(value || ''));
+
 export function ManagerCheckpointScreen() {
   const { currentUser, sites, checkpoints, saveCheckpoints } = useApp();
 
@@ -18,7 +20,10 @@ export function ManagerCheckpointScreen() {
     ...(currentUser?.siteIds || []),
     ...(currentUser?.managedSiteIds || []),
   ].map(String));
-  const mgrSites = isAdmin ? sites : sites.filter(s => mgrSiteIds.has(String(s.id || s._id || '')));
+  const currentUserId = String(currentUser?.id || currentUser?._id || '');
+  const mgrSites = isAdmin ? sites : sites.filter(s =>
+    mgrSiteIds.has(String(s.id || s._id || '')) || String(s.managerId || '') === currentUserId
+  );
   const [selectedSite, setSelectedSite] = useState(mgrSites[0]?.id || null);
   const [addModal, setAddModal]         = useState(false);
   const [newName, setNewName]           = useState('');
@@ -27,14 +32,23 @@ export function ManagerCheckpointScreen() {
   const [newNfcTagId, setNewNfcTagId] = useState(null);
   const [pairingId, setPairingId] = useState(null);
   const [saving, setSaving]             = useState(false);
+  const savingRef = useRef(false);
+
+  useEffect(() => {
+    if (!mgrSites.some(site => String(site.id || site._id) === String(selectedSite || ''))) {
+      setSelectedSite(mgrSites[0]?.id || mgrSites[0]?._id || null);
+    }
+  }, [mgrSites, selectedSite]);
 
   const siteCheckpoints = checkpoints
     .filter(cp => cp.siteId === selectedSite)
     .sort((a, b) => a.order - b.order);
 
   const handleAdd = async () => {
+    if (savingRef.current) return;
     if (!newName.trim()) { Alert.alert('Name required'); return; }
-    if (newNfcRequired && !newNfcTagId) { Alert.alert('Pair an NFC card', 'Scan the checkpoint card before making it required.'); return; }
+    if (newNfcRequired && !newNfcTagId) { Alert.alert('Pair an NFC card', 'Scan the physical checkpoint card before adding this NFC-required checkpoint.'); return; }
+    savingRef.current = true;
     setSaving(true);
     const newCP = {
       id: `cp_${Date.now()}`,
@@ -45,13 +59,19 @@ export function ManagerCheckpointScreen() {
       nfcRequired: newNfcRequired,
       nfcTagId: newNfcTagId,
     };
-    await saveCheckpoints([...checkpoints, newCP]);
-    setSaving(false);
-    setAddModal(false);
-    setNewName('');
-    setNewRequired(true);
-    setNewNfcRequired(false);
-    setNewNfcTagId(null);
+    try {
+      await saveCheckpoints([...checkpoints, newCP]);
+      setAddModal(false);
+      setNewName('');
+      setNewRequired(true);
+      setNewNfcRequired(false);
+      setNewNfcTagId(null);
+    } catch (error) {
+      Alert.alert('Could not add checkpoint', error.message || 'Check your connection and try again.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   const handleDelete = (cpId) => {
@@ -75,14 +95,26 @@ export function ManagerCheckpointScreen() {
   };
 
   const pairTag = async (checkpoint) => {
-    setPairingId(checkpoint.id);
-    try {
-      const nfcTagId = await readNfcTag({ promptTitle: `Pair Tag: ${checkpoint.name}` });
-      const updated = checkpoints.map(cp => cp.id === checkpoint.id ? { ...cp, nfcTagId, nfcRequired: true } : cp);
-      await saveCheckpoints(updated);
-      Alert.alert('NFC checkpoint paired', `${checkpoint.name} will require this card (${nfcTagId.slice(-6)}) during patrols.`);
-    } catch (error) { Alert.alert('NFC scan', error.message); }
-    finally { setPairingId(null); }
+    Alert.alert(
+      `Pair NFC Tag: ${checkpoint.name}`,
+      'How would you like to assign an NFC tag to this checkpoint?',
+      [
+        {
+          text: 'Scan with Phone NFC',
+          onPress: async () => {
+            setPairingId(checkpoint.id);
+            try {
+              const nfcTagId = await readNfcTag({ promptTitle: `Pair Tag: ${checkpoint.name}` });
+              const updated = checkpoints.map(cp => cp.id === checkpoint.id ? { ...cp, nfcTagId, nfcRequired: true } : cp);
+              await saveCheckpoints(updated);
+              Alert.alert('NFC Checkpoint Paired', `${checkpoint.name} will require this card (${nfcTagId.slice(-6)}) during patrols.`);
+            } catch (error) { Alert.alert('NFC Scan', error.message); }
+            finally { setPairingId(null); }
+          },
+        },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
   };
 
   return (
@@ -166,14 +198,14 @@ export function ManagerCheckpointScreen() {
                     <Text style={styles.reqLabel}>NFC card</Text>
                     <Switch
                       value={Boolean(cp.nfcRequired)}
-                      disabled={!cp.nfcTagId}
+                      disabled={!isPhysicalNfcTag(cp.nfcTagId)}
                       onValueChange={value => saveCheckpoints(checkpoints.map(item => item.id === cp.id ? { ...item, nfcRequired: value } : item))}
                       trackColor={{ true: P.info, false: P.b3 }}
                       thumbColor={P.white}
                       style={{ transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }] }}
                     />
                     <Text style={[styles.reqState, { color: cp.nfcRequired ? P.info : P.t4 }]}>
-                      {cp.nfcTagId ? (cp.nfcRequired ? 'Required' : 'Paired') : 'Not paired'}
+                      {isPhysicalNfcTag(cp.nfcTagId) ? (cp.nfcRequired ? 'Required' : 'Paired') : cp.nfcTagId ? 'Re-pair real card' : 'Not paired'}
                     </Text>
                     <TouchableOpacity style={styles.pairBtn} onPress={() => pairTag(cp)} disabled={pairingId === cp.id}>
                       {pairingId === cp.id ? <Radio size={14} color={P.info} /> : <ScanLine size={14} color={P.info} />}
@@ -226,18 +258,33 @@ export function ManagerCheckpointScreen() {
 
               <View style={[styles.reqToggleRow, { marginTop: SP.px12 }]}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.fieldLabel}>Require NFC card</Text>
-                  <Text style={styles.nfcHint}>{newNfcTagId ? `Paired card · ${newNfcTagId.slice(-6)}` : 'Pair a tag at this checkpoint'}</Text>
+                  <Text style={styles.fieldLabel}>Require NFC Tag / Card</Text>
+                  <Text style={styles.nfcHint}>{newNfcTagId ? `Physical card paired · ${newNfcTagId}` : 'Scan a physical NFC card to pair it'}</Text>
                 </View>
-                <Switch value={newNfcRequired} onValueChange={setNewNfcRequired} disabled={!newNfcTagId} trackColor={{ true: P.info, false: P.b3 }} thumbColor={P.white} />
+                <Switch value={newNfcRequired} onValueChange={setNewNfcRequired} trackColor={{ true: P.info, false: P.b3 }} thumbColor={P.white} />
               </View>
-              <TouchableOpacity style={styles.pairWideBtn} onPress={async () => {
-                try { setNewNfcTagId(await readNfcTag()); Alert.alert('NFC card paired', 'This tag will be assigned to the new checkpoint.'); }
-                catch (error) { Alert.alert('NFC scan', error.message); }
-              }}>
-                <ScanLine size={16} color={P.info} />
-                <Text style={styles.pairTxt}>{newNfcTagId ? 'Scan a different NFC card' : 'Pair NFC card'}</Text>
-              </TouchableOpacity>
+
+              {newNfcRequired && (
+                <View style={{ marginTop: 8 }}>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity
+                      style={[styles.pairWideBtn, { flex: 1, marginTop: 0 }]}
+                      onPress={async () => {
+                        try {
+                          const tag = await readNfcTag();
+                          setNewNfcTagId(tag);
+                          Alert.alert('Tag Scanned', `Tag ID: ${tag}`);
+                        } catch (err) {
+                          Alert.alert('NFC Scan', err.message);
+                        }
+                      }}
+                    >
+                      <ScanLine size={15} color={P.info} />
+                      <Text style={styles.pairTxt}>Scan Card</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
 
               <TouchableOpacity
                 style={[btnPrimary, { marginTop: SP.px20, opacity: saving ? 0.6 : 1 }]}

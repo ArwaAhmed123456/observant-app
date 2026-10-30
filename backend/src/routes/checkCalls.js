@@ -17,14 +17,19 @@ const { createAlert } = require('../services/alertService');
 const { upload: uploadPhoto, saveImage } = require('../services/mediaStore');
 const { Site } = require('../models');
 const { audit } = require('../utils/auditLogger');
+const { getWhat3WordsFromCoordinates } = require('../utils/what3words');
 
 // Guard-initiated check calls are completed immediately and occupy the current
 // scheduled hour. The following automatic call is aligned to the next hour.
-router.post('/manual', authenticate, requireRole('guard'), [
+router.post('/manual', authenticate, requireRole('guard'),
+  (req, res, next) => uploadPhoto.single('photo')(req, res, err => err ? res.status(400).json({ error: err.message }) : next()),
+  [
   body('response').isIn(['yes', 'no']).withMessage('Response must be yes or no'),
   body('note').optional().trim().isLength({ max: 500 }),
   body('description').optional().trim().isLength({ max: 500 }),
   body('category').optional().trim().isLength({ max: 100 }),
+  body('latitude').optional().isFloat({ min: -90, max: 90 }),
+  body('longitude').optional().isFloat({ min: -180, max: 180 }),
 ], validate, asyncHandler(async (req, res) => {
   const now = new Date();
   const session = await ShiftSession.findOne({ organisationId: req.user.organisationId, guardId: req.user._id, bookedOffAt: null });
@@ -34,21 +39,33 @@ router.post('/manual', authenticate, requireRole('guard'), [
   const existing = await CheckCall.findOne({ sessionId: session._id, firedAt: { $gte: hourStart, $lt: nextHour } }).sort({ firedAt: -1 });
   if (existing) return res.status(409).json({ error: 'A check call is already recorded for this hour.', checkCall: existing });
   const noteText = req.body.description || req.body.note || null;
+  let photoUrl = null;
+  if (req.file) {
+    const fileId = await saveImage(req.file, { organisationId: req.user.organisationId.toString(), guardId: req.user._id.toString() });
+    photoUrl = `${req.protocol}://${req.get('host')}/api/media/${fileId}`;
+  }
   const call = await CheckCall.create({
     organisationId: req.user.organisationId, sessionId: session._id, guardId: req.user._id,
     siteId: session.siteId, firedAt: now, scheduledFor: hourStart, expiresAt: now,
     respondedAt: now, response: req.body.response, note: noteText,
     category: req.body.category || null, isManualLog: true,
+    photoUrl,
+    location: req.body.latitude != null && req.body.longitude != null ? {
+      latitude: Number(req.body.latitude),
+      longitude: Number(req.body.longitude),
+      what3words: await getWhat3WordsFromCoordinates(req.body.latitude, req.body.longitude),
+    } : null,
   });
   await ShiftSession.findByIdAndUpdate(session._id, {
     $inc: { checkCallCount: 1 }, $set: { nextCheckCallAt: nextHour },
   });
   if (req.body.response === 'no') {
-    const guard = await User.findById(req.user._id).select('name');
+    const guard = await User.findById(req.user._id).select('name badgeNumber');
+    const issueDetail = noteText ? `: ${noteText}` : '';
     await createAlert({ organisationId: req.user.organisationId, siteId: session.siteId, guardId: req.user._id,
-      type: 'check_call_issue', title: 'Issue reported by guard',
-      message: `${guard?.name || 'Guard'} reported an issue during a manual check call at ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.`,
-      note: req.body.note || null, refModel: 'CheckCall', refId: call._id });
+      type: 'check_call_issue', title: '⚠️ Issue reported by guard',
+      message: `${guard?.name || 'Guard'} reported an issue during check call at ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${issueDetail}`,
+      note: noteText, photoUrl, location: call.location || null, category: req.body.category || null, refModel: 'CheckCall', refId: call._id });
     await CheckCall.findByIdAndUpdate(call._id, { managerAlerted: true, managerAlertedAt: now });
   }
   await audit({ req, action: req.body.response === 'no' ? 'issue_reported' : 'check_call_completed', targetModel: 'CheckCall', targetId: call._id, targetName: req.user.name, details: { manual: true, response: req.body.response } });
@@ -117,7 +134,9 @@ router.post('/:id/respond',
     }
 
     if (req.body.latitude != null && req.body.longitude != null) {
-      cc.location = { latitude: Number(req.body.latitude), longitude: Number(req.body.longitude) };
+      const latitude = Number(req.body.latitude);
+      const longitude = Number(req.body.longitude);
+      cc.location = { latitude, longitude, what3words: await getWhat3WordsFromCoordinates(latitude, longitude) };
       const site = await Site.findById(cc.siteId).select('location geofenceRadiusMetres');
       const [siteLon, siteLat] = site?.location?.coordinates || [];
       if (siteLat != null && siteLon != null) {
@@ -152,14 +171,18 @@ router.post('/:id/respond',
     // If guard reported an issue, alert managers
     if (response === 'no') {
       const guard = await User.findById(guardId).select('name badgeNumber');
+      const issueDetail = cc.note ? `: ${cc.note}` : '';
       await createAlert({
         organisationId: orgId,
         siteId:   cc.siteId,
         guardId,
         type:     'check_call_issue',
         title:    '⚠️ Issue reported on site',
-        message:  `${guard.name} reported an issue at ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`,
-        note:     note || null,
+        message:  `${guard.name} reported an issue at ${now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}${issueDetail}`,
+        note:     cc.note || null,
+        photoUrl: cc.photoUrl || null,
+        category: cc.category || null,
+        location: cc.location || null,
         refModel: 'CheckCall',
         refId:    cc._id,
       });

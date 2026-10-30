@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Switch, Modal, ActivityIndicator,
+  TextInput, Switch, Modal, ActivityIndicator, Alert,
 } from 'react-native';
 import { useApp } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
@@ -12,12 +12,13 @@ import {
 } from 'lucide-react-native';
 
 export function ProfileScreen() {
-  const { currentUser, sites, logout, shiftSessions, checkCalls, patrolSessions, updatePassword, deleteAccount } = useApp();
+  const { currentUser, sites, logout, shiftSessions, checkCalls, patrolSessions, updatePassword, deleteAccount, addAlert } = useApp();
   const site = sites.find(s => s.id === currentUser?.siteId || s._id === currentUser?.siteId);
 
   const [pwModal, setPwModal]     = useState(false);
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteReason, setDeleteReason]   = useState('');
   const [oldPw, setOldPw]         = useState('');
   const [newPw, setNewPw]         = useState('');
   const [confirmPw, setConfirmPw] = useState('');
@@ -235,29 +236,88 @@ export function ProfileScreen() {
             <View style={[styles.actionIcon, { width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(239, 68, 68, 0.15)', borderWidth: 1, borderColor: P.dangerBorder, marginBottom: SP.px16 }]}>
               <AlertTriangle size={24} color={P.danger} />
             </View>
-            <Text style={[styles.modalTitle, { color: P.danger }]}>Delete Account Permanently?</Text>
-            <Text style={[styles.modalSubTxt, { textAlign: 'center', marginBottom: SP.px16 }]}>
-              This action will deactivate your security officer profile, invalidate all login credentials, and cannot be undone.
+            <Text style={[styles.modalTitle, { color: P.danger }]}>
+              {currentUser?.role === 'manager' || currentUser?.role === 'admin'
+                ? 'Delete Manager Account?'
+                : 'Request Account Deletion'}
             </Text>
+            <Text style={[styles.modalSubTxt, { textAlign: 'center', marginBottom: SP.px12 }]}>
+              {currentUser?.role === 'manager' || currentUser?.role === 'admin'
+                ? 'This action will permanently delete your manager account and remove access to the operations portal.'
+                : 'Security compliance and shift records require Operations Manager approval before an officer account can be deleted. Submitting will send an immediate formal deletion request to your Manager.'}
+            </Text>
+
+            {!(currentUser?.role === 'manager' || currentUser?.role === 'admin') && (
+              <View style={{ width: '100%', marginBottom: SP.px16 }}>
+                <Text style={styles.fieldLabel}>Reason for Leaving / Deletion (Optional)</Text>
+                <TextInput
+                  style={[input, { color: P.t1, minHeight: 70, textAlignVertical: 'top', paddingTop: 10 }]}
+                  multiline
+                  numberOfLines={3}
+                  value={deleteReason}
+                  onChangeText={setDeleteReason}
+                  placeholder="e.g. Relocating, career change, end of contract..."
+                  placeholderTextColor={P.t4}
+                />
+              </View>
+            )}
+
             <TouchableOpacity
               style={[btnDanger, { width: '100%', marginBottom: 10, opacity: deleteLoading ? 0.6 : 1 }]}
               disabled={deleteLoading}
               onPress={async () => {
                 setDeleteLoading(true);
-                const targetId = currentUser?.id || currentUser?._id;
-                const res = await deleteAccount(targetId);
-                setDeleteLoading(false);
-                if (res?.success) {
-                  setDeleteModal(false);
-                  // deleteAccount already calls logout() internally — no need to call again
+                const isManager = currentUser?.role === 'manager' || currentUser?.role === 'admin';
+                if (!isManager) {
+                  // Guard flow: Send request to manager
+                  try {
+                    if (addAlert) {
+                      await addAlert({
+                        type: 'account_deletion_request',
+                        title: `⚠️ Deletion Request — ${currentUser?.name || 'Officer'}`,
+                        message: `Officer ${currentUser?.name || 'Guard'} (Badge: ${currentUser?.badgeNumber || '—'}) has requested account deletion.\nReason: ${deleteReason?.trim() || 'No reason provided'}.\n\nPlease review and confirm in Guard Management.`,
+                        guardId: currentUser?.id || currentUser?._id,
+                        siteId: currentUser?.siteId,
+                        location: site?.name || 'Assigned Site',
+                      });
+                    }
+                    setDeleteLoading(false);
+                    setDeleteModal(false);
+                    setDeleteReason('');
+                    Alert.alert(
+                      'Request Submitted to Manager',
+                      'Your Operations Manager has received your account deletion request and must confirm it before your account is closed.',
+                      [{ text: 'OK' }]
+                    );
+                  } catch (err) {
+                    setDeleteLoading(false);
+                    Alert.alert('Error', 'Unable to submit request. Please notify your manager directly.');
+                  }
                 } else {
-                  Alert.alert('Unable to delete account', res?.error || 'Please contact your operations manager.');
+                  // Manager direct deletion
+                  const targetId = currentUser?.id || currentUser?._id;
+                  const res = await deleteAccount(targetId);
+                  setDeleteLoading(false);
+                  if (res?.success) {
+                    setDeleteModal(false);
+                  } else {
+                    Alert.alert('Unable to delete account', res?.error || 'Please contact support.');
+                  }
                 }
               }}
             >
-              <Text style={styles.saveBtnTxt}>{deleteLoading ? 'Deleting Account…' : 'Yes, Permanently Delete My Account'}</Text>
+              <Text style={styles.saveBtnTxt}>
+                {deleteLoading
+                  ? 'Processing…'
+                  : (currentUser?.role === 'manager' || currentUser?.role === 'admin'
+                    ? 'Yes, Permanently Delete My Account'
+                    : 'Submit Request to Manager')}
+              </Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.cancelBtn, { width: '100%' }]} onPress={() => setDeleteModal(false)}>
+            <TouchableOpacity
+              style={[styles.cancelBtn, { width: '100%' }]}
+              onPress={() => { setDeleteModal(false); setDeleteReason(''); }}
+            >
               <Text style={styles.cancelBtnTxt}>Cancel & Keep Account</Text>
             </TouchableOpacity>
           </View>

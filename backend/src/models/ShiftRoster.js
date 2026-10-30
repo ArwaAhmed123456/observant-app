@@ -16,6 +16,9 @@ const shiftRosterSchema = new mongoose.Schema({
   siteId:         { type: mongoose.Schema.Types.ObjectId, ref: 'Site', required: true },
   // Optional site checkpoints assigned to this guard for the roster week.
   checkpointIds:  [{ type: mongoose.Schema.Types.ObjectId, ref: 'PatrolCheckpoint' }],
+  checkCallInterval: { type: Number, default: 60, min: 5, max: 1440 },
+  recurringWeekly: { type: Boolean, default: true },
+  shiftInstructions: { type: String, default: '', maxlength: 2000 },
   publishedBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 
   weekStartDate:  { type: String, required: true }, // e.g. "2026-09-21"

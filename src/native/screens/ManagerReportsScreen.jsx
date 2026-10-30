@@ -247,13 +247,15 @@ export function ManagerReportsScreen() {
       const finishDateStr = fmtDate(endD);
       const yearStr = endD.getFullYear() || new Date().getFullYear();
 
-      // Clean hyphenated filename: e.g. "Tripod-Checkcalls-2026.pdf" or "Observant-Checkcalls-2026.pdf"
-      const siteRaw = siteFilter !== 'all' && siteName && siteName !== 'All Sites'
-        ? siteName
-        : (currentUser?.organisationName || 'Observant');
-      const cleanSite = siteRaw.trim().replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'Observant';
-      const cleanType = reportType === 'check_calls' ? 'Checkcalls' : reportType === 'patrols' ? 'Patrols' : 'Checkcalls-Patrols';
-      const pdfFileName = `${cleanSite}-${cleanType}-${yearStr}.pdf`;
+      // Professional PDF filename: e.g. "Observant_Security_CheckCall_Report_26-10-2026.pdf"
+      const orgName = (currentUser?.organisationName || 'Observant_Security').trim();
+      const sitePart = siteFilter !== 'all' && siteName && siteName !== 'All Sites'
+        ? `_${siteName.trim().replace(/[^a-zA-Z0-9]/g, '_')}`
+        : '';
+      const typePart = reportType === 'check_calls' ? 'CheckCall' : reportType === 'patrols' ? 'Patrol' : 'CheckCall_Patrol';
+      const datePart = fmtDate(endD).replace(/\//g, '-');
+      const cleanCompany = orgName.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '') || 'Observant_Security';
+      const pdfFileName = `${cleanCompany}${sitePart}_${typePart}_Report_${datePart}.pdf`;
 
       // ── Group check-call rows by officer + site + shift-date ──────────────
       const checkCallRows = rows.filter(r => r.type === 'check_call');
@@ -352,6 +354,7 @@ export function ManagerReportsScreen() {
   .footer { margin-top: 10px; font-size: 7.5px; color: #555; text-align: center; border-top: 1px solid #ccc; padding-top: 4px; }
   .doc-no { font-size: 7.5px; color: #555; text-align: left; margin-top: 6px; }
 </style>
+<title>${pdfFileName.replace('.pdf', '')}</title>
 </head>
 <body>
 
@@ -422,7 +425,8 @@ ${(reportType === 'combined' || reportType === 'patrols') && patrolRows.length >
 
       let targetUri = uri;
       try {
-        const destUri = `${FileSystem.documentDirectory || FileSystem.cacheDirectory}${pdfFileName}`;
+        const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+        const destUri = `${baseDir}${pdfFileName}`;
         await FileSystem.deleteAsync(destUri, { idempotent: true });
         await FileSystem.copyAsync({ from: uri, to: destUri });
         targetUri = destUri;

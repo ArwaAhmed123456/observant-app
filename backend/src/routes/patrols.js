@@ -28,6 +28,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const { createAlert } = require('../services/alertService');
 const { upload: uploadPhoto, saveImage } = require('../services/mediaStore');
 const { getMondayOfWeek, dayKey } = require('../utils/dateHelpers');
+const { getWhat3WordsFromCoordinates } = require('../utils/what3words');
 
 // ════════════════════════════════════════════════════════════
 // CHECKPOINT CONFIG
@@ -38,7 +39,7 @@ router.get('/checkpoints', authenticate, requireRole('guard','manager','admin'),
   if (!siteId) return res.status(400).json({ error: 'siteId query param required' });
   const site = await require('../models').Site.findOne({ _id: siteId, organisationId: req.user.organisationId, active: true });
   if (!site) return res.status(404).json({ error: 'Site not found.' });
-  if (req.user.role === 'guard' && String(req.user.siteId) !== String(site._id)) {
+  if (req.user.role === 'guard' && ![req.user.siteId, ...(req.user.assignedSiteIds || [])].some(id => String(id) === String(site._id))) {
     const hasRosterOrShift = await ShiftRoster.exists({ organisationId: req.user.organisationId, guardId: req.user._id, siteId: site._id });
     if (!hasRosterOrShift) return res.status(403).json({ error: 'Site is outside your assignment.' });
   }
@@ -62,6 +63,7 @@ router.post('/checkpoints',
   asyncHandler(async (req, res) => {
     const { siteId, name, order, required, nfcRequired, nfcTagId, qrCode } = req.body;
     if (nfcRequired && !nfcTagId) return res.status(400).json({ error: 'Pair an NFC tag before requiring NFC verification.' });
+    if (nfcTagId && !/^[a-f0-9]{8,32}$/i.test(String(nfcTagId))) return res.status(400).json({ error: 'NFC tag ID must be the scanned physical card UID (8–32 hexadecimal characters).' });
     const site = await require('../models').Site.findOne({ _id: siteId, organisationId: req.user.organisationId, active: true });
     if (!site) return res.status(404).json({ error: 'Site not found.' });
     if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(site._id))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
@@ -94,6 +96,7 @@ router.patch('/checkpoints/:id',
     if (updates.nfcRequired === true && !(updates.nfcTagId || checkpoint.nfcTagId)) {
       return res.status(400).json({ error: 'Pair an NFC tag before requiring NFC verification.' });
     }
+    if (updates.nfcTagId && !/^[a-f0-9]{8,32}$/i.test(String(updates.nfcTagId))) return res.status(400).json({ error: 'NFC tag ID must be the scanned physical card UID (8–32 hexadecimal characters).' });
     if (updates.location?.coordinates?.length === 2) {
       const [longitude, latitude] = updates.location.coordinates;
       updates.location.coordinates = [Number(longitude), Number(latitude)];
@@ -140,7 +143,7 @@ router.post('/start',
       responded: false, managerAlerted: false, expiresAt: { $gt: new Date() },
     }).sort({ triggeredAt: -1 });
     if (req.body.triggeredByAntiIdle && !activePrompt) return res.status(410).json({ error: 'There is no active surprise patrol response window.' });
-    const roster = await ShiftRoster.findOne({ organisationId: orgId, guardId, weekStartDate: getMondayOfWeek() }).select('days checkpointIds');
+    const roster = await ShiftRoster.findOne({ organisationId: orgId, guardId, siteId: session.siteId, weekStartDate: getMondayOfWeek() }).select('days checkpointIds');
     const assignedCheckpointIds = roster?.days?.[dayKey()] && roster.checkpointIds?.length ? roster.checkpointIds : [];
 
     // If already has an in-progress patrol, return it
@@ -215,6 +218,7 @@ router.post('/:id/capture',
     if (req.file && !checkpoint.required) return res.status(400).json({ error: 'A photo is not required for this checkpoint.' });
     if (nfcTagId && !checkpoint.nfcRequired) return res.status(400).json({ error: 'An NFC scan is not required for this checkpoint.' });
     const cleanTagId = value => String(value || '').replace(/[^a-f0-9]/gi, '').toLowerCase();
+    if (nfcTagId && !/^[a-f0-9]{8,32}$/i.test(cleanTagId(nfcTagId))) return res.status(400).json({ error: 'Invalid NFC card ID. Scan the physical checkpoint card again.' });
     if (nfcTagId && checkpoint.nfcRequired && cleanTagId(nfcTagId) !== cleanTagId(checkpoint.nfcTagId)) {
       return res.status(400).json({ error: 'NFC card does not match the tag assigned to this checkpoint.' });
     }
@@ -240,6 +244,9 @@ router.post('/:id/capture',
     capture.capturedAt = new Date();
     capture.latitude = latitude !== undefined && latitude !== '' ? parseFloat(latitude) : capture.latitude ?? null;
     capture.longitude = longitude !== undefined && longitude !== '' ? parseFloat(longitude) : capture.longitude ?? null;
+    if (capture.latitude != null && capture.longitude != null) {
+      capture.what3words = await getWhat3WordsFromCoordinates(capture.latitude, capture.longitude);
+    }
     if (!patrol.capturedCheckpointIds.map(String).includes(String(checkpointId))) patrol.capturedCheckpointIds.push(checkpointId);
     patrol.markModified('captures');
     await patrol.save();
@@ -274,7 +281,7 @@ router.post('/:id/finish',
     const missingIds   = required.filter(cp => {
       const cpIdStr = String(cp._id);
       const capture = patrol.captures.find(item => String(item.checkpointId) === cpIdStr);
-      const hasPhoto = Boolean(capture?.photoUrl || capture?.publicId || patrol.capturedCheckpointIds?.map(String).includes(cpIdStr));
+      const hasPhoto = Boolean(capture?.photoUrl || capture?.publicId);
       const hasNfc = !cp.nfcRequired || Boolean(capture?.nfcVerifiedAt);
       return !capture || (cp.required && !hasPhoto) || (cp.nfcRequired && !hasNfc);
     }).map(cp => cp._id.toString());
@@ -305,21 +312,27 @@ router.post('/:id/finish',
     const nextRandomPromptAt = new Date(now.getTime() + (10 + Math.random() * 20) * 60 * 1000);
     await ShiftSession.findByIdAndUpdate(patrol.shiftSessionId, { nextRandomPromptAt });
 
-    // Alert managers if incomplete
-    if (status === 'incomplete') {
+    // Persist both routine patrol records and exceptions; preferences decide whether routine records send push.
+    {
       const guard = await User.findById(guardId).select('name badgeNumber');
+      const evidencePhotos = patrol.captures.map(capture => capture.photoUrl).filter(Boolean);
       await createAlert({
         organisationId: orgId,
         siteId:   patrol.siteId,
         guardId,
-        type:     'patrol_missing_checkpoints',
-        title:    '⚠️ Patrol finished with missing checkpoints',
-        message:  `${guard.name} finished a patrol with ${missingIds.length} checkpoint(s) missing.`,
+        type: status === 'incomplete' ? 'patrol_missing_checkpoints' : 'patrol_complete',
+        title: status === 'incomplete' ? '⚠️ Patrol finished with missing checkpoints' : 'Patrol completed',
+        message: status === 'incomplete'
+          ? `${guard?.name || 'Guard'} finished a patrol with ${missingIds.length} checkpoint(s) missing.`
+          : `${guard?.name || 'Guard'} completed all required patrol checkpoints.`,
+        photoUrls: evidencePhotos,
         refModel: 'PatrolSession',
         refId:    patrol._id,
       });
-      patrol.managerAlerted = true;
-      await patrol.save();
+      if (status === 'incomplete') {
+        patrol.managerAlerted = true;
+        await patrol.save();
+      }
     }
 
     res.json({ patrol });

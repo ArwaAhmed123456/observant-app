@@ -16,8 +16,8 @@ import {
 } from 'lucide-react-native';
 import * as Location from 'expo-location';
 import {
-  isValidWhat3Words, isValidCoordinates, getCoordinatesFromWhat3Words,
-  getWhat3WordsSync, getMapUrl
+  isValidWhat3Words, normalizeWhat3Words, isValidCoordinates, getCoordinatesFromWhat3Words,
+  getMapUrl
 } from '../../utils/what3words';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -223,7 +223,7 @@ export function SuperAdminScreen() {
     setSiteName(site.name || '');
     setSiteAddress(site.address || '');
     setSitePostcode(site.postcode || '');
-    const w3wVal = site.what3words || (site.latitude && site.longitude ? getWhat3WordsSync(site.latitude, site.longitude) : '');
+    const w3wVal = site.what3words || '';
     setSiteW3w(w3wVal || '');
     setSiteLat(site.latitude != null ? String(site.latitude) : '51.5050');
     setSiteLng(site.longitude != null ? String(site.longitude) : '-0.0195');
@@ -287,8 +287,8 @@ export function SuperAdminScreen() {
     const defaultMgr = users.find(u => u.role === 'manager' && u.status !== 'inactive')?.id || currentUser?.id || 'admin';
     const chosenMgrId = siteManagerId || defaultMgr;
     const trimmedW3w = siteW3w.trim();
-    const normalizedW3w = trimmedW3w ? (trimmedW3w.startsWith('///') ? trimmedW3w : `///${trimmedW3w}`) : null;
-    const finalW3w = normalizedW3w || (!isNaN(latNum) && !isNaN(lngNum) ? getWhat3WordsSync(latNum, lngNum) : null);
+    const normalizedW3w = trimmedW3w ? normalizeWhat3Words(trimmedW3w) : null;
+    const finalW3w = normalizedW3w;
 
     setModalLoading(true);
     const siteData = {
@@ -317,7 +317,7 @@ export function SuperAdminScreen() {
       setModalLoading(false);
       if (res?.success) {
         setShowSiteModal(false);
-        Alert.alert('Site Created', `${siteName} is registered and active for guard rosters.`);
+        Alert.alert('Site Created', `${siteName} is registered and active for guard rosters.${res.what3wordsLookupUnavailable ? '\n\nWhat3Words lookup was unavailable. Check the API key/network or enter the address manually.' : ''}`);
       } else {
         Alert.alert('Creation Failed', res?.error || 'Could not create site.');
       }
@@ -871,7 +871,7 @@ export function SuperAdminScreen() {
                   const manager = users.find(u => u.id === site.managerId);
                   const assignedGuards = users.filter(u => u.siteId === site.id || (u.siteIds && u.siteIds.includes(site.id)));
                   const mapUrl = getMapUrl(site.latitude, site.longitude, site.what3words);
-                  const displayW3w = site.what3words || (site.latitude && site.longitude ? getWhat3WordsSync(site.latitude, site.longitude) : null);
+                  const displayW3w = site.what3words || null;
 
                   return (
                     <View key={site.id || site._id} style={styles.siteCard}>
@@ -1128,12 +1128,11 @@ export function SuperAdminScreen() {
                       const perm = await Location.requestForegroundPermissionsAsync();
                       if (perm.status === 'granted') {
                         const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-                        const w3w = getWhat3WordsSync(pos.coords.latitude, pos.coords.longitude);
-                        setSiteW3w(w3w);
+                        setSiteW3w('');
                         setSiteLat(pos.coords.latitude.toFixed(6));
                         setSiteLng(pos.coords.longitude.toFixed(6));
                         if (pos.coords.altitude != null) setSiteAltitude(pos.coords.altitude.toFixed(1));
-                        Alert.alert('GPS & W3W Detected', `Coordinates and ${w3w} populated.`);
+                        Alert.alert('GPS Detected', 'Coordinates were captured. Add a verified What3Words address manually if one is available.');
                       } else {
                         Alert.alert('Permission Needed', 'Location permission is required to detect GPS coordinates.');
                       }

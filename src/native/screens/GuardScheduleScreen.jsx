@@ -6,18 +6,10 @@ import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card } from '../../ds';
+import { getUKDateKey, getUKMondayDate } from '../../utils/scheduleDates';
 
 const DAY_KEYS   = ['mon','tue','wed','thu','fri','sat','sun'];
 const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-
-function getMondayOfWeek(date) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(12, 0, 0, 0);
-  return d;
-}
 
 function addDays(date, n) {
   const d = new Date(date);
@@ -35,7 +27,7 @@ function toWeekKey(date) {
 
 export function GuardScheduleScreen() {
   const { currentUser, sites, getGuardRoster, getGuardRosters, shiftSessions, refreshRosters } = useApp();
-  const [weekStart, setWeekStart] = useState(getMondayOfWeek(new Date()));
+  const [weekStart, setWeekStart] = useState(getUKMondayDate(new Date()));
 
   useFocusEffect(useCallback(() => {
     refreshRosters?.().catch(error => console.warn('[Observant] Could not refresh guard rota:', error.message));
@@ -46,8 +38,8 @@ export function GuardScheduleScreen() {
   const rostersForWeek = getGuardRosters ? getGuardRosters(gId, weekKey) : [];
   const singleRoster  = getGuardRoster(gId, weekKey);
   const allWeekRosters = rostersForWeek.length > 0 ? rostersForWeek : (singleRoster ? [singleRoster] : []);
-  const today         = toWeekKey(new Date());
-  const isCurrentWeek = toWeekKey(getMondayOfWeek(new Date())) === weekKey;
+  const today         = getUKDateKey(new Date());
+  const isCurrentWeek = toWeekKey(getUKMondayDate(new Date())) === weekKey;
 
   const prevWeek = () => setWeekStart(prev => addDays(prev, -7));
   const nextWeek = () => setWeekStart(prev => addDays(prev, 7));

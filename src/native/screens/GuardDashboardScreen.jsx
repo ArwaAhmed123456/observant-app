@@ -21,7 +21,19 @@ import {
   Flame,
   Radio
 } from 'lucide-react-native';
-import { useSecurity } from '../../context/SecurityContext';
+// Legacy screen — not currently mounted in the navigator.
+// Stub out SecurityContext dependency to prevent the web-only AudioContext crash on iOS.
+const useSecurity = () => ({
+  currentUser: { id: '', name: '', badgeNumber: '', assignedSiteId: '' },
+  sites: [],
+  activeShiftSession: null,
+  activePatrolSession: null,
+  bookOn: () => {},
+  bookOff: () => {},
+  triggerPanicAlert: () => {},
+  triggerCheckCall: () => {},
+  notifications: [],
+});
 
 export const GuardDashboardScreen = ({
   onNavigateToPatrol,

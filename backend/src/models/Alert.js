@@ -19,11 +19,13 @@ const alertSchema = new mongoose.Schema({
       'check_call_issue',
       'patrol_incomplete',
       'patrol_missing_checkpoints',
+      'patrol_complete',
       'guard_booked_late',
       'shift_end_reminder',
       'random_prompt_ignored',
       'sos',
       'geofence_warning',
+      'account_deletion_request',
     ],
     required: true,
   },
@@ -31,9 +33,13 @@ const alertSchema = new mongoose.Schema({
   title:   { type: String, required: true },
   message: { type: String, required: true },
   note:    { type: String, default: null },
+  category:{ type: String, default: null },
+  photoUrl:{ type: String, default: null },
+  photoUrls: { type: [String], default: [] },
+  location:{ type: mongoose.Schema.Types.Mixed, default: null },
 
   // Reference to the source document
-  refModel: { type: String, enum: ['CheckCall', 'PatrolSession', 'ShiftSession', 'RandomPromptLog'], default: null },
+  refModel: { type: String, enum: ['CheckCall', 'PatrolSession', 'ShiftSession', 'RandomPromptLog', 'User'], default: null },
   refId:    { type: mongoose.Schema.Types.ObjectId, default: null },
 
   // Read tracking per manager

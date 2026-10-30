@@ -13,6 +13,7 @@ const captureSchema = new mongoose.Schema({
   capturedAt:   { type: Date, default: Date.now },
   latitude:     { type: Number, default: null },
   longitude:    { type: Number, default: null },
+  what3words:   { type: String, default: null, trim: true },
 }, { _id: true });
 
 const patrolSessionSchema = new mongoose.Schema({

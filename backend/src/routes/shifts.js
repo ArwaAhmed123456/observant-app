@@ -10,7 +10,7 @@
  */
 const router = require('express').Router();
 const { body } = require('express-validator');
-const { ShiftSession, ShiftRoster, PatrolSession, User } = require('../models');
+const { ShiftSession, ShiftRoster, PatrolSession, User, Site } = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
 const validate     = require('../middleware/validate');
 const asyncHandler = require('../utils/asyncHandler');
@@ -23,6 +23,15 @@ const {
 } = require('../utils/dateHelpers');
 const { createAlert } = require('../services/alertService');
 const { audit } = require('../utils/auditLogger');
+
+async function managerSites(user) {
+  const owned = await Site.find({
+    organisationId: user.organisationId,
+    managerId: user._id,
+    active: true,
+  }).distinct('_id');
+  return [...new Set([...(user.managedSiteIds || []), ...owned].map(String))];
+}
 
 // ── Book On ───────────────────────────────────────────────────────────────────
 router.post('/book-on',
@@ -38,6 +47,15 @@ router.post('/book-on',
     if (!targetSiteId) {
       return res.status(400).json({ error: 'No site specified for book on.' });
     }
+    if (![req.user.siteId, ...(req.user.assignedSiteIds || [])].some(id => String(id) === String(targetSiteId))) return res.status(403).json({ error: 'You are not assigned to this site.' });
+
+    const activeAtAnotherSite = await ShiftSession.findOne({
+      organisationId: orgId, guardId, bookedOffAt: null, siteId: { $ne: targetSiteId },
+    }).populate('siteId', 'name');
+    if (activeAtAnotherSite) return res.status(409).json({
+      error: `You are already booked on at ${activeAtAnotherSite.siteId?.name || 'another site'}. Book off before starting a shift at this site.`,
+      activeSiteId: String(activeAtAnotherSite.siteId?._id || activeAtAnotherSite.siteId || ''),
+    });
 
     // Find roster for this week and site
     const weekStart = getMondayOfWeek(now);
@@ -47,15 +65,6 @@ router.post('/book-on',
       siteId: targetSiteId,
       weekStartDate: weekStart,
     });
-
-    // Fallback: Check if there's any active roster for this guard this week
-    if (!roster) {
-      roster = await ShiftRoster.findOne({
-        organisationId: orgId,
-        guardId,
-        weekStartDate: weekStart,
-      });
-    }
 
     const todayShift = roster?.days?.[dayKey(now)];
     const scheduledStart = todayShift?.start || null;
@@ -244,9 +253,9 @@ router.get('/',
     } else {
       if (guardId) filter.guardId = guardId;
       if (req.user.role === 'manager') {
-        const allowedSites = req.user.managedSiteIds.map(String);
+        const allowedSites = await managerSites(req.user);
         if (siteId && !allowedSites.includes(String(siteId))) filter.siteId = null;
-        else filter.siteId = siteId || { $in: req.user.managedSiteIds };
+        else filter.siteId = siteId || { $in: allowedSites };
       } else if (siteId) filter.siteId = siteId;
     }
 
@@ -272,11 +281,12 @@ router.get('/',
 
 // ── Get one session ───────────────────────────────────────────────────────────
 router.get('/:id', authenticate, asyncHandler(async (req, res) => {
+  const allowedManagerSites = req.user.role === 'manager' ? await managerSites(req.user) : null;
   const session = await ShiftSession.findOne({
     _id: req.params.id,
     organisationId: req.user.organisationId,
     ...(req.user.role === 'guard' ? { guardId: req.user._id } : {}),
-    ...(req.user.role === 'manager' ? { siteId: { $in: req.user.managedSiteIds } } : {}),
+    ...(allowedManagerSites ? { siteId: { $in: allowedManagerSites } } : {}),
   })
     .populate('guardId', 'name badgeNumber avatarUrl')
     .populate('siteId',  'name address what3words latitude longitude');
@@ -289,10 +299,11 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
 router.patch('/:id',
   authenticate, requireRole('manager', 'admin', 'superadmin'),
   asyncHandler(async (req, res) => {
+    const allowedManagerSites = req.user.role === 'manager' ? await managerSites(req.user) : null;
     const session = await ShiftSession.findOne({
       _id: req.params.id,
       organisationId: req.user.organisationId,
-      ...(req.user.role === 'manager' ? { siteId: { $in: req.user.managedSiteIds } } : {}),
+      ...(allowedManagerSites ? { siteId: { $in: allowedManagerSites } } : {}),
     });
     if (!session) return res.status(404).json({ error: 'Shift session not found or inaccessible.' });
 

@@ -11,6 +11,7 @@ import {
 import { registerPushNotifications } from '../services/pushNotifications';
 import { compressImageForUpload } from '../utils/imageCompressor';
 import { getWhat3WordsSync, formatLocationTelemetry } from '../utils/what3words';
+import { getUKDayKey, isCurrentUKWeek } from '../utils/scheduleDates';
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -320,9 +321,10 @@ export function AppProvider({ children }) {
           password: userData.password, role: userData.role === 'superadmin' ? 'admin' : (userData.role || 'guard'),
           badgeNumber: userData.badgeNumber, phone: userData.phone,
           siteId: userData.siteId || null, managedSiteIds: userData.siteIds || [],
+          assignedSiteIds: userData.role === 'guard' ? (userData.assignedSiteIds || [userData.siteId].filter(Boolean)) : undefined,
         });
         const user = normalizeUser(response.user);
-        setUsers(previous => [user, ...previous]);
+        setUsers(previous => [user, ...previous.filter(existing => String(existing.id || existing._id) !== String(user.id || user._id))]);
         return { success: true, user };
       } catch (error) { return { success: false, error: error.message }; }
     }
@@ -341,6 +343,7 @@ export function AppProvider({ children }) {
       badgeNumber: userData.badgeNumber || `SG-${Math.floor(1000 + Math.random() * 9000)}`,
       phone: userData.phone || '',
       siteId: userData.role === 'guard' ? userData.siteId : undefined,
+      assignedSiteIds: userData.role === 'guard' ? (userData.assignedSiteIds || [userData.siteId].filter(Boolean)) : undefined,
       siteIds: userData.role === 'manager' ? (userData.siteIds || [userData.siteId].filter(Boolean)) : undefined,
       createdAt: new Date().toISOString(),
     };
@@ -375,13 +378,34 @@ export function AppProvider({ children }) {
       try {
         const response = await apiPost('/api/sites', payload);
         const site = normalizeSite(response.site);
-        setSites(previous => [site, ...previous]);
-        return { success: true, site };
+        setSites(previous => [site, ...previous.filter(item => String(item.id || item._id) !== String(site.id || site._id))]);
+        const currentUserId = String(currentUser?.id || currentUser?._id || '');
+        if (String(site.managerId || payload.managerId || '') === currentUserId) {
+          const siteId = String(site.id || site._id);
+          setCurrentUser(previous => {
+            if (!previous) return previous;
+            const managedSiteIds = [...new Set([
+              ...(previous.siteIds || []), ...(previous.managedSiteIds || []), siteId,
+            ].map(String))];
+            return { ...previous, siteIds: managedSiteIds, managedSiteIds };
+          });
+        }
+        return { success: true, site, alreadyRegistered: Boolean(response.alreadyRegistered), what3wordsLookupUnavailable: Boolean(response.what3wordsLookupUnavailable) };
       } catch (error) {
         return { success: false, error: error.message };
       }
     }
     const allSites = await load(KEYS.SITES) || [];
+    const existingSite = allSites.find(site =>
+      site.active !== false &&
+      String(site.managerId || '') === String(payload.managerId || '') &&
+      String(site.name || '').trim().toLowerCase() === payload.name.toLowerCase() &&
+      String(site.address || '').trim().toLowerCase() === String(payload.address || '').toLowerCase()
+    );
+    if (existingSite) {
+      setSites(previous => [existingSite, ...previous.filter(item => String(item.id || item._id) !== String(existingSite.id || existingSite._id))]);
+      return { success: true, site: existingSite, alreadyRegistered: true };
+    }
     const newSite = {
       id: `s_${Date.now()}`,
       name: payload.name,
@@ -399,7 +423,11 @@ export function AppProvider({ children }) {
     };
     const updated = [newSite, ...allSites];
     await save(KEYS.SITES, updated);
-    setSites(updated);
+    setSites(previous => [newSite, ...previous.filter(item => String(item.id || item._id) !== String(newSite.id))]);
+    if (String(payload.managerId || '') === String(currentUser?.id || currentUser?._id || '')) {
+      const managedSiteIds = [...new Set([...(currentUser?.siteIds || []), newSite.id].map(String))];
+      setCurrentUser(previous => previous ? { ...previous, siteIds: managedSiteIds, managedSiteIds } : previous);
+    }
     await addAuditLog({
       action: 'SITE_CREATED',
       targetName: newSite.name,
@@ -489,6 +517,7 @@ export function AppProvider({ children }) {
           ...updates,
           ...(updates.status ? { active: updates.status !== 'inactive' } : {}),
           ...(updates.siteIds ? { managedSiteIds: updates.siteIds } : {}),
+          ...(updates.assignedSiteIds ? { siteId: updates.siteId || updates.assignedSiteIds[0], assignedSiteIds: updates.assignedSiteIds } : {}),
         });
         const user = normalizeUser(saved);
         setUsers(previous => previous.map(item => item.id === userId ? user : item));
@@ -684,12 +713,13 @@ export function AppProvider({ children }) {
     return shiftSessions.find(s => s.guardId === guardId && !s.bookedOffAt) || null;
   }, [shiftSessions]);
 
-  const getTodayRoster = useCallback((guardId) => {
+  const getTodayRoster = useCallback((guardId, siteId = null) => {
     const today = new Date();
     const dayNames = ['sun','mon','tue','wed','thu','fri','sat'];
     const todayDay = dayNames[today.getDay()];
     return rosters.find(r =>
       r.guardId === guardId &&
+      (!siteId || String(r.siteId?._id || r.siteId?.id || r.siteId || '') === String(siteId)) &&
       r.days &&
       r.days[todayDay] &&
       r.weekStartDate &&
@@ -715,7 +745,7 @@ export function AppProvider({ children }) {
   // ─── Shift: Book On ───────────────────────────────────────────────────────
   const bookOn = useCallback(async (guardId, siteId) => {
     if (API_ENABLED) {
-      const scheduledEnd = getTodayRoster(guardId)?.days?.[todayKey()]?.end;
+      const scheduledEnd = getTodayRoster(guardId, siteId)?.days?.[todayKey()]?.end;
       let scheduledEndAt = null;
       if (scheduledEnd) {
         const [hours, minutes] = scheduledEnd.split(':').map(Number);
@@ -741,7 +771,9 @@ export function AppProvider({ children }) {
         : s
     );
 
-    const roster = getTodayRoster(guardId);
+    const existingAtOtherSite = allSessions.find(session => session.guardId === guardId && !session.bookedOffAt && String(session.siteId) !== String(siteId));
+    if (existingAtOtherSite) throw new Error('You are already booked on at another site. Book off before starting a shift here.');
+    const roster = getTodayRoster(guardId, siteId);
     const scheduledStart = roster?.days?.[todayKey()]?.start || null;
     const scheduledEnd   = roster?.days?.[todayKey()]?.end   || null;
     const now = new Date();
@@ -1188,7 +1220,7 @@ export function AppProvider({ children }) {
     }
   }, [users, sites, addAlert, startCheckCallTimer]);
 
-  const recordManualGuardCheckCall = useCallback(async (response, note = null, category = null) => {
+  const recordManualGuardCheckCall = useCallback(async (response, note = null, extraOrCategory = {}) => {
     // Clear any active pending call timer and active banner
     if (checkCallExpireRef.current) {
       clearTimeout(checkCallExpireRef.current);
@@ -1196,13 +1228,43 @@ export function AppProvider({ children }) {
     }
     setActiveCheckCall(null);
 
+    const category = typeof extraOrCategory === 'string' ? extraOrCategory : extraOrCategory?.category || null;
+    const photoUri = typeof extraOrCategory === 'object' ? extraOrCategory?.photoUri : null;
+    let manualLocation = null;
+    try {
+      let permission = await Location.getForegroundPermissionsAsync();
+      if (permission.status !== 'granted') permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status === 'granted') {
+        const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        manualLocation = { latitude: position.coords.latitude, longitude: position.coords.longitude };
+      }
+    } catch (_) { /* Manual check calls remain available when GPS is unavailable. */ }
+
     if (API_ENABLED) {
       try {
-        // Use the /manual endpoint — single atomic call that creates & responds
-        const body = { response };
-        if (note) body.note = note;
-        if (category) body.category = category;
-        const result = await apiPost('/api/check-calls/manual', body);
+        let result;
+        if (photoUri) {
+          const form = new FormData();
+          form.append('response', response);
+          if (note) form.append('note', note);
+          if (category) form.append('category', category);
+          if (manualLocation) {
+            form.append('latitude', String(manualLocation.latitude));
+            form.append('longitude', String(manualLocation.longitude));
+          }
+          const compressed = await compressImageForUpload(photoUri);
+          form.append('photo', { uri: compressed, name: 'check-call-issue.jpg', type: 'image/jpeg' });
+          result = await apiUpload('/api/check-calls/manual', form);
+        } else {
+          const body = { response };
+          if (note) body.note = note;
+          if (category) body.category = category;
+          if (manualLocation) {
+            body.latitude = manualLocation.latitude;
+            body.longitude = manualLocation.longitude;
+          }
+          result = await apiPost('/api/check-calls/manual', body);
+        }
         const saved = normalizeCheckCall(result.checkCall);
         setCheckCalls(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
         const session = shiftSessions.find(item => item.id === saved.sessionId || (item.guardId === currentUser?.id && !item.bookedOffAt));
@@ -1216,7 +1278,17 @@ export function AppProvider({ children }) {
           const firedId = fireRes?.checkCall?._id || fireRes?.checkCall?.id;
           if (firedId) {
             const noteText = category ? `[${category}]${note ? ' ' + note : ''}` : note;
-            const respRes = await apiPost(`/api/check-calls/${firedId}/respond`, { response, note: noteText || undefined });
+            let respRes;
+            if (photoUri) {
+              const form = new FormData();
+              form.append('response', response);
+              if (noteText) form.append('note', noteText);
+              const compressed = await compressImageForUpload(photoUri);
+              form.append('photo', { uri: compressed, name: 'check-call-issue.jpg', type: 'image/jpeg' });
+              respRes = await apiUpload(`/api/check-calls/${firedId}/respond`, form);
+            } else {
+              respRes = await apiPost(`/api/check-calls/${firedId}/respond`, { response, note: noteText || undefined });
+            }
             const saved = normalizeCheckCall(respRes.checkCall);
             setCheckCalls(previous => [saved, ...previous.filter(item => item.id !== saved.id)]);
             const currentUserId = String(currentUser?.id || currentUser?._id || '');
@@ -1275,6 +1347,8 @@ export function AppProvider({ children }) {
       response,
       note,
       category,
+      photoUri,
+      photoUrl: photoUri,
       location: manualLoc,
       isManualLog: true,
       manuallyLogged: false,
@@ -1292,6 +1366,9 @@ export function AppProvider({ children }) {
         message: `${guardLabel} reported an issue at ${site?.name || 'Site'}: ${note || category || 'No details provided'}.`,
         note,
         category,
+        photoUri,
+        photoUrl: photoUri,
+        location: manualLoc,
         siteId: session.siteId,
         guardId: currentUser?.id,
         guardName: guard?.name,
@@ -1386,6 +1463,7 @@ export function AppProvider({ children }) {
       startedAt: new Date().toISOString(),
       finishedAt: null,
       checkpointsCaptured: [],
+      assignedCheckpointIds: getTodayRoster(guardId, siteId)?.checkpointIds || [],
       missingCheckpoints: [],
       status: 'in_progress',
     };
@@ -1396,7 +1474,7 @@ export function AppProvider({ children }) {
     setPatrolSessions(updated);
     setActivePatrol(patrol);
     return patrol;
-  }, [antiIdlePrompt, randomPromptLogs]);
+  }, [antiIdlePrompt, randomPromptLogs, getTodayRoster]);
 
   // ─── Patrol: Capture Checkpoint Photo ─────────────────────────────────────
   const captureCheckpoint = useCallback(async (patrolId, checkpointId, photoUri, nfcTagId = null, location = null) => {
@@ -1436,6 +1514,7 @@ export function AppProvider({ children }) {
       longitude: location?.longitude ?? null,
       altitude: location?.altitude ?? null,
       what3words: location?.what3words ?? (location?.latitude ? getWhat3WordsSync(location.latitude, location.longitude) : null),
+      syncPending: API_ENABLED,
     };
     if (location && currentUser?.id) {
       recordMovementBreadcrumb(currentUser.id, capture);
@@ -1488,6 +1567,32 @@ export function AppProvider({ children }) {
   const finishPatrol = useCallback(async (patrolId, forceFinish = false) => {
     if (API_ENABLED) {
       try {
+        const localCaptures = await load(KEYS.PATROL_CAPTURES) || [];
+        const pendingCaptures = localCaptures.filter(capture => capture.patrolId === patrolId && capture.syncPending);
+        let latestSaved = null;
+        for (const capture of pendingCaptures) {
+          const form = new FormData();
+          const checkpointId = String(capture.checkpointId?._id || capture.checkpointId?.id || capture.checkpointId || '');
+          form.append('checkpointId', checkpointId);
+          if (capture.nfcTagId) form.append('nfcTagId', capture.nfcTagId);
+          if (/^(file|content):\/\//i.test(String(capture.photoUri || ''))) {
+            const compressedUri = await compressImageForUpload(capture.photoUri);
+            form.append('photo', { uri: compressedUri, name: `checkpoint-${checkpointId}.jpg`, type: 'image/jpeg' });
+          }
+          if (capture.latitude != null) form.append('latitude', String(capture.latitude));
+          if (capture.longitude != null) form.append('longitude', String(capture.longitude));
+          const uploaded = await apiUpload(`/api/patrols/${patrolId}/capture`, form);
+          latestSaved = normalizePatrol(uploaded.patrol);
+        }
+        if (pendingCaptures.length) {
+          const synced = localCaptures.map(capture => capture.patrolId === patrolId ? { ...capture, syncPending: false } : capture);
+          await save(KEYS.PATROL_CAPTURES, synced);
+          if (latestSaved) {
+            setPatrolSessions(previous => previous.map(item => item.id === latestSaved.id ? latestSaved : item));
+            setPatrolCaptures(latestSaved.captures || []);
+            setActivePatrol(latestSaved);
+          }
+        }
         const { patrol } = await apiPost(`/api/patrols/${patrolId}/finish`, { forceFinish });
         const saved = normalizePatrol(patrol);
         setPatrolSessions(previous => previous.map(item => item.id === saved.id ? saved : item));
@@ -1495,7 +1600,17 @@ export function AppProvider({ children }) {
         setPatrolCaptures(saved.captures || []);
         return { incomplete: false, patrol: saved };
       } catch (error) {
-        if (error.status === 422) return { incomplete: true, missing: error.missingCheckpointIds || [], patrol: activePatrol };
+        if (error.status === 422) {
+          let latest = activePatrol;
+          try {
+            const detail = await apiGet(`/api/patrols/${patrolId}`);
+            latest = normalizePatrol(detail.patrol);
+            setPatrolSessions(previous => previous.map(item => item.id === latest.id ? latest : item));
+            setPatrolCaptures(latest.captures || []);
+            setActivePatrol(latest);
+          } catch (_) { /* Keep the server's precise missing list if refresh is unavailable. */ }
+          return { incomplete: true, serverAuthoritative: true, missing: error.missingCheckpointIds || [], patrol: latest };
+        }
         throw error;
       }
     }
@@ -1503,7 +1618,7 @@ export function AppProvider({ children }) {
     const patrol = allPatrols.find(p => p.id === patrolId);
     if (!patrol) return;
 
-    const rosterCheckpointIds = getTodayRoster(patrol.guardId)?.checkpointIds || [];
+    const rosterCheckpointIds = getTodayRoster(patrol.guardId, patrol.siteId)?.checkpointIds || [];
     const assignedIds = patrol.assignedCheckpointIds?.length ? patrol.assignedCheckpointIds : rosterCheckpointIds;
     const siteCheckpoints = checkpoints.filter(cp => cp.siteId === patrol.siteId && (cp.required || cp.nfcRequired) && (!assignedIds.length || assignedIds.includes(cp.id)));
     const capturesForPatrol = (await load(KEYS.PATROL_CAPTURES) || []).filter(capture => capture.patrolId === patrolId);
@@ -1589,7 +1704,7 @@ export function AppProvider({ children }) {
   // ─── Roster management ────────────────────────────────────────────────────
   const publishRoster = useCallback(async (rosterData) => {
     if (API_ENABLED) {
-      const { roster } = await apiPost('/api/rosters', rosterData);
+        const { roster } = await apiPost('/api/rosters', rosterData);
       const saved = normalizeRoster(roster);
       setRosters(previous => [saved, ...previous.filter(item => {
         const sameGuard = String(item.guardId?._id || item.guardId?.id || item.guardId || '') === String(saved.guardId?._id || saved.guardId?.id || saved.guardId || '');
@@ -1714,6 +1829,35 @@ export function AppProvider({ children }) {
     setUsers(u || []);
   }, []);
 
+  const refreshSites = useCallback(async () => {
+    if (API_ENABLED) {
+      const { sites: remoteSites } = await apiGet('/api/sites');
+      const normalized = (remoteSites || []).map(normalizeSite);
+      setSites(normalized);
+      return normalized;
+    }
+    return undefined;
+  }, []);
+
+  const saveNotificationPreferences = useCallback(async (updates) => {
+    if (API_ENABLED) {
+      const result = await apiPatch('/api/users/me/notification-preferences', updates);
+      const preferences = result.notificationPreferences || updates;
+      setCurrentUser(previous => previous ? { ...previous, notificationPreferences: preferences } : previous);
+      setUsers(previous => previous.map(user => String(user.id || user._id) === String(currentUser?.id || currentUser?._id)
+        ? { ...user, notificationPreferences: preferences }
+        : user));
+      return { success: true, notificationPreferences: preferences, emailDeliveryConfigured: result.emailDeliveryConfigured };
+    }
+    const preferences = { ...(currentUser?.notificationPreferences || {}), ...updates };
+    const updatedUser = { ...currentUser, notificationPreferences: preferences };
+    setCurrentUser(updatedUser);
+    setUsers(previous => previous.map(user => String(user.id || user._id) === String(currentUser?.id || currentUser?._id) ? updatedUser : user));
+    const allUsers = await load(KEYS.USERS) || [];
+    await save(KEYS.USERS, allUsers.map(user => String(user.id || user._id) === String(currentUser?.id || currentUser?._id) ? updatedUser : user));
+    return { success: true, notificationPreferences: preferences, emailDeliveryConfigured: false };
+  }, [currentUser]);
+
   const getGuardRosters = useCallback((guardId, weekStartDate) => {
     const targetGid = String(guardId || '');
     return (rosters || []).filter(r => {
@@ -1822,7 +1966,7 @@ export function AppProvider({ children }) {
     currentUser, authLoading, login, logout, createSite, updateSite, editSite: updateSite, deleteSite, deleteAccount,
     updatePassword, resetPasswordWithCode,
     // Reference data
-    users, sites, checkpoints, refreshUsers,
+    users, sites, checkpoints, refreshUsers, refreshSites, saveNotificationPreferences,
     // Super Admin Account Management & Audit
     auditLogs, addAuditLog, createUser, updateUser, toggleUserStatus, deleteUser,
     // Geographic Movement & Telemetry
@@ -1879,17 +2023,11 @@ function todayDateStr() {
 }
 
 function todayKey() {
-  const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-  return days[new Date().getDay()];
+  return getUKDayKey();
 }
 
 function isThisWeek(weekStartDate) {
-  if (!weekStartDate) return false;
-  const [y, m, d] = weekStartDate.split('-').map(Number);
-  const start = new Date(y, m - 1, d, 0, 0, 0);
-  const end = new Date(y, m - 1, d + 7, 0, 0, 0);
-  const now = new Date();
-  return now >= start && now < end;
+  return isCurrentUKWeek(weekStartDate);
 }
 
 function getMinutesFromTime(date, timeStr) {

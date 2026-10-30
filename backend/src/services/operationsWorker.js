@@ -1,6 +1,7 @@
 const { ShiftSession, CheckCall, RandomPromptLog, User, Site } = require('../models');
 const { createAlert } = require('./alertService');
 const { sendPush } = require('./fcm');
+const { sendRoutinePatrolDigests } = require('./routineDigest');
 
 const HOUR = 60 * 60 * 1000;
 
@@ -167,6 +168,7 @@ function startOperationsWorker() {
       await fireDueRandomPrompts(now);
       await warnShiftsEndingSoon(now);
       await alertIgnoredPrompts(now);
+      await sendRoutinePatrolDigests(now);
     } catch (error) {
       console.error('[OpsWorker] Tick failed:', error.message);
     } finally { running = false; }

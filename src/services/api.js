@@ -133,8 +133,24 @@ export function normalizeRoster(value) {
 
 export function normalizeAlert(value) {
   const guard = value.guardId && typeof value.guardId === 'object' ? value.guardId.name : null;
+  const badge = value.guardId && typeof value.guardId === 'object' ? value.guardId.badgeNumber : null;
   const site = value.siteId && typeof value.siteId === 'object' ? value.siteId.name : null;
-  return { ...value, id: idOf(value), guardId: idOf(value.guardId), siteId: idOf(value.siteId), guardName: value.guardName || guard, siteName: value.siteName || site, read: value.isRead ?? value.read ?? false };
+  const photo = value.photoUrl || value.photoUri || null;
+  return {
+    ...value,
+    id: idOf(value),
+    guardId: idOf(value.guardId),
+    siteId: idOf(value.siteId),
+    guardName: value.guardName || guard,
+    badgeNumber: value.badgeNumber || badge || null,
+    siteName: value.siteName || site,
+    read: value.isRead ?? value.read ?? false,
+    photoUrl: photo,
+    photoUri: photo,
+    category: value.category || null,
+    note: value.note || null,
+    location: value.location || null,
+  };
 }
 
 export function normalizeCheckpoint(value) {
@@ -145,5 +161,5 @@ export function normalizeUser(value) {
   const user = normalizePerson(value);
   // The mobile UI calls the organisation administrator "superadmin"; the API
   // deliberately stores that account as "admin".
-  return { ...user, role: user.role === 'admin' ? 'superadmin' : user.role, siteId: idOf(value.siteId), siteIds: (value.managedSiteIds || value.siteIds || []).map(idOf) };
+  return { ...user, role: user.role === 'admin' ? 'superadmin' : user.role, siteId: idOf(value.siteId), assignedSiteIds: [...new Set([value.siteId, ...(value.assignedSiteIds || [])].map(idOf).filter(Boolean))], siteIds: (value.managedSiteIds || value.siteIds || []).map(idOf) };
 }

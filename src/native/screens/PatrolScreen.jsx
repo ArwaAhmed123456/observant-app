@@ -41,11 +41,12 @@ export function PatrolScreen() {
   }, []);
 
   const activeSession = getGuardActiveSession(currentUser.id);
-  const site = sites.find(item => item.id === currentUser.siteId);
+  const patrolSiteId = activeSession?.siteId || currentUser.siteId;
+  const site = sites.find(item => String(item.id || item._id) === String(patrolSiteId));
   const assignedIds = activePatrol?.assignedCheckpointIds?.length
     ? activePatrol.assignedCheckpointIds
-    : getTodayRoster(currentUser.id)?.checkpointIds || [];
-  const siteCheckpoints = getSiteCheckpoints(currentUser.siteId);
+    : getTodayRoster(currentUser.id, patrolSiteId)?.checkpointIds || [];
+  const siteCheckpoints = getSiteCheckpoints(patrolSiteId);
   const checkpoints = assignedIds.length
     ? siteCheckpoints.filter(checkpoint => assignedIds.includes(checkpoint.id))
     : siteCheckpoints;
@@ -74,7 +75,7 @@ export function PatrolScreen() {
     }
     setStarting(true);
     try {
-      await startPatrol(currentUser.id, currentUser.siteId, activeSession.id);
+      await startPatrol(currentUser.id, activeSession.siteId || currentUser.siteId, activeSession.id);
     } catch (error) {
       Alert.alert('Could not start patrol', error.message || 'Check your connection and try again.');
     } finally { setStarting(false); }
@@ -129,18 +130,24 @@ export function PatrolScreen() {
       const result = await finishPatrol(activePatrol.id, false);
       if (result?.incomplete) {
         // Double-check if the guard actually completed all captures on this device
+        const proofCaptures = result.serverAuthoritative ? (result.patrol?.captures || []) : captures;
         const reallyMissing = (result.missing || []).filter(id => {
-          const capture = captures.find(item => item.checkpointId === id);
+          const capture = proofCaptures.find(item => String(item.checkpointId?._id || item.checkpointId?.id || item.checkpointId || '') === String(id));
           const cp = checkpoints.find(c => c.id === id);
-          const photoDone = !cp?.required || Boolean(capture?.photoUri);
+          if (!cp) return true;
+          const photoDone = !cp?.required || Boolean(capture?.photoUri || capture?.photoUrl || capture?.publicId);
           const nfcDone = !cp?.nfcRequired || Boolean(capture?.nfcVerifiedAt);
           return !(photoDone && nfcDone);
         });
 
         if (reallyMissing.length === 0) {
           // All required captures were taken! Auto-finish so guard is not blocked by server sync timing
-          await finishPatrol(activePatrol.id, true);
-          Alert.alert('Patrol complete', 'All manager-required checkpoint evidence has been recorded. Your next surprise check may arrive at any time.');
+          const forcedResult = await finishPatrol(activePatrol.id, true);
+          if (forcedResult?.patrol?.status === 'incomplete') {
+            Alert.alert('Patrol submitted with exceptions', 'The server still records missing checkpoint evidence. Your manager has been notified.');
+          } else {
+            Alert.alert('Patrol complete', 'All manager-required checkpoint evidence has been recorded. Your next surprise check may arrive at any time.');
+          }
           return;
         }
 

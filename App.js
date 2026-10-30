@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 import React from 'react';
-import { ActivityIndicator, View, StyleSheet } from 'react-native';
+import { ActivityIndicator, View, StyleSheet, Platform } from 'react-native';
 import { DefaultTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -43,35 +43,39 @@ const APP_NAV_THEME = {
   },
 };
 
-const tabScreenOptions = insets => ({ route }) => ({
-  headerShown: false,
-  tabBarActiveTintColor:   '#D97706',
-  tabBarInactiveTintColor: '#FFFFFF',
-  tabBarStyle: {
-    backgroundColor: '#0B192C',
-    borderTopColor: '#23344C',
-    borderTopWidth: 1,
-    paddingBottom: Math.max(insets.bottom, 16),
-    paddingTop: 8,
-    height: 58 + Math.max(insets.bottom, 16),
-  },
-  tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
-  tabBarIcon: ({ color, size }) => {
-    const icons = {
-      Home:        <Home             color={color} size={size} />,
-      'Check Call':<Phone            color={color} size={size} />,
-      'Call Path': <Route            color={color} size={size} />,
-      Patrol:      <MapPin           color={color} size={size} />,
-      Shifts:      <Calendar         color={color} size={size} />,
-      Profile:     <User             color={color} size={size} />,
-      Dashboard:   <LayoutDashboard  color={color} size={size} />,
-      Schedule:    <Calendar         color={color} size={size} />,
-      Reports:     <FileText         color={color} size={size} />,
-      Checkpoints: <Settings         color={color} size={size} />,
-    };
-    return icons[route.name] || null;
-  },
-});
+const tabScreenOptions = insets => ({ route }) => {
+  const bottomPadding = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 16);
+  return {
+    headerShown: false,
+    tabBarActiveTintColor:   '#D97706',
+    tabBarInactiveTintColor: '#94A3B8',
+    tabBarStyle: {
+      backgroundColor: '#0B192C',
+      borderTopColor: '#23344C',
+      borderTopWidth: 1,
+      paddingBottom: bottomPadding,
+      paddingTop: 8,
+      height: 60 + bottomPadding,
+      elevation: 8,
+    },
+    tabBarLabelStyle: { fontSize: 10, fontWeight: '600' },
+    tabBarIcon: ({ color, size }) => {
+      const icons = {
+        Home:        <Home             color={color} size={size} />,
+        'Check Call':<Phone            color={color} size={size} />,
+        'Call Path': <Route            color={color} size={size} />,
+        Patrol:      <MapPin           color={color} size={size} />,
+        Shifts:      <Calendar         color={color} size={size} />,
+        Profile:     <User             color={color} size={size} />,
+        Dashboard:   <LayoutDashboard  color={color} size={size} />,
+        Schedule:    <Calendar         color={color} size={size} />,
+        Reports:     <FileText         color={color} size={size} />,
+        Checkpoints: <Settings         color={color} size={size} />,
+      };
+      return icons[route.name] || null;
+    },
+  };
+};
 
 // ── Guard Tabs ────────────────────────────────────────────────────────────────
 function GuardTabs() {

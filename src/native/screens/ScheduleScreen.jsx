@@ -7,7 +7,13 @@ import {
   ScrollView
 } from 'react-native';
 import { ArrowLeft, Calendar, Clock, MapPin, CheckCircle2 } from 'lucide-react-native';
-import { useSecurity } from '../../context/SecurityContext';
+// Legacy screen — not currently mounted in the navigator.
+// Stub out SecurityContext to prevent web-only AudioContext crash on iOS.
+const useSecurity = () => ({
+  rosters: [],
+  sites: [],
+  currentUser: { id: '', name: '', badgeNumber: '' },
+});
 
 export const ScheduleScreen = ({ onBack }) => {
   const { rosters, sites, currentUser } = useSecurity();

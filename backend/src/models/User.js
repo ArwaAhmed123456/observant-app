@@ -5,6 +5,15 @@
 const mongoose = require('mongoose');
 const bcrypt   = require('bcryptjs');
 
+const notificationPreferencesSchema = new mongoose.Schema({
+  exceptionOnly: { type: Boolean, default: false },
+  routinePatrolPush: { type: Boolean, default: false },
+  dailyPatrolEmailDigest: { type: Boolean, default: false },
+  includePatrolPhotosInDigest: { type: Boolean, default: true },
+  lastRoutineDigestAt: { type: Date, default: null },
+  lastRoutineDigestAttemptAt: { type: Date, default: null },
+}, { _id: false });
+
 const userSchema = new mongoose.Schema({
   organisationId: { type: mongoose.Schema.Types.ObjectId, ref: 'Organisation', required: true, index: true },
 
@@ -16,9 +25,12 @@ const userSchema = new mongoose.Schema({
   phone:       { type: String, default: null },
   avatarUrl:   { type: String, default: null },
 
-  // Guards are assigned to one site; managers can own many
+  // siteId is retained as the primary/legacy site; guards may work at multiple sites.
   siteId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Site', default: null },
+  assignedSiteIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Site' }],
   managedSiteIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Site' }],
+  notificationPreferences: { type: notificationPreferencesSchema, default: () => ({}) },
+  rosterWriteLockUntil: { type: Date, default: null, select: false },
 
   // Expo push token (field retained as fcmToken for backwards compatible schema)
   fcmToken:    { type: String, default: null },

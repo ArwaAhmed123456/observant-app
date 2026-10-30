@@ -37,6 +37,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.observantsecurity.app",
+      "appleTeamId": "QM8VK8RT5S",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Observant requires camera access to capture patrol checkpoint photos and incident evidence.",
@@ -73,7 +74,10 @@
       ],
       [
         "react-native-nfc-manager",
-        { "nfcPermission": "Allow Observant to scan nearby security checkpoint NFC cards." }
+        {
+          "nfcPermission": "Allow Observant to scan nearby security checkpoint NFC cards.",
+          "includeNdefEntitlement": false
+        }
       ]
     ],
     "extra": {

@@ -6,7 +6,7 @@ const mongoose = require('mongoose');
 const { Alert, User, Site } = require('../models');
 const fcm = require('./fcm');
 
-async function createAlert({ organisationId, siteId, guardId, type, title, message, note, refModel, refId }) {
+async function createAlert({ organisationId, siteId, guardId, type, title, message, note, photoUrl, photoUrls, category, location, refModel, refId }) {
   let validSiteId = siteId;
   if (siteId && typeof siteId === 'string' && mongoose.Types.ObjectId.isValid(siteId)) {
     try { validSiteId = new mongoose.Types.ObjectId(siteId); } catch (_) {}
@@ -21,7 +21,7 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
       { role: 'manager', managedSiteIds: { $in: [validSiteId, siteId].filter(Boolean) } },
       { role: 'manager', siteId: { $in: [validSiteId, siteId].filter(Boolean) } },
     ],
-  }).select('_id fcmToken name');
+  }).select('_id fcmToken name notificationPreferences');
 
   // Fallback: if no site-specific manager configured, notify all active managers
   if (!managers.length) {
@@ -29,7 +29,7 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
       organisationId,
       active: true,
       role: { $in: ['manager', 'admin'] },
-    }).select('_id fcmToken name');
+    }).select('_id fcmToken name notificationPreferences');
   }
 
   const managerIds = managers.map(m => m._id);
@@ -64,12 +64,19 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
     title:    enrichedTitle,
     message:  enrichedMessage,
     note:     note || null,
+    category: category || null,
+    photoUrl: photoUrl || null,
+    photoUrls: [...new Set([...(photoUrls || []), ...(photoUrl ? [photoUrl] : [])])],
+    location: location || null,
     refModel: refModel || null,
     refId:    refId   || null,
   });
 
   // Fire push notifications asynchronously with full officer telemetry
-  fcm.notifyManagers(alert, managers).catch(err =>
+  const pushManagers = type === 'patrol_complete'
+    ? managers.filter(manager => !manager.notificationPreferences?.exceptionOnly && manager.notificationPreferences?.routinePatrolPush === true)
+    : managers;
+  fcm.notifyManagers(alert, pushManagers).catch(err =>
     console.error('[alertService] FCM error:', err.message)
   );
 

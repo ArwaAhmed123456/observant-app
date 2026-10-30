@@ -1,4 +1,5 @@
 // Audio & Haptic Feedback Engine for Observant Mobile App
+// AudioContext is a Web API — guard every access so this module is safe in React Native.
 import * as Haptics from 'expo-haptics';
 
 class SoundEngine {
@@ -8,14 +9,16 @@ class SoundEngine {
   }
 
   init() {
-    if (!this.ctx && typeof window !== 'undefined') {
+    // AudioContext only exists in browsers/web — skip silently in React Native
+    if (typeof window === 'undefined') return;
+    if (!this.ctx) {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       if (AudioContext) {
-        this.ctx = new AudioContext();
+        try { this.ctx = new AudioContext(); } catch (_) {}
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      try { this.ctx.resume(); } catch (_) {}
     }
   }
 
@@ -46,13 +49,13 @@ class SoundEngine {
       this.init();
       if (!this.ctx) return;
       const now = this.ctx.currentTime;
-      
+
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'sine';
       osc.frequency.setValueAtTime(880, now);
       osc.frequency.setValueAtTime(1174.66, now + 0.12);
-      
+
       gain.gain.setValueAtTime(0.15, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
 
@@ -60,9 +63,7 @@ class SoundEngine {
       gain.connect(this.ctx.destination);
       osc.start(now);
       osc.stop(now + 0.35);
-    } catch (e) {
-      // Audio error
-    }
+    } catch (_) {}
   }
 
   playEmergencyAlarm() {
@@ -88,9 +89,7 @@ class SoundEngine {
         osc.start(now + delay);
         osc.stop(now + delay + 0.14);
       });
-    } catch (e) {
-      // Audio error
-    }
+    } catch (_) {}
   }
 
   playSuccessChime() {
@@ -115,9 +114,7 @@ class SoundEngine {
         osc.start(now + i * 0.08);
         osc.stop(now + i * 0.08 + 0.35);
       });
-    } catch (e) {
-      // Audio error
-    }
+    } catch (_) {}
   }
 
   playCameraShutter() {
@@ -152,9 +149,7 @@ class SoundEngine {
 
       noise.start(now);
       noise.stop(now + 0.08);
-    } catch (e) {
-      // Audio error
-    }
+    } catch (_) {}
   }
 }
 

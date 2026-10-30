@@ -85,7 +85,10 @@ export function CheckCallPathScreen({ route, navigation }) {
 
   const targetId   = guardId || currentUser.id;
   const targetUser = users.find(u => u.id === targetId) || currentUser;
-  const site       = sites.find(s => s.id === targetUser.siteId);
+  const assignedSiteIds = [...new Set([targetUser.siteId, ...(targetUser.assignedSiteIds || [])]
+    .map(value => String(value?._id || value?.id || value || '')).filter(Boolean))];
+  const assignedSites = assignedSiteIds.map(id => sites.find(item => String(item.id || item._id) === id)).filter(Boolean);
+  const primarySite = assignedSites[0] || null;
 
   // ── Shift selector ────────────────────────────────────────────────────────
   const guardSessions = useMemo(() =>
@@ -97,6 +100,8 @@ export function CheckCallPathScreen({ route, navigation }) {
 
   const [sessionIdx, setSessionIdx] = useState(0);
   const session = guardSessions[sessionIdx] || null;
+  const site = sites.find(item => String(item.id || item._id) === String(session?.siteId?._id || session?.siteId?.id || session?.siteId || ''))
+    || primarySite;
 
   // ── Animations: Path Draw-in & Active Beacon Pulse ────────────────────────
   const pathFadeAnim = useRef(new Animated.Value(0)).current;
@@ -120,42 +125,70 @@ export function CheckCallPathScreen({ route, navigation }) {
           })()
         : new Date(start.getTime() + 12 * 3600000); // default 12h shift
 
-    // First check call is 1h after book-on, then every hour
+    // Include Hour 0 (Shift Start / Book-on Check-In) + Hourly check calls
     const slots = [];
-    const firstSlot = new Date(start.getTime() + 3600000);
-    firstSlot.setSeconds(0, 0);
+    const bookOnTime = new Date(start);
+    bookOnTime.setSeconds(0, 0);
+    slots.push({ time: bookOnTime, isBookOn: true });
 
-    let slot = new Date(firstSlot);
+    let slot = new Date(start.getTime() + 3600000);
+    slot.setSeconds(0, 0);
     while (slot <= end) {
-      slots.push(new Date(slot));
+      slots.push({ time: new Date(slot), isBookOn: false });
       slot = new Date(slot.getTime() + 3600000);
     }
 
-    const sessionCCs = checkCalls.filter(cc => cc.sessionId === session.id);
+    const sessionCCs = (checkCalls || []).filter(cc =>
+      cc.sessionId === session.id ||
+      cc.sessionId === session._id ||
+      (cc.guardId === targetId && new Date(cc.firedAt || cc.createdAt) >= new Date(start.getTime() - 20 * 60000) && new Date(cc.firedAt || cc.createdAt) <= new Date(end.getTime() + 20 * 60000))
+    );
 
-    return slots.map((slotTime, i) => {
-      const windowEnd = new Date(slotTime.getTime() + 10 * 60000);
+    return slots.map((item, i) => {
+      const slotTime = item.time;
+      const isBookOn = item.isBookOn;
+      const windowEnd = new Date(slotTime.getTime() + 15 * 60000);
+
+      // Find closest check call
       const matched = sessionCCs.find(cc => {
-        const fired = new Date(cc.firedAt);
-        return Math.abs(fired - slotTime) < 10 * 60000;
+        const fired = new Date(cc.firedAt || cc.createdAt);
+        return Math.abs(fired - slotTime) < 30 * 60000;
       });
 
-      const isPast    = slotTime < new Date();
-      const isActive  = !matched && isPast && new Date() < windowEnd;
-      const isUpcoming = !matched && !isPast;
+      const isPast = slotTime < new Date();
+      const isActive = !matched && !isBookOn && isPast && new Date() < windowEnd;
+      const isUpcoming = !matched && !isBookOn && !isPast;
+
+      let statusToken;
+      if (isBookOn) {
+        statusToken = STATUS.yes; // Book on verified safe upon check in
+      } else if (matched) {
+        if (matched.response === 'yes') statusToken = STATUS.yes;
+        else if (matched.response === 'missed') statusToken = STATUS.missed;
+        else if (matched.response === 'no') statusToken = STATUS.no;
+        else statusToken = STATUS.pending;
+      } else if (isActive) {
+        statusToken = STATUS.pending;
+      } else if (isUpcoming) {
+        statusToken = STATUS.upcoming;
+      } else {
+        statusToken = STATUS.missed; // past window and no response
+      }
 
       return {
-        id:       matched?.id || `slot_${i}`,
+        id: matched?.id || matched?._id || `slot_${i}`,
         slotTime,
-        cc:       matched || null,
-        response: matched?.response || (isUpcoming ? 'upcoming' : isActive ? 'pending' : 'missed'),
-        note:     matched?.note || null,
-        seq:      i + 1,
+        isBookOn,
+        cc: matched || null,
+        response: isBookOn ? 'yes' : (matched?.response || (isUpcoming ? 'upcoming' : isActive ? 'pending' : 'missed')),
+        statusToken,
+        note: matched?.note || (isBookOn ? 'Shift book-on recorded' : null),
+        seq: i === 0 ? 0 : i,
         isActive,
         isUpcoming,
       };
     });
-  }, [session, checkCalls]);
+  }, [session, checkCalls, targetId]);
 
   useEffect(() => {
     pathFadeAnim.setValue(0);
@@ -266,7 +299,7 @@ export function CheckCallPathScreen({ route, navigation }) {
               <Text style={styles.detailSectionLabel}>OFFICER INFORMATION</Text>
               {[
                 { icon: <User size={14} color={P.t3} />, label: 'SIA Badge', value: targetUser.badgeNumber || '—' },
-                { icon: <MapPin size={14} color={P.t3} />, label: 'Assigned Site', value: site?.name || '—' },
+                { icon: <MapPin size={14} color={P.t3} />, label: 'Assigned Sites', value: assignedSites.map(item => item.name).join(', ') || site?.name || '—' },
                 { icon: <Mail size={14} color={P.t3} />, label: 'Email', value: targetUser.email || '—' },
                 { icon: <Phone size={14} color={P.t3} />, label: 'Phone', value: targetUser.phone || '—' },
               ].map(({ icon, label, value }) => (
@@ -284,10 +317,15 @@ export function CheckCallPathScreen({ route, navigation }) {
             {(() => {
               const trail = getGuardMovementTrail ? getGuardMovementTrail(targetId) : [];
               const latestBreadcrumb = trail[0];
-              const w3w = latestBreadcrumb?.what3words || session?.what3words || '///safety.patrol.point';
-              const alt = latestBreadcrumb?.altitude != null ? latestBreadcrumb.altitude : session?.altitude != null ? session.altitude : 18;
-              const lat = latestBreadcrumb?.latitude ?? session?.latitude ?? site?.latitude ?? 51.505;
-              const lon = latestBreadcrumb?.longitude ?? session?.longitude ?? site?.longitude ?? -0.0195;
+              const latestCheckCall = (checkCalls || [])
+                .filter(call => String(call.guardId?._id || call.guardId?.id || call.guardId || '') === String(targetId)
+                  && call.location?.latitude != null && call.location?.longitude != null)
+                .sort((a, b) => new Date(b.respondedAt || b.firedAt || 0) - new Date(a.respondedAt || a.firedAt || 0))[0];
+              const liveLocation = latestBreadcrumb || targetUser.lastLocation || latestCheckCall?.location || session || null;
+              const liveW3w = liveLocation?.what3words || null;
+              const siteW3w = site?.what3words || null;
+              const hasGps = liveLocation?.latitude != null && liveLocation?.longitude != null;
+              const alt = liveLocation?.altitude;
 
               return (
                 <View style={styles.detailSection}>
@@ -295,8 +333,15 @@ export function CheckCallPathScreen({ route, navigation }) {
                   <View style={styles.detailRow}>
                     <View style={styles.detailRowIcon}><MapPin size={14} color="#e11d48" /></View>
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.detailRowLabel}>What3Words Address</Text>
-                      <Text style={[styles.detailRowValue, { color: '#e11d48', fontWeight: '700' }]}>{w3w}</Text>
+                      <Text style={styles.detailRowLabel}>Assigned Site What3Words</Text>
+                      <Text style={[styles.detailRowValue, { color: siteW3w ? P.t1 : '#e11d48', fontWeight: '700' }]}>{siteW3w || 'No What3Words address saved for this site'}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <View style={styles.detailRowIcon}><MapPin size={14} color={P.blueLight} /></View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detailRowLabel}>Guard location What3Words</Text>
+                      <Text style={[styles.detailRowValue, { color: liveW3w ? P.t1 : P.t3, fontWeight: liveW3w ? '700' : '500' }]}>{liveW3w || 'Not captured for the latest GPS location'}</Text>
                     </View>
                   </View>
                   <View style={styles.detailRow}>
@@ -304,7 +349,7 @@ export function CheckCallPathScreen({ route, navigation }) {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.detailRowLabel}>GPS Coordinates & Altitude</Text>
                       <Text style={styles.detailRowValue}>
-                        {Number(lat).toFixed(4)}°, {Number(lon).toFixed(4)}° · Alt: {Math.round(alt)}m
+                        {hasGps ? `${Number(liveLocation.latitude).toFixed(4)}°, ${Number(liveLocation.longitude).toFixed(4)}°` : 'No GPS location received yet'}{alt != null ? ` · Alt: ${Math.round(Number(alt))}m` : ''}
                       </Text>
                     </View>
                   </View>
@@ -426,45 +471,41 @@ export function CheckCallPathScreen({ route, navigation }) {
             contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
             showsVerticalScrollIndicator={false}
           >
-            <Svg width={PATH_W} height={svgHeight}>
-              <Defs>
-                <LinearGradient id="pathGrad" x1="0" y1="0" x2="0" y2="1">
-                  <Stop offset="0" stopColor={P.blueLight} stopOpacity="0.75" />
-                  <Stop offset="1" stopColor={P.blue} stopOpacity="0.18" />
-                </LinearGradient>
-              </Defs>
+            <View style={{ width: PATH_W, height: svgHeight, position: 'relative' }}>
+              <Svg width={PATH_W} height={svgHeight} style={StyleSheet.absoluteFill}>
+                <Defs>
+                  <LinearGradient id="pathGrad" x1="0" y1="0" x2="0" y2="1">
+                    <Stop offset="0" stopColor={P.blueLight} stopOpacity="0.75" />
+                    <Stop offset="1" stopColor={P.blue} stopOpacity="0.18" />
+                  </LinearGradient>
+                </Defs>
 
-              {/* Trail path with subtle glow */}
-              <Path
-                d={pathD}
-                stroke={P.blueBorder}
-                strokeWidth={10}
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                opacity={0.3}
-              />
-              <Path
-                d={pathD}
-                stroke="url(#pathGrad)"
-                strokeWidth={5}
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+                {/* Trail path with subtle glow */}
+                <Path
+                  d={pathD}
+                  stroke={P.blueBorder}
+                  strokeWidth={10}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  opacity={0.3}
+                />
+                <Path
+                  d={pathD}
+                  stroke="url(#pathGrad)"
+                  strokeWidth={5}
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
 
-              {/* Nodes */}
-              {nodes.map((node, i) => {
-                const { x, y } = points[i];
-                const st = statusFor(node.cc);
-                const isUpcoming = node.isUpcoming;
-                const labelRight = x < PATH_W / 2;
-
-                return (
-                  <React.Fragment key={node.id}>
-                    {/* Glowing radar beacon for active / next pending node */}
-                    {(node.isActive || (!node.cc && !node.isUpcoming)) && (
+                {/* Glowing radar beacon behind active node */}
+                {nodes.map((node, i) => {
+                  const { x, y } = points[i];
+                  if (node.isActive || (!node.cc && !node.isUpcoming && !node.isBookOn)) {
+                    return (
                       <AnimatedCircle
+                        key={`beacon_${node.id}`}
                         cx={x} cy={y}
                         r={beaconPulse.interpolate({ inputRange: [1, 1.25], outputRange: [NODE_R + 7, NODE_R + 13] })}
                         fill="none"
@@ -472,46 +513,64 @@ export function CheckCallPathScreen({ route, navigation }) {
                         strokeWidth={2}
                         opacity={beaconPulse.interpolate({ inputRange: [1, 1.25], outputRange: [0.55, 0.12] })}
                       />
-                    )}
+                    );
+                  }
+                  return null;
+                })}
+              </Svg>
 
-                    {/* Outer ring */}
-                    <Circle
-                      cx={x} cy={y} r={NODE_R}
-                      fill={isUpcoming ? P.bg2 : st.bg}
-                      stroke={isUpcoming ? P.b2 : st.color}
-                      strokeWidth={isUpcoming ? 1.5 : 2.8}
+              {/* Crisp Overlay Nodes & Labels */}
+              {nodes.map((node, i) => {
+                const { x, y } = points[i];
+                const st = node.statusToken || statusFor(node.cc);
+                const isUpcoming = node.isUpcoming;
+                const labelRight = x < PATH_W / 2;
+
+                return (
+                  <View key={`overlay_${node.id}`} style={{ position: 'absolute', left: 0, top: 0, width: PATH_W, height: svgHeight }} pointerEvents="box-none">
+                    {/* Node Circle Button */}
+                    <TouchableOpacity
+                      activeOpacity={0.8}
                       onPress={() => setDetailNode(node)}
-                    />
-
-                    {/* Center Icon / sequence */}
-                    <Text
                       style={{
                         position: 'absolute',
                         left: x - NODE_R,
-                        top: y - 10,
+                        top: y - NODE_R,
                         width: NODE_R * 2,
-                        textAlign: 'center',
-                        fontSize: 14,
-                        fontWeight: '800',
-                        color: isUpcoming ? P.t3 : st.color,
+                        height: NODE_R * 2,
+                        borderRadius: NODE_R,
+                        backgroundColor: isUpcoming ? P.bg2 : st.bg,
+                        borderWidth: isUpcoming ? 1.5 : 2.5,
+                        borderColor: isUpcoming ? P.b2 : st.color,
+                        justifyContent: 'center',
+                        alignItems: 'center',
+                        zIndex: 10,
                       }}
                     >
-                      {isUpcoming ? node.seq : st.icon}
-                    </Text>
+                      <Text
+                        style={{
+                          fontSize: 14,
+                          fontWeight: '800',
+                          color: isUpcoming ? P.t3 : st.color,
+                        }}
+                      >
+                        {node.isBookOn ? '✓' : (isUpcoming ? node.seq : st.icon)}
+                      </Text>
+                    </TouchableOpacity>
 
-                    {/* Time label */}
+                    {/* Time & Shift Tag */}
                     <Text
                       style={[
                         styles.nodeTimeLabel,
                         labelRight
-                          ? { left: x + NODE_R + 10, top: y - 22, textAlign: 'left' }
-                          : { right: PATH_W - x + NODE_R + 10, top: y - 22, textAlign: 'right' },
+                          ? { left: x + NODE_R + 10, top: y - 20, textAlign: 'left' }
+                          : { right: PATH_W - x + NODE_R + 10, top: y - 20, textAlign: 'right' },
                       ]}
                     >
-                      {formatTime(node.slotTime)}
+                      {node.isBookOn ? `${formatTime(node.slotTime)} · Shift Start` : formatTime(node.slotTime)}
                     </Text>
 
-                    {/* Status label */}
+                    {/* Status Pill / Label */}
                     <Text
                       style={[
                         styles.nodeStatusLabel,
@@ -521,12 +580,12 @@ export function CheckCallPathScreen({ route, navigation }) {
                         { color: isUpcoming ? P.t4 : st.color },
                       ]}
                     >
-                      {st.label}
+                      {node.isBookOn ? 'Verified Book-on' : st.label}
                     </Text>
-                  </React.Fragment>
+                  </View>
                 );
               })}
-            </Svg>
+            </View>
 
             {/* Tactical Legend */}
             <View style={styles.legend}>

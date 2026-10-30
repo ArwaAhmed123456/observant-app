@@ -148,9 +148,10 @@ async function performNfcTagScan(options = {}) {
   try {
     await NfcManagerModule.start();
     requestStarted = true;
-    const techs = Platform.OS === 'ios'
-      ? [NfcTechModule.Ndef]
-      : [NfcTechModule.Ndef, NfcTechModule.NfcA, NfcTechModule.IsoDep];
+    // Request the same tag families on both platforms. The NFC manager maps
+    // NfcA to MifareIOS on iOS, which covers common security cards that do not
+    // expose an NDEF payload.
+    const techs = [NfcTechModule.Ndef, NfcTechModule.NfcA, NfcTechModule.IsoDep];
     await NfcManagerModule.requestTechnology(
       techs,
       { alertMessage: promptTitle },

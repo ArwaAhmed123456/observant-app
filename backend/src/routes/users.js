@@ -27,31 +27,62 @@ const {
   isValidWhat3Words,
   normalizeW3W,
   getCoordinatesFromWhat3Words,
-  getWhat3WordsSync,
+  getWhat3WordsFromCoordinates,
 } = require('../utils/what3words');
 
 function userCanAccessSite(user, siteId) {
   if (user.role === 'admin') return true;
   const id = String(siteId || '');
-  if (user.role === 'guard') return String(user.siteId || '') === id;
+  if (user.role === 'guard') return [user.siteId, ...(user.assignedSiteIds || [])].some(assigned => String(assigned || '') === id);
   return (user.managedSiteIds || []).some(assigned => String(assigned) === id);
+}
+
+async function getManagerSiteIds(user) {
+  const ownedSiteIds = await Site.find({
+    organisationId: user.organisationId,
+    managerId: user._id,
+    active: true,
+  }).distinct('_id');
+  return [...new Set([...(user.managedSiteIds || []), ...ownedSiteIds].map(String))];
 }
 
 // ════════════════════════════════════════════════════════════
 // USERS
 // ════════════════════════════════════════════════════════════
 
+router.patch('/users/me/notification-preferences', authenticate, requireRole('manager','admin'), asyncHandler(async (req, res) => {
+  const allowed = ['exceptionOnly', 'routinePatrolPush', 'dailyPatrolEmailDigest', 'includePatrolPhotosInDigest'];
+  const updates = {};
+  for (const key of allowed) {
+    if (req.body[key] === undefined) continue;
+    if (typeof req.body[key] !== 'boolean') return res.status(400).json({ error: `${key} must be true or false.` });
+    updates[`notificationPreferences.${key}`] = req.body[key];
+  }
+  const user = await User.findOneAndUpdate(
+    { _id: req.user._id, organisationId: req.user.organisationId },
+    { $set: updates },
+    { new: true }
+  ).select('-password -refreshTokenHash');
+  if (!user) return res.status(404).json({ error: 'Manager account not found.' });
+  res.json({
+    notificationPreferences: user.notificationPreferences,
+    emailDeliveryConfigured: Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD && process.env.SMTP_FROM),
+  });
+}));
+
 router.get('/users', authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
     const { role, siteId, active = 'true' } = req.query;
     const filter = { organisationId: req.user.organisationId };
     if (role)   filter.role   = role;
-    if (siteId) filter.siteId = siteId;
+    if (siteId) filter.$and = [{ $or: [{ siteId }, { assignedSiteIds: siteId }] }];
     if (req.user.role === 'manager') {
-      filter.$or = [
-        { siteId: { $in: req.user.managedSiteIds } },
-        { managedSiteIds: { $in: req.user.managedSiteIds } },
-      ];
+      const managerSiteIds = await getManagerSiteIds(req.user);
+      filter.$and = [...(filter.$and || []), { $or: [
+        { siteId: { $in: managerSiteIds } },
+        { assignedSiteIds: { $in: managerSiteIds } },
+        { managedSiteIds: { $in: managerSiteIds } },
+      ] }];
     }
     if (active !== 'all') filter.active = active === 'true';
 
@@ -72,21 +103,36 @@ router.post('/users',
   ],
   validate,
   asyncHandler(async (req, res) => {
-    let { name, email, password, role, badgeNumber, siteId, managedSiteIds, phone } = req.body;
+    let { name, email, password, role, badgeNumber, siteId, assignedSiteIds = [], managedSiteIds, phone } = req.body;
+    if (!Array.isArray(assignedSiteIds)) return res.status(400).json({ error: 'Choose one or more valid sites for this guard.' });
+    assignedSiteIds = [...new Set(assignedSiteIds.map(id => String(id || '').trim()).filter(Boolean))];
+    if (siteId && typeof siteId === 'object') siteId = String(siteId._id || siteId.id || '');
     if (req.user.role === 'manager' && !['guard', 'manager'].includes(role)) {
       return res.status(403).json({ error: 'Managers can only create guard or manager accounts.' });
     }
     if (siteId === '' || siteId === undefined) siteId = null;
-    if (role === 'guard' && !siteId) {
+    if (role === 'guard' && !siteId && !assignedSiteIds.length) {
       // If no site provided, auto-assign to first active site in organisation if available
       const firstSite = await Site.findOne({ organisationId: req.user.organisationId, active: true });
       if (firstSite) siteId = firstSite._id;
       else return res.status(400).json({ error: 'A guard account must be assigned to a site. Please create a site first.' });
     }
+    const existingEmail = await User.findOne({ organisationId: req.user.organisationId, email: String(email).trim().toLowerCase() }).select('_id active');
+    if (existingEmail) return res.status(409).json({ error: existingEmail.active === false ? 'This email already belongs to an inactive account. Reactivate that account or use a different email address.' : 'An account with this email already exists in your organisation.' });
+    if (role === 'guard') {
+      assignedSiteIds = [...new Set([...(assignedSiteIds || []), ...(siteId ? [siteId] : [])].map(String))];
+      if (!siteId) siteId = assignedSiteIds[0] || null;
+      const assignedSites = await Site.find({ _id: { $in: assignedSiteIds }, organisationId: req.user.organisationId, active: true }).select('_id managerId');
+      if (assignedSites.length !== assignedSiteIds.length) return res.status(400).json({ error: 'One or more assigned sites are not active in this organisation.' });
+      if (req.user.role === 'manager' && assignedSites.some(site => !userCanAccessSite(req.user, site._id) && String(site.managerId || '') !== String(req.user._id))) return res.status(403).json({ error: 'You cannot assign users outside your sites.' });
+    }
     if (siteId) {
       const site = await Site.findOne({ _id: siteId, organisationId: req.user.organisationId, active: true });
       if (!site) return res.status(400).json({ error: 'The selected site is not active in this organisation.' });
-      if (req.user.role === 'manager' && !userCanAccessSite(req.user, siteId)) return res.status(403).json({ error: 'You cannot assign users outside your sites.' });
+      const managerOwnsSite = String(site.managerId || '') === String(req.user._id);
+      if (req.user.role === 'manager' && !userCanAccessSite(req.user, siteId) && !managerOwnsSite) {
+        return res.status(403).json({ error: 'You cannot assign users outside your sites.' });
+      }
     }
     if (managedSiteIds?.length) {
       if (req.user.role === 'manager' && managedSiteIds.some(id => !userCanAccessSite(req.user, id))) return res.status(403).json({ error: 'You cannot assign managers outside your sites.' });
@@ -99,6 +145,7 @@ router.post('/users',
       name, email, password, role,
       badgeNumber:    badgeNumber || null,
       siteId:         siteId || null,
+      assignedSiteIds: role === 'guard' ? assignedSiteIds : [],
       managedSiteIds: managedSiteIds || [],
       phone:          phone || null,
     });
@@ -142,13 +189,15 @@ router.patch('/users/:id',
       if (['admin', 'superadmin'].includes(user.role)) {
         return res.status(403).json({ error: 'Managers cannot edit administrator accounts.' });
       }
-      const targetSiteIds = [user.siteId, ...(user.managedSiteIds || [])].filter(Boolean).map(String);
-      if (!targetSiteIds.some(id => req.user.managedSiteIds.map(String).includes(id))) {
+      const targetSiteIds = [user.siteId, ...(user.assignedSiteIds || []), ...(user.managedSiteIds || [])].filter(Boolean).map(String);
+      const accessibleSiteIds = await getManagerSiteIds(req.user);
+      if (!targetSiteIds.some(id => accessibleSiteIds.includes(id))) {
         return res.status(403).json({ error: 'You cannot manage this account outside your assigned sites.' });
       }
-      if (req.body.siteId && !userCanAccessSite(req.user, req.body.siteId)) {
+      if (req.body.siteId && !accessibleSiteIds.includes(String(req.body.siteId))) {
         return res.status(403).json({ error: 'You cannot assign users outside your sites.' });
       }
+      if (req.body.assignedSiteIds?.some(id => !accessibleSiteIds.includes(String(id)))) return res.status(403).json({ error: 'You cannot assign users outside your sites.' });
       if (req.body.managedSiteIds?.some(id => !userCanAccessSite(req.user, id))) {
         return res.status(403).json({ error: 'You cannot assign managers outside your sites.' });
       }
@@ -168,8 +217,14 @@ router.patch('/users/:id',
       user.email = req.body.email;
     }
 
-    const allowed = ['name','email','phone','badgeNumber','siteId','managedSiteIds','active','avatarUrl','role'];
+    const allowed = ['name','email','phone','badgeNumber','siteId','assignedSiteIds','managedSiteIds','active','avatarUrl','role'];
     allowed.forEach(key => { if (req.body[key] !== undefined) user[key] = req.body[key]; });
+    if (user.role === 'guard' && req.body.assignedSiteIds !== undefined) {
+      user.assignedSiteIds = [...new Set([...(req.body.assignedSiteIds || []), ...(req.body.siteId || user.siteId ? [req.body.siteId || user.siteId] : [])].map(String))];
+      const count = await Site.countDocuments({ _id: { $in: user.assignedSiteIds }, organisationId: req.user.organisationId, active: true });
+      if (!user.assignedSiteIds.length || count !== user.assignedSiteIds.length) return res.status(400).json({ error: 'One or more assigned sites are invalid or inactive.' });
+      if (!user.assignedSiteIds.some(id => String(id) === String(user.siteId))) user.siteId = user.assignedSiteIds[0];
+    }
     
     if (req.body.password) {
       user.password = req.body.password;
@@ -243,9 +298,12 @@ router.get('/sites', authenticate, asyncHandler(async (req, res) => {
   const filter = { organisationId: req.user.organisationId, active: true };
   // Guards see only their site; managers see all their sites
   if (req.user.role === 'guard') {
-    filter._id = req.user.siteId || null;
+    filter._id = { $in: [...new Set([req.user.siteId, ...(req.user.assignedSiteIds || [])].filter(Boolean).map(String))] };
   } else if (req.user.role === 'manager') {
-    filter._id = { $in: req.user.managedSiteIds };
+    filter.$or = [
+      { _id: { $in: await getManagerSiteIds(req.user) } },
+      { managerId: req.user._id },
+    ];
   }
   const sites = await Site.find(filter).sort({ name: 1 });
   res.json({ sites });
@@ -279,6 +337,22 @@ router.post('/sites',
       return res.status(403).json({ error: 'You may only create sites assigned to yourself.' });
     }
 
+    const normalizedName = String(name || '').trim();
+    const normalizedAddress = String(address || '').trim().toLowerCase();
+    const escapedAddress = normalizedAddress.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedName = normalizedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const duplicate = await Site.findOne({
+      organisationId: req.user.organisationId,
+      managerId,
+      active: true,
+      name: { $regex: `^${escapedName}$`, $options: 'i' },
+      address: normalizedAddress ? { $regex: `^${escapedAddress}$`, $options: 'i' } : { $in: [null, ''] },
+    });
+    if (duplicate) {
+      await User.findByIdAndUpdate(managerId, { $addToSet: { managedSiteIds: duplicate._id } });
+      return res.status(200).json({ site: duplicate, alreadyRegistered: true });
+    }
+
     let siteLocation = location;
     let latNum = latitude != null ? Number(latitude) : null;
     let lngNum = longitude != null ? Number(longitude) : null;
@@ -286,20 +360,22 @@ router.post('/sites',
 
     let finalW3w = normalizeW3W(what3words);
 
+    if (finalW3w && !isValidWhat3Words(finalW3w)) {
+      return res.status(400).json({ error: 'Enter a valid What3Words address in ///word.word.word format.' });
+    }
+
     if (finalW3w && (latNum == null || lngNum == null)) {
       const coords = await getCoordinatesFromWhat3Words(finalW3w);
       if (coords) {
         latNum = coords.latitude;
         lngNum = coords.longitude;
-      } else if (latNum == null || lngNum == null) {
-        // Fallback to central UK operations coordinates so site perimeter is valid
-        latNum = 51.5074;
-        lngNum = -0.1278;
+      } else {
+        return res.status(422).json({ error: 'The What3Words address could not be verified. Check the address and What3Words API configuration, or capture GPS coordinates.' });
       }
     }
 
     if (!finalW3w && latNum != null && lngNum != null) {
-      finalW3w = getWhat3WordsSync(latNum, lngNum);
+      finalW3w = await getWhat3WordsFromCoordinates(latNum, lngNum);
     }
 
     if (!siteLocation && latNum != null && lngNum != null) {
@@ -325,7 +401,7 @@ router.post('/sites',
     });
     await User.findByIdAndUpdate(managerId, { $addToSet: { managedSiteIds: site._id } });
     await audit({ req, action: 'site_created', targetModel: 'Site', targetId: site._id, targetName: site.name });
-    res.status(201).json({ site });
+    res.status(201).json({ site, what3wordsLookupUnavailable: Boolean(latNum != null && lngNum != null && !finalW3w) });
   })
 );
 
@@ -372,6 +448,9 @@ router.patch('/sites/:id',
 
     if (updates.what3words !== undefined) {
       updates.what3words = normalizeW3W(updates.what3words);
+      if (updates.what3words && !isValidWhat3Words(updates.what3words)) {
+        return res.status(400).json({ error: 'Enter a valid What3Words address in ///word.word.word format.' });
+      }
       if (updates.what3words && updates.latitude == null && updates.longitude == null) {
         const coords = await getCoordinatesFromWhat3Words(updates.what3words);
         if (coords) {
@@ -394,7 +473,7 @@ router.patch('/sites/:id',
           coordinates: [lng, lat],
         };
         if (!updates.what3words) {
-          updates.what3words = getWhat3WordsSync(lat, lng);
+          updates.what3words = await getWhat3WordsFromCoordinates(lat, lng);
         }
       }
     }

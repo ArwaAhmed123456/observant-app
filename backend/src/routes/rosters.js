@@ -23,27 +23,45 @@ const fcm          = require('../services/fcm');
 const { audit }    = require('../utils/auditLogger');
 const { getMondayOfWeek } = require('../utils/dateHelpers');
 
+async function managerSites(user) {
+  const owned = await Site.find({ organisationId: user.organisationId, managerId: user._id, active: true }).distinct('_id');
+  return [...new Set([...(user.managedSiteIds || []), ...owned].map(String))];
+}
+
 // Helper to convert HH:MM into minutes from 00:00
 function timeToMinutes(t) {
   if (!t || !/^\d{2}:\d{2}$/.test(t)) return null;
   const [h, m] = t.split(':').map(Number);
+  if (h > 23 || m > 59) return null;
   return h * 60 + m;
 }
 
-// Helper to check if two shift times on the same day overlap
-function shiftsOverlap(s1, s2) {
-  if (!s1 || !s2 || !s1.start || !s1.end || !s2.start || !s2.end) return false;
-  let start1 = timeToMinutes(s1.start);
-  let end1 = timeToMinutes(s1.end);
-  let start2 = timeToMinutes(s2.start);
-  let end2 = timeToMinutes(s2.end);
-  if (start1 === null || end1 === null || start2 === null || end2 === null) return false;
+function shiftInterval(day, shift) {
+  const dayIndex = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].indexOf(day);
+  const start = timeToMinutes(shift?.start);
+  const rawEnd = timeToMinutes(shift?.end);
+  if (dayIndex < 0 || start === null || rawEnd === null) return null;
+  const absoluteStart = dayIndex * 1440 + start;
+  const absoluteEnd = dayIndex * 1440 + rawEnd + (rawEnd <= start ? 1440 : 0);
+  return { start: absoluteStart, end: absoluteEnd };
+}
 
-  // Handle overnight shift by extending end into next 24h
-  if (end1 <= start1) end1 += 24 * 60;
-  if (end2 <= start2) end2 += 24 * 60;
-
-  return Math.max(start1, start2) < Math.min(end1, end2);
+function weeklyShiftsOverlap(firstDays, secondDays) {
+  const weekMinutes = 7 * 1440;
+  for (const day of ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']) {
+    const first = shiftInterval(day, firstDays?.[day]);
+    if (!first) continue;
+    for (const otherDay of ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']) {
+      const second = shiftInterval(otherDay, secondDays?.[otherDay]);
+      if (!second) continue;
+      for (const weekOffset of [-weekMinutes, 0, weekMinutes]) {
+        if (Math.max(first.start, second.start + weekOffset) < Math.min(first.end, second.end + weekOffset)) {
+          return { day, otherDay };
+        }
+      }
+    }
+  }
+  return null;
 }
 
 // ── List rosters ──────────────────────────────────────────────────────────────
@@ -59,14 +77,14 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
   }
 
   if (req.user.role === 'manager') {
-    const allowed = req.user.managedSiteIds.map(String);
+    const allowed = await managerSites(req.user);
     if (siteId) {
       if (!allowed.includes(String(siteId))) {
         return res.status(403).json({ error: 'Site is outside your assigned area.' });
       }
       filter.siteId = siteId;
     } else {
-      filter.siteId = { $in: req.user.managedSiteIds };
+      filter.siteId = { $in: allowed };
     }
   } else if (siteId) {
     filter.siteId = siteId;
@@ -92,20 +110,33 @@ router.post('/',
     body('days').isObject(),
     body('checkpointIds').optional().isArray(),
     body('checkpointIds.*').optional().isMongoId(),
+    body('checkCallInterval').optional().isInt({ min: 5, max: 1440 }),
+    body('recurringWeekly').optional().isBoolean(),
+    body('shiftInstructions').optional().isString().isLength({ max: 2000 }),
   ],
   validate,
   asyncHandler(async (req, res) => {
     const { guardId, siteId, weekStartDate, days } = req.body;
     const checkpointIds = [...new Set((Array.isArray(req.body.checkpointIds) ? req.body.checkpointIds : []).map(String))];
     const orgId = req.user.organisationId;
+    const dayKeys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+    for (const day of dayKeys) {
+      const shift = days[day];
+      if (shift == null) continue;
+      if (typeof shift !== 'object' || timeToMinutes(shift.start) === null || timeToMinutes(shift.end) === null || shift.start === shift.end) {
+        return res.status(400).json({ error: `Invalid ${day.toUpperCase()} shift. Use different start/end times in HH:MM format.` });
+      }
+    }
 
-    const guard = await User.findOne({ _id: guardId, organisationId: orgId, role: 'guard', active: true }).select('name fcmToken siteId');
+    const guard = await User.findOne({ _id: guardId, organisationId: orgId, role: 'guard', active: true }).select('name fcmToken siteId assignedSiteIds');
     if (!guard) return res.status(404).json({ error: 'Active guard not found in this organisation.' });
 
     const site = await Site.findOne({ _id: siteId, organisationId: orgId, active: true });
     if (!site) return res.status(404).json({ error: 'Site not found.' });
 
-    if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(siteId))) {
+    if (![guard.siteId, ...(guard.assignedSiteIds || [])].some(id => String(id) === String(siteId))) return res.status(400).json({ error: 'This guard is not assigned to the selected site.' });
+
+    if (req.user.role === 'manager' && !(await managerSites(req.user)).includes(String(siteId))) {
       return res.status(403).json({ error: 'Site is outside your assigned area.' });
     }
 
@@ -114,44 +145,50 @@ router.post('/',
       if (validCount !== checkpointIds.length) return res.status(400).json({ error: 'One or more selected checkpoints are not active at this site.' });
     }
 
-    // Check for conflicting overlapping shifts across other sites for this guard in the same week
-    const existingOtherSiteRosters = await ShiftRoster.find({
+    // A short database lease serializes schedule writes for this guard, so two
+    // simultaneous requests cannot both pass the overlap check before either saves.
+    const lockUntil = new Date(Date.now() + 60 * 1000);
+    const lock = await User.findOneAndUpdate({
+      _id: guardId,
       organisationId: orgId,
-      guardId,
-      weekStartDate,
-      siteId: { $ne: siteId }
-    }).populate('siteId', 'name');
+      $or: [
+        { rosterWriteLockUntil: { $exists: false } },
+        { rosterWriteLockUntil: null },
+        { rosterWriteLockUntil: { $lte: new Date() } },
+      ],
+    }, { $set: { rosterWriteLockUntil: lockUntil } }, { new: true });
+    if (!lock) return res.status(409).json({ error: 'Another schedule for this guard is being saved. Wait a moment and try again.' });
 
-    const dayKeys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-    for (const other of existingOtherSiteRosters) {
-      for (const d of dayKeys) {
-        if (days[d] && other.days?.[d]) {
-          if (shiftsOverlap(days[d], other.days[d])) {
-            return res.status(409).json({
-              error: `Overlapping shift conflict on ${d.toUpperCase()}: Guard is already scheduled at ${other.siteId?.name || 'another site'} (${other.days[d].start} - ${other.days[d].end}).`,
-              conflictDay: d,
-              conflictingSite: other.siteId?.name,
-              conflictingShift: other.days[d]
-            });
-          }
-        }
+    let roster;
+    try {
+      const existingOtherSiteRosters = await ShiftRoster.find({
+        organisationId: orgId, guardId, weekStartDate, siteId: { $ne: siteId },
+      }).populate('siteId', 'name');
+      for (const other of existingOtherSiteRosters) {
+        const conflict = weeklyShiftsOverlap(days, other.days);
+        if (conflict) return res.status(409).json({
+          error: `Shift conflict: this guard already has an overlapping shift at ${other.siteId?.name || 'another site'} (${conflict.otherDay.toUpperCase()}). Adjust the days or times before saving.`,
+          conflictDay: conflict.day,
+          conflictingDay: conflict.otherDay,
+          conflictingSite: other.siteId?.name,
+        });
       }
-    }
 
-    const roster = await ShiftRoster.findOneAndUpdate(
-      { organisationId: orgId, guardId, siteId, weekStartDate },
-      {
-        organisationId: orgId,
-        guardId,
-        siteId,
-        checkpointIds,
-        publishedBy:    req.user._id,
-        weekStartDate,
-        days,
-        publishedAt:    new Date(),
-      },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
+      roster = await ShiftRoster.findOneAndUpdate(
+        { organisationId: orgId, guardId, siteId, weekStartDate },
+        {
+          organisationId: orgId, guardId, siteId, checkpointIds,
+          publishedBy: req.user._id, weekStartDate, days,
+          checkCallInterval: req.body.checkCallInterval ?? 60,
+          recurringWeekly: req.body.recurringWeekly ?? true,
+          shiftInstructions: String(req.body.shiftInstructions || '').trim(),
+          publishedAt: new Date(),
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } finally {
+      await User.updateOne({ _id: guardId, rosterWriteLockUntil: lockUntil }, { $set: { rosterWriteLockUntil: null } });
+    }
 
     // Send FCM push to guard
     if (guard?.fcmToken) {
@@ -189,10 +226,11 @@ router.post('/',
 router.patch('/:id',
   authenticate, requireRole('manager','admin','superadmin'),
   asyncHandler(async (req, res) => {
+    const allowedManagerSites = req.user.role === 'manager' ? await managerSites(req.user) : null;
     const roster = await ShiftRoster.findOne({
       _id: req.params.id,
       organisationId: req.user.organisationId,
-      ...(req.user.role === 'manager' ? { siteId: { $in: req.user.managedSiteIds } } : {}),
+      ...(allowedManagerSites ? { siteId: { $in: allowedManagerSites } } : {}),
     });
     if (!roster) return res.status(404).json({ error: 'Roster not found or inaccessible.' });
 
@@ -225,10 +263,11 @@ router.patch('/:id',
 router.delete('/:id',
   authenticate, requireRole('manager','admin','superadmin'),
   asyncHandler(async (req, res) => {
+    const allowedManagerSites = req.user.role === 'manager' ? await managerSites(req.user) : null;
     const roster = await ShiftRoster.findOneAndDelete({
       _id: req.params.id,
       organisationId: req.user.organisationId,
-      ...(req.user.role === 'manager' ? { siteId: { $in: req.user.managedSiteIds } } : {}),
+      ...(allowedManagerSites ? { siteId: { $in: allowedManagerSites } } : {}),
     });
     if (!roster) return res.status(404).json({ error: 'Roster not found or inaccessible.' });
 
@@ -251,7 +290,7 @@ router.get('/week/:date', authenticate, asyncHandler(async (req, res) => {
     weekStartDate:  req.params.date,
   };
   if (req.user.role === 'manager') {
-    filter.siteId = { $in: req.user.managedSiteIds };
+    filter.siteId = { $in: await managerSites(req.user) };
   } else if (req.user.role === 'guard') {
     filter.guardId = req.user._id;
   }
@@ -267,11 +306,18 @@ router.get('/guard/:guardId', authenticate, asyncHandler(async (req, res) => {
   const { week } = req.query;
   const weekStartDate = week || getMondayOfWeek();
 
-  const rosters = await ShiftRoster.find({
+  const filter = {
     organisationId: req.user.organisationId,
     guardId:        req.params.guardId,
     weekStartDate,
-  }).populate('siteId', 'name address what3words latitude longitude');
+  };
+  if (req.user.role === 'guard' && String(req.user._id) !== String(req.params.guardId)) {
+    return res.status(403).json({ error: 'You can only view your own schedule.' });
+  }
+  if (req.user.role === 'manager') {
+    filter.siteId = { $in: await managerSites(req.user) };
+  }
+  const rosters = await ShiftRoster.find(filter).populate('siteId', 'name address what3words latitude longitude');
 
   res.json({
     rosters,
@@ -307,7 +353,7 @@ router.post('/templates',
     const checkpointIds = [...new Set((Array.isArray(req.body.checkpointIds) ? req.body.checkpointIds : []).map(String))];
     if (checkpointIds.length) {
       const filter = { _id: { $in: checkpointIds }, organisationId: req.user.organisationId, active: true };
-      if (req.user.role === 'manager') filter.siteId = { $in: req.user.managedSiteIds };
+      if (req.user.role === 'manager') filter.siteId = { $in: await managerSites(req.user) };
       const validCount = await PatrolCheckpoint.countDocuments(filter);
       if (validCount !== checkpointIds.length) return res.status(400).json({ error: 'One or more template checkpoints are not active in this organisation.' });
     }
@@ -326,9 +372,9 @@ router.post('/templates',
 router.delete('/templates/:id',
   authenticate, requireRole('manager','admin','superadmin'),
   asyncHandler(async (req, res) => {
-    await RosterTemplate.findOneAndDelete({
-      _id: req.params.id, organisationId: req.user.organisationId,
-    });
+    const filter = { _id: req.params.id, organisationId: req.user.organisationId };
+    if (req.user.role === 'manager') filter.createdBy = req.user._id;
+    await RosterTemplate.findOneAndDelete(filter);
     res.json({ message: 'Template deleted' });
   })
 );

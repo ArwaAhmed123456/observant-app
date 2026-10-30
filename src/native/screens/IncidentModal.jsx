@@ -4,7 +4,7 @@ import {
   StyleSheet, ScrollView, Alert,
 } from 'react-native';
 import { AlertTriangle, X, Check, Camera, Zap, Shield } from 'lucide-react-native';
-import { useSecurity } from '../../context/SecurityContext';
+import { useApp } from '../../context/AppContext';
 import { P, SP, BR, FONT, SH_TOKENS, input, btnPrimary } from '../../ds';
 
 const CATEGORIES = ['Trespassing', 'Fire/Hazard', 'Forced Entry', 'Maintenance', 'Suspicious Activity'];
@@ -16,7 +16,8 @@ const SEVERITIES = [
 ];
 
 export const IncidentModal = ({ visible, onClose }) => {
-  const { logIncident, activeShiftSession, currentUser } = useSecurity();
+  const { addAlert, currentUser, getGuardActiveSession } = useApp();
+  const activeShiftSession = currentUser ? getGuardActiveSession(currentUser.id) : null;
   const [title, setTitle]                 = useState('');
   const [category, setCategory]           = useState('Trespassing');
   const [severity, setSeverity]           = useState('Medium');
@@ -32,16 +33,19 @@ export const IncidentModal = ({ visible, onClose }) => {
       Alert.alert('Required Field', 'Please provide a detailed description of the incident.');
       return;
     }
-    logIncident({
-      title: title.trim(),
-      notes: notes.trim(),
-      severity,
-      guardId:   currentUser.id,
-      guardName: currentUser.name,
-      siteId:    activeShiftSession?.siteId || currentUser.assignedSiteId || 'site-1',
-      hasPhoto:  photoCaptured,
-      timestamp: new Date().toISOString(),
-    });
+    if (addAlert) {
+      addAlert({
+        type: 'incident',
+        severity: severity.toLowerCase(),
+        title: title.trim(),
+        message: notes.trim(),
+        guardId: currentUser?.id,
+        guardName: currentUser?.name,
+        badgeNumber: currentUser?.badgeNumber,
+        siteId: activeShiftSession?.siteId || currentUser?.siteId,
+        createdAt: new Date().toISOString(),
+      });
+    }
     setTitle(''); setNotes(''); setPhotoCaptured(false);
     onClose();
   };

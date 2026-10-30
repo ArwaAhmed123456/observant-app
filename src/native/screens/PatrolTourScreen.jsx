@@ -18,7 +18,17 @@ import {
   Check,
   Award
 } from 'lucide-react-native';
-import { useSecurity } from '../../context/SecurityContext';
+// Legacy screen — not currently mounted in the navigator.
+// Stub out SecurityContext to prevent web-only AudioContext crash on iOS.
+const useSecurity = () => ({
+  sites: [],
+  activeShiftSession: null,
+  activePatrolSession: null,
+  startPatrol: () => ({}),
+  scanCheckpoint: () => {},
+  completePatrol: () => {},
+  currentUser: { id: '', name: '' },
+});
 
 export const PatrolTourScreen = ({ onBack }) => {
   const {

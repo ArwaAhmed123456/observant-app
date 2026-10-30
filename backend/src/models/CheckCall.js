@@ -21,6 +21,7 @@ const checkCallSchema = new mongoose.Schema({
   location: {
     latitude:  { type: Number, default: null },
     longitude: { type: Number, default: null },
+    what3words: { type: String, default: null, trim: true },
   },
   isManualLog: { type: Boolean, default: false },
   manuallyLoggedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

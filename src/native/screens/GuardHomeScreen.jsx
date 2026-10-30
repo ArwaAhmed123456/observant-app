@@ -179,7 +179,7 @@ export function GuardHomeScreen({ navigation }) {
       return;
     }
     await addAlert?.({
-      type: 'sos', siteId: currentUser?.siteId, guardId: gId,
+      type: 'sos', siteId: activeSession?.siteId || effectiveSiteId, guardId: gId,
       title: `🚨 SOS — ${currentUser?.name}`,
       message: `URGENT: ${currentUser?.name} (${currentUser?.badgeNumber}) triggered emergency alert.`,
     });

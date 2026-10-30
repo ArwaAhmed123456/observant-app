@@ -8,6 +8,10 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+.gradle-home/
+**/.gradle/
+android/app/build/
+android/build/
 dist
 dist-ssr
 *.local
@@ -30,3 +34,4 @@ web-archive/
 *.njsproj
 *.sln
 *.sw?
+*.p8

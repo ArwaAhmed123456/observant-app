@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   Modal, TextInput, Alert, Switch, Platform, KeyboardAvoidingView,
@@ -9,18 +9,11 @@ import { ChevronLeft, ChevronRight, ChevronDown, Save, Bookmark, Trash2, Send, C
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, input, btnPrimary, btnGold } from '../../ds';
+import { getUKMondayDate } from '../../utils/scheduleDates';
+import { useFocusEffect } from '@react-navigation/native';
 
 const DAY_KEYS   = ['mon','tue','wed','thu','fri','sat','sun'];
 const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-
-function getMondayOfWeek(date) {
-  const d = new Date(date);
-  const day = d.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  d.setHours(12, 0, 0, 0);
-  return d;
-}
 
 function addDays(date, n) {
   const d = new Date(date);
@@ -36,19 +29,53 @@ function toWeekKey(date) {
   return `${year}-${month}-${day}`;
 }
 
+function shiftMinutes(value) {
+  if (!/^\d{2}:\d{2}$/.test(String(value || ''))) return null;
+  const [hours, minutes] = String(value).split(':').map(Number);
+  return hours < 24 && minutes < 60 ? hours * 60 + minutes : null;
+}
+
+function getShiftInterval(day, shift) {
+  const dayIndex = DAY_KEYS.indexOf(day);
+  const start = shiftMinutes(shift?.start);
+  const rawEnd = shiftMinutes(shift?.end);
+  if (dayIndex < 0 || start == null || rawEnd == null) return null;
+  const absoluteStart = dayIndex * 1440 + start;
+  return { start: absoluteStart, end: dayIndex * 1440 + rawEnd + (rawEnd <= start ? 1440 : 0), day };
+}
+
+function findWeeklyShiftConflict(firstDays, secondDays) {
+  const weekMinutes = 7 * 1440;
+  for (const firstDay of DAY_KEYS) {
+    const first = getShiftInterval(firstDay, firstDays?.[firstDay]);
+    if (!first) continue;
+    for (const secondDay of DAY_KEYS) {
+      const second = getShiftInterval(secondDay, secondDays?.[secondDay]);
+      if (!second) continue;
+      for (const offset of [-weekMinutes, 0, weekMinutes]) {
+        if (Math.max(first.start, second.start + offset) < Math.min(first.end, second.end + offset)) {
+          return { firstDay, secondDay };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 const DEFAULT_DAYS = { mon:null,tue:null,wed:null,thu:null,fri:null,sat:null,sun:null };
 
 export function ManagerRosterScreen() {
   const insets = useSafeAreaInsets();
-  const safeBottom = Math.max(insets.bottom, 16);
+  const safeBottom = Math.max(insets.bottom, Platform.OS === 'android' ? 36 : 16);
   const {
     currentUser, users, sites, checkpoints, publishRoster,
-    getWeekRosters, getGuardRoster,
+    getWeekRosters, refreshUsers, refreshSites, refreshRosters,
     rosterTemplates, saveRosterTemplate, deleteRosterTemplate,
   } = useApp();
 
-  const [weekStart, setWeekStart]         = useState(getMondayOfWeek(new Date()));
+  const [weekStart, setWeekStart]         = useState(getUKMondayDate(new Date()));
   const [selectedGuard, setSelectedGuard] = useState(null);
+  const [selectedRosterSiteId, setSelectedRosterSiteId] = useState('');
   const [editDays, setEditDays]           = useState({ ...DEFAULT_DAYS });
   const [editCheckpointIds, setEditCheckpointIds] = useState([]);
   const [editModalVisible, setEditModalVisible] = useState(false);
@@ -64,13 +91,25 @@ export function ManagerRosterScreen() {
   const [checkCallInterval, setCheckCallInterval] = useState(60);
   const [recurringWeekly, setRecurringWeekly] = useState(true);
   const [shiftInstructions, setShiftInstructions] = useState('');
+  const [siteDrafts, setSiteDrafts] = useState({});
 
-  const guardSiteId = (guard) => String(guard.siteId?._id || guard.siteId?.id || guard.siteId || '');
-  const managerSiteIds = (currentUser.siteIds || currentUser.managedSiteIds || [currentUser.siteId]).filter(Boolean).map(String);
+  useFocusEffect(useCallback(() => {
+    Promise.allSettled([refreshUsers(), refreshSites(), refreshRosters()]);
+  }, [refreshUsers, refreshSites, refreshRosters]));
+
+  const guardSiteIds = (guard) => [...new Set([guard.siteId, ...(guard.assignedSiteIds || [])].map(value => String(value?._id || value?.id || value || '')).filter(Boolean))];
+  const guardSiteId = (guard) => guardSiteIds(guard)[0] || '';
+  const currentUserId = String(currentUser?.id || currentUser?._id || '');
+  const managerSiteIds = new Set([
+    ...(currentUser?.siteIds || []),
+    ...(currentUser?.managedSiteIds || []),
+    ...(currentUser?.siteId ? [currentUser.siteId] : []),
+    ...(sites || []).filter(site => String(site.managerId || '') === currentUserId).map(site => site.id || site._id),
+  ].filter(Boolean).map(String));
   const isAllAdmin = currentUser.role === 'superadmin' || currentUser.role === 'admin';
   const guards = users.filter(u =>
     u.role === 'guard' &&
-    (isAllAdmin || managerSiteIds.length === 0 || managerSiteIds.includes(guardSiteId(u)))
+    (isAllAdmin || managerSiteIds.size === 0 || guardSiteIds(u).some(id => managerSiteIds.has(id)))
   );
   const weekKey = toWeekKey(weekStart);
 
@@ -80,12 +119,30 @@ export function ManagerRosterScreen() {
   const openEditForGuard = (guard) => {
     setSelectedGuard(guard);
     const gId = guard.id || guard._id;
-    const existing = getGuardRoster(gId, weekKey);
-    setEditDays(existing?.days ? { ...DEFAULT_DAYS, ...existing.days } : { ...DEFAULT_DAYS });
-    setEditCheckpointIds(existing?.checkpointIds || []);
-    setCheckCallInterval(existing?.checkCallInterval || 60);
-    setRecurringWeekly(existing?.recurringWeekly ?? true);
-    setShiftInstructions(existing?.shiftInstructions || '');
+    const existingRosters = getWeekRosters(weekKey).filter(roster => String(roster.guardId?._id || roster.guardId?.id || roster.guardId || '') === String(gId));
+    const initialDrafts = Object.fromEntries(existingRosters.map(roster => {
+      const siteId = String(roster.siteId?._id || roster.siteId?.id || roster.siteId || '');
+      return [siteId, {
+        days: { ...DEFAULT_DAYS, ...(roster.days || {}) },
+        checkpointIds: roster.checkpointIds || [],
+        checkCallInterval: roster.checkCallInterval || 60,
+        recurringWeekly: roster.recurringWeekly ?? true,
+        shiftInstructions: roster.shiftInstructions || '',
+      }];
+    }));
+    const assignedIds = guardSiteIds(guard);
+    const activeSiteId = assignedIds.find(id => initialDrafts[id]) || assignedIds[0] || '';
+    const activeDraft = initialDrafts[activeSiteId] || {
+      days: { ...DEFAULT_DAYS }, checkpointIds: [], checkCallInterval: 60,
+      recurringWeekly: true, shiftInstructions: '',
+    };
+    setSiteDrafts(initialDrafts);
+    setSelectedRosterSiteId(activeSiteId);
+    setEditDays(activeDraft.days);
+    setEditCheckpointIds(activeDraft.checkpointIds);
+    setCheckCallInterval(activeDraft.checkCallInterval);
+    setRecurringWeekly(activeDraft.recurringWeekly);
+    setShiftInstructions(activeDraft.shiftInstructions);
     setGuardPickerVisible(false);
     setEditModalVisible(true);
   };
@@ -125,32 +182,66 @@ export function ManagerRosterScreen() {
 
   const handleSaveRoster = async () => {
     if (!selectedGuard) return;
-    const workDays = DAY_KEYS.filter(key => editDays[key]);
-    if (!workDays.length) return Alert.alert('Add a shift first', 'Choose at least one working day before publishing this rota.');
+    const drafts = {
+      ...siteDrafts,
+      [selectedRosterSiteId]: {
+        days: editDays, checkpointIds: editCheckpointIds, checkCallInterval,
+        recurringWeekly, shiftInstructions,
+      },
+    };
+    const assignedIds = guardSiteIds(selectedGuard);
+    const existingSiteIds = new Set(getWeekRosters(weekKey)
+      .filter(roster => String(roster.guardId?._id || roster.guardId?.id || roster.guardId || '') === String(selectedGuard.id || selectedGuard._id))
+      .map(roster => String(roster.siteId?._id || roster.siteId?.id || roster.siteId || '')));
+    const scheduledSites = assignedIds.map(siteId => ({ siteId, ...(drafts[siteId] || {}) }))
+      .filter(draft => draft.siteId && draft.days && (
+        DAY_KEYS.some(key => draft.days[key]) || draft.siteId === selectedRosterSiteId || existingSiteIds.has(draft.siteId)
+      ));
+    if (!scheduledSites.length) return Alert.alert('Add a shift first', 'Choose at least one working day for an assigned site.');
+    const plannedBySite = new Map(getWeekRosters(weekKey)
+      .filter(roster => String(roster.guardId?._id || roster.guardId?.id || roster.guardId || '') === String(selectedGuard.id || selectedGuard._id))
+      .map(roster => [String(roster.siteId?._id || roster.siteId?.id || roster.siteId || ''), roster.days || {}]));
+    scheduledSites.forEach(draft => plannedBySite.set(draft.siteId, draft.days));
+    const planned = [...plannedBySite.entries()];
+    for (let i = 0; i < planned.length; i += 1) {
+      for (let j = i + 1; j < planned.length; j += 1) {
+        const conflict = findWeeklyShiftConflict(planned[i][1], planned[j][1]);
+        if (conflict) {
+          const siteName = id => sites.find(item => String(item.id || item._id) === id)?.name || 'another site';
+          const day = DAY_LABELS[DAY_KEYS.indexOf(conflict.firstDay)];
+          return Alert.alert('Schedule conflict', `${selectedGuard.name} has overlapping shifts at ${siteName(planned[i][0])} and ${siteName(planned[j][0])} (${day} or an overnight crossover). Adjust one site’s shift before saving.`);
+        }
+      }
+    }
     setPublishing(true);
     try {
       const guardId = selectedGuard.id || selectedGuard._id;
-      const effectiveSiteId = String(selectedGuard.siteId?._id || selectedGuard.siteId?.id || selectedGuard.siteId || selectedGuard.siteIds?.[0] || sites[0]?.id || sites[0]?._id || '');
-      const saved = await publishRoster({
-        guardId,
-        siteId: effectiveSiteId,
-        weekStartDate: weekKey,
-        days: editDays,
-        checkpointIds: editCheckpointIds,
-        checkCallInterval,
-        recurringWeekly,
-        shiftInstructions: shiftInstructions.trim(),
-        publishedBy: currentUser.id || currentUser._id,
-        publishedAt: new Date().toISOString(),
-      });
+      const savedRosters = [];
+      for (const draft of scheduledSites) {
+        savedRosters.push(await publishRoster({
+          guardId, siteId: draft.siteId, weekStartDate: weekKey,
+          days: draft.days, checkpointIds: draft.checkpointIds || [],
+          checkCallInterval: draft.checkCallInterval || 60,
+          recurringWeekly: draft.recurringWeekly ?? true,
+          shiftInstructions: String(draft.shiftInstructions || '').trim(),
+          publishedBy: currentUser.id || currentUser._id,
+          publishedAt: new Date().toISOString(),
+        }));
+      }
       setEditModalVisible(false);
-      const summary = workDays.map(key => `${DAY_LABELS[DAY_KEYS.indexOf(key)]} ${editDays[key].start}–${editDays[key].end}`).join(', ');
-      const notification = saved?.id?.startsWith('ro_')
-        ? `Demo notification preview for ${selectedGuard.name}: ${summary}.`
-        : saved?.notifiedAt
-          ? `${selectedGuard.name} was notified: ${summary}.`
-          : `The rota was saved, but no push was sent because the guard has no registered device: ${summary}.`;
-      Alert.alert('Rota published', `${notification}\n${editCheckpointIds.length} patrol checkpoint${editCheckpointIds.length === 1 ? '' : 's'} assigned.`);
+      const siteNames = scheduledSites.map(({ siteId, days }) => {
+        const siteName = sites.find(site => String(site.id || site._id) === siteId)?.name || 'Assigned site';
+        const times = DAY_KEYS.filter(key => days[key]).map(key => `${DAY_LABELS[DAY_KEYS.indexOf(key)]} ${days[key].start}–${days[key].end}`).join(', ');
+        return `${siteName}: ${times}`;
+      }).join('\n');
+      const notified = savedRosters.some(saved => saved?.notifiedAt);
+      const demo = savedRosters.every(saved => saved?.id?.startsWith('ro_'));
+      const notification = demo
+        ? `Demo schedule saved for ${selectedGuard.name}.`
+        : notified
+          ? `${selectedGuard.name} was notified about the assigned shifts.`
+          : `Schedules saved, but no push was sent because the guard has no registered device.`;
+      Alert.alert('Rota published', `${notification}\n\n${siteNames}`);
     } catch (error) {
       Alert.alert('Could not publish rota', error.message || 'Check your connection and try again.');
     } finally {
@@ -160,7 +251,7 @@ export function ManagerRosterScreen() {
 
   const handleLoadTemplate = (template) => {
     setEditDays({ ...DEFAULT_DAYS, ...template.days });
-    const siteCheckpointIds = new Set((checkpoints || []).filter(checkpoint => checkpoint.siteId === selectedGuard?.siteId).map(checkpoint => checkpoint.id));
+    const siteCheckpointIds = new Set((checkpoints || []).filter(checkpoint => String(checkpoint.siteId) === String(selectedRosterSiteId)).map(checkpoint => checkpoint.id));
     setEditCheckpointIds((template.checkpointIds || []).filter(id => siteCheckpointIds.has(id)));
     setTemplateModal(false);
   };
@@ -184,7 +275,7 @@ export function ManagerRosterScreen() {
           <View style={styles.guardDropdownIcon}><UserRound size={17} color={P.blue} /></View>
           <View style={{ flex: 1 }}>
             <Text style={styles.guardDropdownName}>{selectedGuard?.name || 'Choose a security officer'}</Text>
-            <Text style={styles.guardDropdownMeta}>{selectedGuard ? (sites.find(site => site.id === selectedGuard.siteId)?.name || 'Assigned site') : `${guards.length} guard${guards.length === 1 ? '' : 's'} available`}</Text>
+            <Text style={styles.guardDropdownMeta}>{selectedGuard ? (sites.find(site => String(site.id || site._id) === guardSiteId(selectedGuard))?.name || 'Assigned site') : `${guards.length} guard${guards.length === 1 ? '' : 's'} available`}</Text>
           </View>
           <ChevronDown size={19} color={P.t3} />
         </TouchableOpacity>
@@ -214,10 +305,12 @@ export function ManagerRosterScreen() {
           ) : (
             guards.map(guard => {
               const gId       = guard.id || guard._id;
-              const gSiteId   = guard.siteId?._id || guard.siteId?.id || guard.siteId;
+              const gSiteId   = guardSiteId(guard);
               const site      = sites.find(s => s.id === gSiteId || s._id === gSiteId || String(s.id || s._id) === String(gSiteId));
-              const roster    = getGuardRoster(gId, weekKey);
-              const workedDays = roster ? DAY_KEYS.filter(k => roster.days?.[k]).length : 0;
+              const guardRosters = getWeekRosters(weekKey).filter(roster =>
+                String(roster.guardId?._id || roster.guardId?.id || roster.guardId || '') === String(gId)
+              );
+              const roster = guardRosters.find(item => String(item.siteId?._id || item.siteId?.id || item.siteId || '') === gSiteId) || guardRosters[0] || null;
 
               return (
                 <TouchableOpacity
@@ -229,20 +322,27 @@ export function ManagerRosterScreen() {
                   <View style={[styles.guardAccent, { backgroundColor: roster ? P.ok : P.b3 }]} />
                   <View style={{ flex: 1 }}>
                     <Text style={styles.guardName}>{guard.name}</Text>
-                    <Text style={styles.guardSite}>{site?.name}</Text>
-                    {roster ? (
+                    <Text style={styles.guardSite}>{guardSiteIds(guard).map(siteId => sites.find(item => String(item.id || item._id) === siteId)?.name).filter(Boolean).join(' · ') || site?.name || 'Assigned site'}</Text>
+                    {guardRosters.length ? (
                       <View>
-                        <View style={styles.dayPills}>
-                          {DAY_KEYS.map((k, i) => (
-                            <View key={k} style={[styles.dayPill, roster.days?.[k] && styles.dayPillActive]}>
-                              <Text style={[styles.dayPillTxt, roster.days?.[k] && styles.dayPillTxtActive]}>{DAY_LABELS[i].charAt(0)}</Text>
+                        {guardRosters.map(item => {
+                          const itemSiteId = String(item.siteId?._id || item.siteId?.id || item.siteId || '');
+                          const itemSite = sites.find(entry => String(entry.id || entry._id) === itemSiteId);
+                          return <View key={item.id || item._id || itemSiteId} style={{ marginTop: 4 }}>
+                            <Text style={styles.rotaSummary} numberOfLines={1}>{itemSite?.name || 'Assigned site'}</Text>
+                            <View style={styles.dayPills}>
+                              {DAY_KEYS.map((k, i) => (
+                                <View key={`${itemSiteId}-${k}`} style={[styles.dayPill, item.days?.[k] && styles.dayPillActive]}>
+                                  <Text style={[styles.dayPillTxt, item.days?.[k] && styles.dayPillTxtActive]}>{DAY_LABELS[i].charAt(0)}</Text>
+                                </View>
+                              ))}
                             </View>
-                          ))}
-                        </View>
-                        <Text style={styles.rotaSummary} numberOfLines={2}>
-                          {DAY_KEYS.filter(key => roster.days?.[key]).map(key => `${DAY_LABELS[DAY_KEYS.indexOf(key)]} ${roster.days[key].start}–${roster.days[key].end}`).join('  ·  ')}
-                        </Text>
-                        {!!roster.checkpointIds?.length && <Text style={styles.rotaSummary}>{roster.checkpointIds.length} assigned checkpoint{roster.checkpointIds.length === 1 ? '' : 's'}</Text>}
+                            <Text style={styles.rotaSummary} numberOfLines={2}>
+                              {DAY_KEYS.filter(key => item.days?.[key]).map(key => `${DAY_LABELS[DAY_KEYS.indexOf(key)]} ${item.days[key].start}–${item.days[key].end}`).join('  ·  ') || 'No shifts assigned'}
+                            </Text>
+                          </View>;
+                        })}
+                        {!!roster?.checkpointIds?.length && <Text style={styles.rotaSummary}>{roster.checkpointIds.length} patrol checkpoint{roster.checkpointIds.length === 1 ? '' : 's'} on {site?.name || 'the selected site'}</Text>}
                       </View>
                     ) : (
                       <Text style={styles.noRoster}>No schedule published</Text>
@@ -284,6 +384,33 @@ export function ManagerRosterScreen() {
                   <Text style={styles.templateBtnTxt}>Save as Template</Text>
                 </TouchableOpacity>
               </View>
+
+              <Text style={styles.fieldLabel}>WORK SITES · SAVE SHIFTS FOR EACH SELECTED SITE</Text>
+              <View style={styles.daySelector}>
+                {(selectedGuard ? guardSiteIds(selectedGuard) : []).map(siteId => {
+                  const site = sites.find(item => String(item.id || item._id) === siteId);
+                  const active = selectedRosterSiteId === siteId;
+                  return <TouchableOpacity key={siteId} style={[styles.daySelectorPill, active && styles.daySelectorPillActive]} onPress={() => {
+                    const nextDrafts = {
+                      ...siteDrafts,
+                      [selectedRosterSiteId]: { days: editDays, checkpointIds: editCheckpointIds, checkCallInterval, recurringWeekly, shiftInstructions },
+                    };
+                    setSiteDrafts(nextDrafts);
+                    setSelectedRosterSiteId(siteId);
+                    const nextDraft = nextDrafts[siteId] || { days: { ...DEFAULT_DAYS }, checkpointIds: [], checkCallInterval: 60, recurringWeekly: true, shiftInstructions: '' };
+                    setEditDays(nextDraft.days);
+                    setEditCheckpointIds(nextDraft.checkpointIds);
+                    setCheckCallInterval(nextDraft.checkCallInterval);
+                    setRecurringWeekly(nextDraft.recurringWeekly);
+                    setShiftInstructions(nextDraft.shiftInstructions);
+                  }}><Text style={[styles.daySelectorText, active && styles.daySelectorTextActive]}>{site?.name || 'Assigned site'}</Text></TouchableOpacity>;
+                })}
+              </View>
+              {guardSiteIds(selectedGuard || {}).length > 1 && (
+                <Text style={[styles.emptyHint, { marginTop: -6, marginBottom: 10 }]}>
+                  Set different shifts for each site. Saving publishes every assigned site that has working days.
+                </Text>
+              )}
 
               <Text style={styles.fieldLabel}>SELECT WORKING DAYS</Text>
               <View style={styles.daySelector}>
@@ -382,9 +509,9 @@ export function ManagerRosterScreen() {
                     <Text style={styles.modalSub}>SITE CHECKPOINTS</Text>
                     <Text style={styles.checkpointCount}>{editCheckpointIds.length} selected</Text>
                   </View>
-                  {(checkpoints || []).filter(checkpoint => checkpoint.siteId === selectedGuard?.siteId && checkpoint.active !== false).length === 0 ? (
+                  {(checkpoints || []).filter(checkpoint => String(checkpoint.siteId) === String(selectedRosterSiteId) && checkpoint.active !== false).length === 0 ? (
                     <Text style={styles.emptyHint}>No active checkpoints are configured for this guard’s site.</Text>
-                  ) : (checkpoints || []).filter(checkpoint => checkpoint.siteId === selectedGuard?.siteId && checkpoint.active !== false).map((checkpoint, index) => {
+                  ) : (checkpoints || []).filter(checkpoint => String(checkpoint.siteId) === String(selectedRosterSiteId) && checkpoint.active !== false).map((checkpoint, index) => {
                     const selected = editCheckpointIds.includes(checkpoint.id);
                     return (
                       <TouchableOpacity
@@ -421,7 +548,7 @@ export function ManagerRosterScreen() {
         {/* Time Picker Modal */}
         <Modal visible={!!timeModal} transparent animationType="fade">
           <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <View style={[styles.modalCard, { paddingBottom: SP.px24 }]}>
+            <View style={[styles.modalCard, { paddingBottom: safeBottom + 24 }]}>
               <Text style={styles.modalTitle}>Set Shift Times</Text>
               
               <Text style={styles.fieldLabel}>START TIME (HH:MM)</Text>
@@ -474,7 +601,7 @@ export function ManagerRosterScreen() {
 
         <Modal visible={guardPickerVisible} transparent animationType="fade" onRequestClose={() => setGuardPickerVisible(false)}>
           <View style={styles.modalOverlay}>
-            <View style={styles.guardPickerCard}>
+            <View style={[styles.guardPickerCard, { paddingBottom: safeBottom + 20 }]}>
               <Text style={styles.modalTitle}>Choose a guard</Text>
               <Text style={styles.modalSub}>Select an officer to assign this week’s shifts.</Text>
               <ScrollView style={{ maxHeight: 420 }}>
@@ -483,7 +610,7 @@ export function ManagerRosterScreen() {
                     <View style={styles.guardDropdownIcon}><UserRound size={17} color={P.blue} /></View>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.guardDropdownName}>{guard.name}</Text>
-                      <Text style={styles.guardDropdownMeta}>{sites.find(site => site.id === guard.siteId)?.name || 'Assigned site'} · SIA: {guard.badgeNumber || '—'}</Text>
+                      <Text style={styles.guardDropdownMeta}>{guardSiteIds(guard).map(siteId => sites.find(site => String(site.id || site._id) === siteId)?.name).filter(Boolean).join(' · ') || 'Assigned site'} · SIA: {guard.badgeNumber || '—'}</Text>
                     </View>
                     <ChevronRight size={17} color={P.t3} />
                   </TouchableOpacity>
@@ -497,7 +624,7 @@ export function ManagerRosterScreen() {
         {/* Save Template Modal */}
         <Modal visible={saveTemplateModal} transparent animationType="fade">
           <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
+            <View style={[styles.modalCard, { paddingBottom: safeBottom + 20 }]}>
               <Text style={styles.modalTitle}>Save as Template</Text>
               <TextInput
                 style={[input, { color: P.t1, marginBottom: SP.px16, marginTop: SP.px16 }]}
@@ -518,7 +645,7 @@ export function ManagerRosterScreen() {
         {/* Load Template Modal */}
         <Modal visible={templateModal} transparent animationType="slide">
           <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
+            <View style={[styles.modalCard, { paddingBottom: safeBottom + 20 }]}>
               <Text style={styles.modalTitle}>Load Template</Text>
               {rosterTemplates.length === 0 && (
                 <Text style={styles.emptyHint}>No templates saved yet.</Text>
