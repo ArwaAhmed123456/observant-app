@@ -182,6 +182,8 @@ router.post('/',
           checkCallInterval: req.body.checkCallInterval ?? 60,
           recurringWeekly: req.body.recurringWeekly ?? true,
           shiftInstructions: String(req.body.shiftInstructions || '').trim(),
+          acceptanceStatus: 'pending',
+          acceptanceUpdatedAt: null,
           publishedAt: new Date(),
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -198,8 +200,8 @@ router.post('/',
         .join(', ');
 
       await fcm.sendPush([guard.fcmToken], {
-        title: '📅 Your schedule is ready',
-        body:  `Your shifts at ${site.name} for week ${weekStartDate}: ${workedDays || 'None'}.${checkpointIds.length ? ` ${checkpointIds.length} checkpoints.` : ''}`,
+        title: '📅 Shift awaiting your response',
+        body:  `Review and accept or decline your shifts at ${site.name} for week ${weekStartDate}: ${workedDays || 'None'}.`,
         data:  { type: 'roster_published', rosterId: roster._id.toString(), weekStartDate, siteId: siteId.toString() },
       });
       await ShiftRoster.findByIdAndUpdate(roster._id, { notifiedAt: new Date() });
@@ -222,6 +224,19 @@ router.post('/',
   })
 );
 
+// Guard acceptance endpoint is deliberately separate from manager editing.
+router.patch('/:id/acceptance', authenticate, requireRole('guard'), asyncHandler(async (req, res) => {
+  const status = req.body.status;
+  if (!['accepted', 'declined'].includes(status)) return res.status(400).json({ error: 'Status must be accepted or declined.' });
+  const roster = await ShiftRoster.findOne({ _id: req.params.id, organisationId: req.user.organisationId, guardId: req.user._id });
+  if (!roster) return res.status(404).json({ error: 'Shift assignment not found.' });
+  roster.acceptanceStatus = status;
+  roster.acceptanceUpdatedAt = new Date();
+  await roster.save();
+  await audit({ req, action: `roster_${status}`, targetModel: 'ShiftRoster', targetId: roster._id, targetName: `Roster ${roster._id}` });
+  res.json({ roster });
+}));
+
 // ── Edit an existing roster ───────────────────────────────────────────────────
 router.patch('/:id',
   authenticate, requireRole('manager','admin','superadmin'),
@@ -235,12 +250,42 @@ router.patch('/:id',
     if (!roster) return res.status(404).json({ error: 'Roster not found or inaccessible.' });
 
     if (req.body.days) {
+      const dayKeys = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+      for (const day of dayKeys) {
+        const shift = req.body.days[day];
+        if (shift != null && (typeof shift !== 'object' || timeToMinutes(shift.start) === null || timeToMinutes(shift.end) === null || shift.start === shift.end)) {
+          return res.status(400).json({ error: `Invalid ${day.toUpperCase()} shift. Use different start/end times in HH:MM format.` });
+        }
+      }
+      const others = await ShiftRoster.find({ organisationId: roster.organisationId, guardId: roster.guardId, weekStartDate: roster.weekStartDate, siteId: { $ne: roster.siteId } }).populate('siteId', 'name');
+      for (const other of others) {
+        const conflict = weeklyShiftsOverlap(req.body.days, other.days);
+        if (conflict) return res.status(409).json({ error: `Shift conflict: this guard already has an overlapping shift at ${other.siteId?.name || 'another site'}.`, conflictDay: conflict.day });
+      }
       roster.days = req.body.days;
+      roster.acceptanceStatus = 'pending';
+      roster.acceptanceUpdatedAt = null;
     }
     if (Array.isArray(req.body.checkpointIds)) {
       roster.checkpointIds = req.body.checkpointIds;
     }
     await roster.save();
+
+    if (req.body.days) {
+      const [guard, site] = await Promise.all([
+        User.findById(roster.guardId).select('name fcmToken'),
+        Site.findById(roster.siteId).select('name'),
+      ]);
+      if (guard?.fcmToken) {
+        await fcm.sendPush([guard.fcmToken], {
+          title: '📅 Your shift was updated',
+          body: `Your schedule at ${site?.name || 'your site'} changed. Review it and accept or decline the updated assignment.`,
+          data: { type: 'roster_updated', rosterId: roster._id.toString(), weekStartDate: roster.weekStartDate, siteId: roster.siteId.toString() },
+        });
+        roster.notifiedAt = new Date();
+        await roster.save();
+      }
+    }
 
     await audit({
       req,

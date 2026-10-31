@@ -23,6 +23,30 @@ import {
   P, SP, BR, FONT, SH_TOKENS, GR, card, SCREEN, TAB_H, statusToken,
 } from '../../ds';
 import { enqueue } from '../../services/offlineQueue';
+import { getUKDayKey, getUKDateKey } from '../../utils/scheduleDates';
+
+function ukWallClockToDate(dateKey, time) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+  let candidate = Date.UTC(year, month - 1, day, hour, minute);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(new Date(candidate)).map(part => [part.type, part.value]));
+    const rendered = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute));
+    candidate -= rendered - candidate;
+  }
+  return new Date(candidate);
+}
+
+function getShiftBookingWindow(shift, now) {
+  if (!shift?.start || !shift?.end) return null;
+  const dateKey = getUKDateKey(now);
+  const startAt = ukWallClockToDate(dateKey, shift.start);
+  let endAt = ukWallClockToDate(dateKey, shift.end);
+  if (endAt <= startAt) endAt = new Date(endAt.getTime() + 86400000);
+  return { opensAt: new Date(startAt.getTime() - 15 * 60000), startAt, endAt };
+}
 
 export function GuardHomeScreen({ navigation }) {
   const {
@@ -60,16 +84,27 @@ export function GuardHomeScreen({ navigation }) {
   const donePatrols   = todayPatrols.filter(p => p.finishedAt).length;
 
   // Today's roster shift
-  const dayKeys     = ['sun','mon','tue','wed','thu','fri','sat'];
-  const todayKey    = dayKeys[new Date().getDay()];
+  const todayKey    = getUKDayKey(now);
   const matchedTodayShift = todayShifts.find(s => String(s.siteId) === String(effectiveSiteId)) || todayShifts[0];
+  const bookingWindow = getShiftBookingWindow(matchedTodayShift, now);
+  const shiftAccepted = !matchedTodayShift || matchedTodayShift.acceptanceStatus === 'accepted';
+  const canBookOn = !!matchedTodayShift && shiftAccepted && !!bookingWindow && now >= bookingWindow.opensAt && now <= bookingWindow.endAt;
+  const bookingHint = !matchedTodayShift
+    ? 'No Duty Scheduled Today'
+    : matchedTodayShift.acceptanceStatus === 'declined'
+      ? 'You declined this shift. Contact your manager.'
+      : !shiftAccepted
+        ? 'Accept this shift in My Schedule before booking on.'
+        : now < bookingWindow.opensAt
+          ? `Book-on available at ${bookingWindow.opensAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} (15 minutes before shift)`
+          : now > bookingWindow.endAt ? 'This shift has ended. Contact your manager.' : '';
   const shiftToday = matchedTodayShift
     ? { start: matchedTodayShift.start, end: matchedTodayShift.end }
     : (() => {
         const found = (rosters || []).find(r => {
           const rGid = String(r.guardId?._id || r.guardId?.id || r.guardId || '');
           if (rGid !== String(gId)) return false;
-          const diff = (new Date() - new Date(r.weekStartDate)) / 86400000;
+          const diff = (new Date(getUKDateKey(now) + 'T12:00:00Z') - new Date(r.weekStartDate + 'T12:00:00Z')) / 86400000;
           return diff >= 0 && diff < 7 && r.days?.[todayKey];
         });
         return found?.days?.[todayKey] || null;
@@ -348,7 +383,7 @@ export function GuardHomeScreen({ navigation }) {
                         </Text>
                         {isSelected && (
                           <Text style={{ fontSize: 10, fontWeight: '800', color: '#0284C7', marginTop: 2 }}>
-                            READY TO BOOK ON
+                            {sh.acceptanceStatus === 'pending' ? 'AWAITING ACCEPTANCE' : sh.acceptanceStatus === 'declined' ? 'DECLINED' : 'SCHEDULED'}
                           </Text>
                         )}
                       </View>
@@ -373,7 +408,7 @@ export function GuardHomeScreen({ navigation }) {
 
         {/* ── Book On / Book Off CTA ── */}
         <TouchableOpacity
-          style={[s.bookBtn, activeSession ? s.bookOffBtn : s.bookOnBtn, bookingLoading && s.btnDisabled]}
+          style={[s.bookBtn, activeSession ? s.bookOffBtn : s.bookOnBtn, (bookingLoading || (!activeSession && !canBookOn)) && s.btnDisabled]}
           onPress={activeSession ? () => {
             if (activeSession.scheduledEndAt && new Date() < new Date(activeSession.scheduledEndAt)) {
               Alert.alert('Shift Incomplete', 'You cannot book off before your time.');
@@ -381,7 +416,7 @@ export function GuardHomeScreen({ navigation }) {
             }
             setShowBookOff(true);
           } : handleBookOn}
-          disabled={bookingLoading}
+          disabled={bookingLoading || (!activeSession && !canBookOn)}
           activeOpacity={0.85}
         >
           <LinearGradient
@@ -392,6 +427,7 @@ export function GuardHomeScreen({ navigation }) {
             <Text style={s.bookBtnTxt}>{activeSession ? 'BOOK OFF DUTY' : 'BOOK ON DUTY'}</Text>
           </LinearGradient>
         </TouchableOpacity>
+        {!activeSession && bookingHint ? <Text style={{ color: P.sub, textAlign: 'center', marginTop: -SP.px8, marginBottom: SP.px12, fontSize: 12, fontWeight: '700' }}>{bookingHint}</Text> : null}
 
         {/* ── NEXT UP OPERATIONS CARD (always populated) ── */}
         <View style={s.nextUpCard}>

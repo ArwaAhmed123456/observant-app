@@ -128,7 +128,7 @@ export function normalizePatrol(value) {
 }
 
 export function normalizeRoster(value) {
-  return { ...value, id: idOf(value), guardId: idOf(value.guardId), siteId: idOf(value.siteId), checkpointIds: (value.checkpointIds || []).map(idOf), days: value.days || {} };
+  return { ...value, id: idOf(value), guardId: idOf(value.guardId), siteId: idOf(value.siteId), checkpointIds: (value.checkpointIds || []).map(idOf), days: value.days || {}, acceptanceStatus: value.acceptanceStatus || 'accepted' };
 }
 
 export function normalizeAlert(value) {

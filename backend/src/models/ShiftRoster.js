@@ -19,6 +19,8 @@ const shiftRosterSchema = new mongoose.Schema({
   checkCallInterval: { type: Number, default: 60, min: 5, max: 1440 },
   recurringWeekly: { type: Boolean, default: true },
   shiftInstructions: { type: String, default: '', maxlength: 2000 },
+  acceptanceStatus: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'accepted', index: true },
+  acceptanceUpdatedAt: { type: Date, default: null },
   publishedBy:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
 
   weekStartDate:  { type: String, required: true }, // e.g. "2026-09-21"

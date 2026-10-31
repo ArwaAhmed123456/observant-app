@@ -84,7 +84,7 @@ function GuardTabs() {
   const { activeCheckCall } = useApp();
   const insets = useSafeAreaInsets();
   return (
-    <Tab.Navigator screenOptions={tabScreenOptions(insets)}>
+    <Tab.Navigator initialRouteName="Home" screenOptions={tabScreenOptions(insets)}>
       <Tab.Screen name="Home"        component={GuardHomeScreen} />
       <Tab.Screen
         name="Check Call"

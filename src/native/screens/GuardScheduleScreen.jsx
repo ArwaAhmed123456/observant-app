@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useApp, formatDate } from '../../context/AppContext';
 import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react-native';
@@ -27,7 +27,8 @@ function toWeekKey(date) {
 }
 
 export function GuardScheduleScreen() {
-  const { currentUser, sites, getGuardRoster, getGuardRosters, shiftSessions, refreshRosters } = useApp();
+  const { currentUser, sites, getGuardRoster, getGuardRosters, shiftSessions, refreshRosters, respondToRoster } = useApp();
+  const [responding, setResponding] = useState(false);
   const [weekStart, setWeekStart] = useState(getUKMondayDate(new Date()));
 
   useFocusEffect(useCallback(() => {
@@ -70,6 +71,18 @@ export function GuardScheduleScreen() {
             <ChevronRight color={P.t2} size={22} />
           </TouchableOpacity>
         </View>
+
+        {allWeekRosters.filter(roster => (roster.acceptanceStatus || 'accepted') === 'pending').map(roster => {
+          const siteName = sites.find(site => String(site.id || site._id) === String(roster.siteId?._id || roster.siteId?.id || roster.siteId))?.name || roster.siteId?.name || 'Assigned site';
+          return <View key={`pending-${roster.id || roster._id}`} style={{ backgroundColor: '#FFF8E8', borderColor: P.gold, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 10 }}>
+            <Text style={{ color: P.t1, fontWeight: '800' }}>Shift awaiting your response · {siteName}</Text>
+            <Text style={{ color: P.sub, marginTop: 3, fontSize: 12 }}>Accept this assignment before booking on.</Text>
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+              <TouchableOpacity disabled={responding} onPress={async () => { setResponding(true); try { await respondToRoster(roster.id || roster._id, 'accepted'); } catch (e) { Alert.alert('Could not accept shift', e.message); } finally { setResponding(false); } }} style={{ flex: 1, padding: 10, borderRadius: 8, backgroundColor: P.ok, alignItems: 'center' }}><Text style={{ color: '#fff', fontWeight: '800' }}>Accept Shift</Text></TouchableOpacity>
+              <TouchableOpacity disabled={responding} onPress={() => Alert.alert('Decline this shift?', 'Your manager will see that you declined this assignment.', [{ text: 'Cancel', style: 'cancel' }, { text: 'Decline', style: 'destructive', onPress: async () => { setResponding(true); try { await respondToRoster(roster.id || roster._id, 'declined'); } catch (e) { Alert.alert('Could not decline shift', e.message); } finally { setResponding(false); } } }])} style={{ flex: 1, padding: 10, borderRadius: 8, borderColor: P.danger, borderWidth: 1, alignItems: 'center' }}><Text style={{ color: P.danger, fontWeight: '800' }}>Decline Shift</Text></TouchableOpacity>
+            </View>
+          </View>;
+        })}
 
         {allWeekRosters.length > 0 ? (
           <ScrollView showsVerticalScrollIndicator={false}>

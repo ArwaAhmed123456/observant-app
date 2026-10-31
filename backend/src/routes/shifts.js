@@ -19,7 +19,8 @@ const {
   punctualityMinutes,
   getPunctualityLabel,
   getMondayOfWeek,
-  calculateShiftEndDateTime
+  calculateShiftEndDateTime,
+  parseTimeOnDate
 } = require('../utils/dateHelpers');
 const { createAlert } = require('../services/alertService');
 const { audit } = require('../utils/auditLogger');
@@ -65,17 +66,42 @@ router.post('/book-on',
       siteId: targetSiteId,
       weekStartDate: weekStart,
     });
+    if (!roster) {
+      roster = await ShiftRoster.findOne({
+        organisationId: orgId, guardId, siteId: targetSiteId,
+        recurringWeekly: true, weekStartDate: { $lt: weekStart },
+      }).sort({ weekStartDate: -1 });
+    }
 
     const todayShift = roster?.days?.[dayKey(now)];
     const scheduledStart = todayShift?.start || null;
     const scheduledEnd   = todayShift?.end   || null;
 
-    let punctuality = 'unscheduled';
-    let diffMins    = 0;
-    if (scheduledStart) {
-      diffMins    = punctualityMinutes(now, scheduledStart, now);
-      punctuality = getPunctualityLabel(diffMins);
+    if (!roster || !scheduledStart || !scheduledEnd) {
+      return res.status(409).json({ error: 'No duty is scheduled for you at this site today.', code: 'NO_DUTY_SCHEDULED' });
     }
+    if (roster.acceptanceStatus === 'declined') {
+      return res.status(409).json({ error: 'You declined this shift. Contact your manager to arrange duty.', code: 'SHIFT_DECLINED' });
+    }
+    if (roster.acceptanceStatus !== 'accepted') {
+      return res.status(409).json({ error: 'Accept this shift in My Schedule before booking on.', code: 'SHIFT_NOT_ACCEPTED' });
+    }
+
+    const shiftStartAt = parseTimeOnDate(scheduledStart, now);
+    const opensAt = new Date(shiftStartAt.getTime() - 15 * 60 * 1000);
+    const shiftEndAt = calculateShiftEndDateTime(scheduledStart, scheduledEnd, now);
+    if (now < opensAt) {
+      return res.status(409).json({
+        error: 'Book-on opens 15 minutes before your scheduled shift.',
+        code: 'BOOK_ON_TOO_EARLY', opensAt: opensAt.toISOString(), scheduledStartAt: shiftStartAt.toISOString(),
+      });
+    }
+    if (now > shiftEndAt) {
+      return res.status(409).json({ error: 'Your scheduled shift has ended. Contact your manager.', code: 'SHIFT_WINDOW_ENDED' });
+    }
+
+    const diffMins = punctualityMinutes(now, scheduledStart, now);
+    const punctuality = getPunctualityLabel(diffMins);
 
     // Close any previous stale open session for this guard at this site
     await ShiftSession.updateMany(
@@ -84,8 +110,7 @@ router.post('/book-on',
     );
 
     // Calculate scheduled end timestamp in UK time
-    const calculatedEndAt = calculateShiftEndDateTime(scheduledStart, scheduledEnd, now);
-    const scheduledEndAt = calculatedEndAt || (req.body.scheduledEndAt ? new Date(req.body.scheduledEndAt) : null);
+    const scheduledEndAt = shiftEndAt;
 
     const session = await ShiftSession.create({
       organisationId:     orgId,

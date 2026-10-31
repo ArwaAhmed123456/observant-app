@@ -90,6 +90,7 @@ export function ManagerRosterScreen() {
   const [timePickerOpen, setTimePickerOpen] = useState(null);
   const [checkCallInterval, setCheckCallInterval] = useState(60);
   const [recurringWeekly, setRecurringWeekly] = useState(true);
+  const [durationWeeks, setDurationWeeks] = useState(1);
   const [shiftInstructions, setShiftInstructions] = useState('');
   const [siteDrafts, setSiteDrafts] = useState({});
   const [scheduleDataError, setScheduleDataError] = useState('');
@@ -129,6 +130,7 @@ export function ManagerRosterScreen() {
   const nextWeek = () => setWeekStart(prev => addDays(prev, 7));
 
   const openEditForGuard = (guard) => {
+    setDurationWeeks(1);
     setSelectedGuard(guard);
     const gId = guard.id || guard._id;
     const existingRosters = getWeekRosters(weekKey).filter(roster => String(roster.guardId?._id || roster.guardId?.id || roster.guardId || '') === String(gId));
@@ -210,18 +212,21 @@ export function ManagerRosterScreen() {
         DAY_KEYS.some(key => draft.days[key]) || draft.siteId === selectedRosterSiteId || existingSiteIds.has(draft.siteId)
       ));
     if (!scheduledSites.length) return Alert.alert('Add a shift first', 'Choose at least one working day for an assigned site.');
-    const plannedBySite = new Map(getWeekRosters(weekKey)
-      .filter(roster => String(roster.guardId?._id || roster.guardId?.id || roster.guardId || '') === String(selectedGuard.id || selectedGuard._id))
-      .map(roster => [String(roster.siteId?._id || roster.siteId?.id || roster.siteId || ''), roster.days || {}]));
-    scheduledSites.forEach(draft => plannedBySite.set(draft.siteId, draft.days));
-    const planned = [...plannedBySite.entries()];
-    for (let i = 0; i < planned.length; i += 1) {
-      for (let j = i + 1; j < planned.length; j += 1) {
-        const conflict = findWeeklyShiftConflict(planned[i][1], planned[j][1]);
-        if (conflict) {
-          const siteName = id => sites.find(item => String(item.id || item._id) === id)?.name || 'another site';
-          const day = DAY_LABELS[DAY_KEYS.indexOf(conflict.firstDay)];
-          return Alert.alert('Schedule conflict', `${selectedGuard.name} has overlapping shifts at ${siteName(planned[i][0])} and ${siteName(planned[j][0])} (${day} or an overnight crossover). Adjust one site’s shift before saving.`);
+    const targetWeeks = Array.from({ length: durationWeeks }, (_, index) => toWeekKey(addDays(weekStart, index * 7)));
+    for (const targetWeek of targetWeeks) {
+      const plannedBySite = new Map(getWeekRosters(targetWeek)
+        .filter(roster => String(roster.guardId?._id || roster.guardId?.id || roster.guardId || '') === String(selectedGuard.id || selectedGuard._id))
+        .map(roster => [String(roster.siteId?._id || roster.siteId?.id || roster.siteId || ''), roster.days || {}]));
+      scheduledSites.forEach(draft => plannedBySite.set(draft.siteId, draft.days));
+      const planned = [...plannedBySite.entries()];
+      for (let i = 0; i < planned.length; i += 1) {
+        for (let j = i + 1; j < planned.length; j += 1) {
+          const conflict = findWeeklyShiftConflict(planned[i][1], planned[j][1]);
+          if (conflict) {
+            const siteName = id => sites.find(item => String(item.id || item._id) === id)?.name || 'another site';
+            const day = DAY_LABELS[DAY_KEYS.indexOf(conflict.firstDay)];
+            return Alert.alert('Schedule conflict', `${selectedGuard.name} has overlapping shifts at ${siteName(planned[i][0])} and ${siteName(planned[j][0])} (${day} or an overnight crossover) in week ${targetWeek}. Adjust one site’s shift before saving.`);
+          }
         }
       }
     }
@@ -229,16 +234,18 @@ export function ManagerRosterScreen() {
     try {
       const guardId = selectedGuard.id || selectedGuard._id;
       const savedRosters = [];
-      for (const draft of scheduledSites) {
-        savedRosters.push(await publishRoster({
-          guardId, siteId: draft.siteId, weekStartDate: weekKey,
-          days: draft.days, checkpointIds: draft.checkpointIds || [],
-          checkCallInterval: draft.checkCallInterval || 60,
-          recurringWeekly: draft.recurringWeekly ?? true,
-          shiftInstructions: String(draft.shiftInstructions || '').trim(),
-          publishedBy: currentUser.id || currentUser._id,
-          publishedAt: new Date().toISOString(),
-        }));
+      for (const targetWeek of targetWeeks) {
+        for (const draft of scheduledSites) {
+          savedRosters.push(await publishRoster({
+            guardId, siteId: draft.siteId, weekStartDate: targetWeek,
+            days: draft.days, checkpointIds: draft.checkpointIds || [],
+            checkCallInterval: draft.checkCallInterval || 60,
+            recurringWeekly: durationWeeks === 1 ? (draft.recurringWeekly ?? true) : false,
+            shiftInstructions: String(draft.shiftInstructions || '').trim(),
+            publishedBy: currentUser.id || currentUser._id,
+            publishedAt: new Date().toISOString(),
+          }));
+        }
       }
       setEditModalVisible(false);
       const siteNames = scheduledSites.map(({ siteId, days }) => {
@@ -251,9 +258,9 @@ export function ManagerRosterScreen() {
       const notification = demo
         ? `Demo schedule saved for ${selectedGuard.name}.`
         : notified
-          ? `${selectedGuard.name} was notified about the assigned shifts.`
+          ? `${selectedGuard.name} was notified. The shifts are awaiting guard acceptance.`
           : `Schedules saved, but no push was sent because the guard has no registered device.`;
-      Alert.alert('Rota published', `${notification}\n\n${siteNames}`);
+      Alert.alert('Rota published', `${notification} ${durationWeeks > 1 ? `for ${durationWeeks} weeks (${targetWeeks[0]} to ${targetWeeks[targetWeeks.length - 1]}).` : ''}\n\n${siteNames}`);
     } catch (error) {
       Alert.alert('Could not publish rota', error.message || 'Check your connection and try again.');
     } finally {
@@ -379,6 +386,7 @@ export function ManagerRosterScreen() {
                           const itemSite = sites.find(entry => String(entry.id || entry._id) === itemSiteId);
                           return <View key={item.id || item._id || itemSiteId} style={{ marginTop: 4 }}>
                             <Text style={styles.rotaSummary} numberOfLines={1}>{itemSite?.name || 'Assigned site'}</Text>
+                            <Text style={{ color: (item.acceptanceStatus || 'accepted') === 'pending' ? P.gold : (item.acceptanceStatus === 'declined' ? P.danger : P.ok), fontSize: 10, fontWeight: '800' }}>{(item.acceptanceStatus || 'accepted') === 'pending' ? 'UNCONFIRMED' : (item.acceptanceStatus || 'accepted').toUpperCase()}</Text>
                             <View style={styles.dayPills}>
                               {DAY_KEYS.map((k, i) => (
                                 <View key={`${itemSiteId}-${k}`} style={[styles.dayPill, item.days?.[k] && styles.dayPillActive]}>
@@ -465,6 +473,11 @@ export function ManagerRosterScreen() {
                   Set different shifts for each site. Saving publishes every assigned site that has working days.
                 </Text>
               )}
+
+              <Text style={styles.fieldLabel}>ASSIGN FOR</Text>
+              <View style={styles.daySelector}>
+                {[1, 2, 3].map(weeks => <TouchableOpacity key={weeks} style={[styles.daySelectorPill, durationWeeks === weeks && styles.daySelectorPillActive]} onPress={() => setDurationWeeks(weeks)}><Text style={[styles.daySelectorText, durationWeeks === weeks && styles.daySelectorTextActive]}>{weeks} week{weeks > 1 ? 's' : ''}</Text></TouchableOpacity>)}
+              </View>
 
               <Text style={styles.fieldLabel}>SELECT WORKING DAYS</Text>
               <View style={styles.daySelector}>

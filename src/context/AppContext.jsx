@@ -755,17 +755,14 @@ export function AppProvider({ children }) {
   }, [shiftSessions]);
 
   const getTodayRoster = useCallback((guardId, siteId = null) => {
-    const today = new Date();
-    const dayNames = ['sun','mon','tue','wed','thu','fri','sat'];
-    const todayDay = dayNames[today.getDay()];
-    return rosters.find(r =>
-      r.guardId === guardId &&
-      (!siteId || String(r.siteId?._id || r.siteId?.id || r.siteId || '') === String(siteId)) &&
-      r.days &&
-      r.days[todayDay] &&
-      r.weekStartDate &&
-      isThisWeek(r.weekStartDate)
-    ) || null;
+    const targetGuard = String(guardId || '');
+    const matches = rosters.filter(r =>
+      String(r.guardId?._id || r.guardId?.id || r.guardId || '') === targetGuard &&
+      (!siteId || String(r.siteId?._id || r.siteId?.id || r.siteId || '') === String(siteId))
+    );
+    return matches.find(r => isThisWeek(r.weekStartDate)) || matches
+      .filter(r => r.recurringWeekly)
+      .sort((a, b) => String(b.weekStartDate || '').localeCompare(String(a.weekStartDate || '')))[0] || null;
   }, [rosters]);
 
   const addAlert = useCallback(async (alert) => {
@@ -1772,6 +1769,21 @@ export function AppProvider({ children }) {
     return updated;
   }, []);
 
+  const respondToRoster = useCallback(async (rosterId, status) => {
+    if (!['accepted', 'declined'].includes(status)) throw new Error('Invalid shift response.');
+    if (API_ENABLED) {
+      const { roster } = await apiPatch(`/api/rosters/${rosterId}/acceptance`, { status });
+      const saved = normalizeRoster(roster);
+      setRosters(previous => previous.map(item => String(item.id || item._id) === String(rosterId) ? saved : item));
+      return saved;
+    }
+    const updated = (await load(KEYS.SHIFT_ROSTERS) || []).map(item => String(item.id || item._id) === String(rosterId)
+      ? { ...item, acceptanceStatus: status, acceptanceUpdatedAt: new Date().toISOString() } : item);
+    await save(KEYS.SHIFT_ROSTERS, updated);
+    setRosters(updated);
+    return updated.find(item => String(item.id || item._id) === String(rosterId));
+  }, []);
+
   const refreshRosters = useCallback(async () => {
     if (API_ENABLED) {
       const result = await apiGet('/api/rosters');
@@ -1914,14 +1926,18 @@ export function AppProvider({ children }) {
   const getGuardTodayShifts = useCallback((guardId) => {
     const day = todayKey();
     const targetGid = String(guardId || '');
-    const gRosters = (rosters || []).filter(r => {
+    const guardRosters = (rosters || []).filter(r => {
       const rGid = String(r.guardId?._id || r.guardId?.id || r.guardId || '');
-      if (rGid !== targetGid) return false;
-      if (r.weekStartDate) {
-        return isThisWeek(r.weekStartDate) || r.recurringWeekly;
-      }
-      return true;
+      return rGid === targetGid;
     });
+    const currentWeek = guardRosters.filter(r => isThisWeek(r.weekStartDate));
+    const currentSites = new Set(currentWeek.map(r => String(r.siteId?._id || r.siteId?.id || r.siteId || '')));
+    const recurringBySite = new Map();
+    guardRosters.filter(r => r.recurringWeekly && !isThisWeek(r.weekStartDate)).forEach(r => {
+      const siteKey = String(r.siteId?._id || r.siteId?.id || r.siteId || '');
+      if (!currentSites.has(siteKey) && (!recurringBySite.has(siteKey) || String(r.weekStartDate) > String(recurringBySite.get(siteKey).weekStartDate))) recurringBySite.set(siteKey, r);
+    });
+    const gRosters = [...currentWeek, ...recurringBySite.values()];
 
     const assignedShifts = [];
 
@@ -1948,6 +1964,7 @@ export function AppProvider({ children }) {
           longitude: matchedSite?.longitude ?? r.siteId?.longitude,
           start: shift.start,
           end: shift.end,
+          acceptanceStatus: r.acceptanceStatus || 'accepted',
           status: session ? 'Active (On Shift)' : 'Scheduled',
           activeSession: session || null,
         });
@@ -2031,7 +2048,7 @@ export function AppProvider({ children }) {
     // Alerts
     alerts, getUnreadAlerts, markAlertRead, markAllAlertsRead, addAlert,
     // Rosters & Multi-shift
-    rosters, rosterTemplates, publishRoster, refreshRosters, saveRosterTemplate,
+    rosters, rosterTemplates, publishRoster, respondToRoster, refreshRosters, saveRosterTemplate,
     deleteRosterTemplate, getWeekRosters, getGuardRoster, getGuardRosters, getGuardTodayShifts, getTodayRoster,
     // Checkpoints
     saveCheckpoints,

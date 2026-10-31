@@ -57,6 +57,7 @@ export default function SchedulesPage({ session }) {
   const [editingRoster, setEditingRoster] = useState(null);
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState('');
+  const [durationWeeks, setDurationWeeks] = useState(1);
 
   // Shift assignment form state
   const [formData, setFormData] = useState({
@@ -119,6 +120,7 @@ export default function SchedulesPage({ session }) {
 
   const openCreateModal = () => {
     setEditingRoster(null);
+    setDurationWeeks(1);
     setFormData({
       guardId: guards[0]?._id || guards[0]?.id || '',
       siteId: sites[0]?._id || sites[0]?.id || '',
@@ -140,6 +142,7 @@ export default function SchedulesPage({ session }) {
 
   const openEditModal = (roster) => {
     setEditingRoster(roster);
+    setDurationWeeks(1);
     const gId = roster.guardId?._id || roster.guardId?.id || roster.guardId || '';
     const sId = roster.siteId?._id || roster.siteId?.id || roster.siteId || '';
 
@@ -191,23 +194,22 @@ export default function SchedulesPage({ session }) {
       const payload = {
         guardId: formData.guardId,
         siteId: formData.siteId,
-        weekStartDate,
         days: daysPayload,
       };
+      for (let index = 0; index < (editingRoster ? 1 : durationWeeks); index += 1) {
+        const weekDate = new Date(`${weekStartDate}T12:00:00`);
+        weekDate.setDate(weekDate.getDate() + index * 7);
+        const targetWeek = `${weekDate.getFullYear()}-${String(weekDate.getMonth() + 1).padStart(2, '0')}-${String(weekDate.getDate()).padStart(2, '0')}`;
+        const res = await fetch(`${API}/api/rosters`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` },
+          body: JSON.stringify({ ...payload, weekStartDate: targetWeek, recurringWeekly: editingRoster ? undefined : durationWeeks === 1 }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `Failed to save roster for ${targetWeek}`);
+      }
 
-      const res = await fetch(`${API}/api/rosters`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${session.accessToken}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save roster');
-
-      setSuccessMsg('Roster successfully published.');
+      setSuccessMsg(`Roster published for ${editingRoster ? 1 : durationWeeks} week${(editingRoster ? 1 : durationWeeks) === 1 ? '' : 's'}. Guard acceptance is required.`);
       setShowModal(false);
       fetchData();
       setTimeout(() => setSuccessMsg(''), 4000);
@@ -366,6 +368,9 @@ export default function SchedulesPage({ session }) {
                       <div className="text-xs text-slate-500 flex items-center gap-1.5 mt-0.5">
                         <Icon name="building" size={13} /> {siteName}
                       </div>
+                      <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${roster.acceptanceStatus === 'pending' ? 'bg-amber-100 text-amber-800' : roster.acceptanceStatus === 'declined' ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                        {roster.acceptanceStatus === 'pending' ? 'Unconfirmed' : (roster.acceptanceStatus || 'accepted')}
+                      </div>
                     </div>
                   </div>
 
@@ -476,8 +481,16 @@ export default function SchedulesPage({ session }) {
                       </option>
                     ))}
                   </select>
+                  {!editingRoster && <p className="mt-1 text-xs text-slate-500">To assign this guard at another site in the same week, publish a separate roster for that site with its own days and times. Overlapping shifts are blocked.</p>}
                 </div>
               </div>
+
+              {!editingRoster && <div>
+                <label className="field-label">Repeat for consecutive weeks</label>
+                <select className="form-input mt-1" value={durationWeeks} onChange={e => setDurationWeeks(Number(e.target.value))}>
+                  {[1, 2, 3].map(weeks => <option key={weeks} value={weeks}>{weeks} week{weeks > 1 ? 's' : ''}</option>)}
+                </select>
+              </div>}
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
