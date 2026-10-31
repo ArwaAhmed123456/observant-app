@@ -13,7 +13,7 @@ import { readNfcTag } from '../../services/nfc';
 const isPhysicalNfcTag = value => /^[a-f0-9]{8,32}$/i.test(String(value || ''));
 
 export function ManagerCheckpointScreen() {
-  const { currentUser, sites, checkpoints, saveCheckpoints } = useApp();
+  const { currentUser, sites, checkpoints, saveCheckpoints, deleteSite } = useApp();
 
   const isAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
   const mgrSiteIds = new Set([
@@ -21,7 +21,8 @@ export function ManagerCheckpointScreen() {
     ...(currentUser?.managedSiteIds || []),
   ].map(String));
   const currentUserId = String(currentUser?.id || currentUser?._id || '');
-  const mgrSites = isAdmin ? sites : sites.filter(s =>
+  const activeSites = sites.filter(site => site.active !== false);
+  const mgrSites = isAdmin ? activeSites : activeSites.filter(s =>
     mgrSiteIds.has(String(s.id || s._id || '')) || String(s.managerId || '') === currentUserId
   );
   const [selectedSite, setSelectedSite] = useState(mgrSites[0]?.id || null);
@@ -89,6 +90,25 @@ export function ManagerCheckpointScreen() {
     ]);
   };
 
+  const handleDeleteSite = () => {
+    const site = mgrSites.find(item => String(item.id || item._id) === String(selectedSite || ''));
+    if (!site) return Alert.alert('Choose a site', 'Select the site you want to delete first.');
+    Alert.alert(
+      'Delete site?',
+      `${site.name} will be deactivated and removed from active site lists. Existing reports and patrol history are retained. Reassign any guards who still need a site.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete site', style: 'destructive', onPress: async () => {
+          const result = await deleteSite(String(site.id || site._id));
+          if (!result?.success) return Alert.alert('Could not delete site', result?.error || 'Please try again.');
+          const remaining = mgrSites.filter(item => String(item.id || item._id) !== String(site.id || site._id));
+          setSelectedSite(remaining[0] ? String(remaining[0].id || remaining[0]._id) : null);
+          Alert.alert('Site deleted', `${site.name} is no longer active.`);
+        } },
+      ]
+    );
+  };
+
   const toggleRequired = async (cpId) => {
     const updated = checkpoints.map(cp => cp.id === cpId ? { ...cp, required: !cp.required } : cp);
     await saveCheckpoints(updated);
@@ -154,6 +174,13 @@ export function ManagerCheckpointScreen() {
             );
           })}
         </ScrollView>
+
+        {!!selectedSite && (
+          <TouchableOpacity accessibilityRole="button" style={styles.deleteSiteBtn} onPress={handleDeleteSite}>
+            <Trash2 size={14} color={P.danger} />
+            <Text style={styles.deleteSiteTxt}>Delete selected site</Text>
+          </TouchableOpacity>
+        )}
 
         <Text style={styles.countLabel}>
           {siteCheckpoints.length} checkpoint{siteCheckpoints.length !== 1 ? 's' : ''} on this route
@@ -319,6 +346,8 @@ const styles = StyleSheet.create({
   siteTabActive:      { borderColor: P.infoBorder, backgroundColor: P.infoSubtle },
   siteTabTxt:         { color: P.t3, fontSize: 12, fontWeight: '600' },
   siteTabTxtActive:   { color: P.info },
+  deleteSiteBtn: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -SP.px8, marginBottom: SP.px12, paddingVertical: 7, paddingHorizontal: 10, borderRadius: BR.sm, borderWidth: 1, borderColor: P.dangerBorder, backgroundColor: P.dangerSubtle },
+  deleteSiteTxt: { color: P.danger, fontSize: 11, fontWeight: '700' },
 
   countLabel:     { color: P.t3, fontSize: 12, fontWeight: '600', marginBottom: SP.px12 },
 

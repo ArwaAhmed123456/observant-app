@@ -465,21 +465,41 @@ export function AppProvider({ children }) {
   }, [addAuditLog]);
 
   const deleteSite = useCallback(async (siteId) => {
+    const siteIdStr = String(siteId || '');
+    const removeSiteFromLocalState = () => {
+      setSites(previous => previous.filter(site => String(site.id || site._id || '') !== siteIdStr));
+      setUsers(previous => previous.map(user => {
+        if (user.role !== 'guard') return user;
+        const assignedSiteIds = [...new Set([...(user.assignedSiteIds || []), user.siteId].filter(Boolean).map(String))]
+          .filter(id => id !== siteIdStr);
+        const siteId = String(user.siteId || '') === siteIdStr
+          ? (assignedSiteIds[0] || null)
+          : user.siteId;
+        return { ...user, siteId, assignedSiteIds };
+      }));
+      const managerId = String(currentUser?.id || currentUser?._id || '');
+      setCurrentUser(previous => {
+        if (!previous || String(previous.id || previous._id || '') !== managerId) return previous;
+        const managedSiteIds = [...new Set([...(previous.managedSiteIds || []), ...(previous.siteIds || [])].map(String))]
+          .filter(id => id !== siteIdStr);
+        return { ...previous, managedSiteIds, siteIds: managedSiteIds };
+      });
+    };
     if (API_ENABLED) {
       try {
-        await apiDelete(`/api/sites/${siteId}`);
-        setSites(previous => previous.map(s => (s.id === siteId || s._id === siteId) ? { ...s, active: false } : s));
+        await apiDelete(`/api/sites/${siteIdStr}`);
+        removeSiteFromLocalState();
         return { success: true };
       } catch (error) {
         return { success: false, error: error.message };
       }
     }
     const allSites = await load(KEYS.SITES) || [];
-    const target = allSites.find(s => s.id === siteId || s._id === siteId);
+    const target = allSites.find(s => String(s.id || s._id || '') === siteIdStr);
     if (!target) return { success: false, error: 'Site not found' };
-    const updatedList = allSites.map(s => (s.id === siteId || s._id === siteId) ? { ...s, active: false } : s);
+    const updatedList = allSites.filter(s => String(s.id || s._id || '') !== siteIdStr);
     await save(KEYS.SITES, updatedList);
-    setSites(updatedList);
+    removeSiteFromLocalState();
     await addAuditLog({
       action: 'SITE_DEACTIVATED',
       targetName: target.name,
@@ -487,7 +507,7 @@ export function AppProvider({ children }) {
       severity: 'warning',
     });
     return { success: true };
-  }, [addAuditLog]);
+  }, [currentUser, addAuditLog]);
 
   const editShift = useCallback(async (shiftId, updates) => {
     if (API_ENABLED) {

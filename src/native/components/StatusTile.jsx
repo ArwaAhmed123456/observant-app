@@ -161,7 +161,7 @@ export function StatusTile({
             <ChevronRight size={13} color={P.t3} />
           </View>
 
-          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+          <View style={styles.footerActions}>
             {onReassignSite && (
               <TouchableOpacity
                 style={styles.reassignBtn}
@@ -332,9 +332,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
     paddingTop: 2,
   },
+  footerActions: { flex: 1, minWidth: 0, flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
   drilldownHint: {
+    flexShrink: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
@@ -352,7 +356,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: P.blueBorder,
     borderRadius: BR.sm,
-    paddingHorizontal: SP.px12,
+    paddingHorizontal: SP.px8,
     paddingVertical: 4,
   },
   manualBtnText: {
@@ -368,7 +372,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(217,119,6,0.3)',
     borderRadius: BR.sm,
-    paddingHorizontal: SP.px12,
+    paddingHorizontal: SP.px8,
     paddingVertical: 4,
   },
   reassignBtnText: {
@@ -377,12 +381,12 @@ const styles = StyleSheet.create({
     color: '#D97706',
   },
   deleteGuardBtn: {
+    width: 36,
+    height: 34,
     backgroundColor: 'rgba(239, 68, 68, 0.12)',
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
     borderRadius: BR.sm,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
     justifyContent: 'center',
     alignItems: 'center',
   },

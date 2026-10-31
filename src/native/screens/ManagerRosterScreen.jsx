@@ -267,7 +267,18 @@ export function ManagerRosterScreen() {
     <View style={styles.root}>
       <AppHeader />
       <View style={styles.content}>
-        <Text style={styles.screenTitle}>Shift Scheduler</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.screenTitle}>Shift Scheduler</Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Add schedule"
+            style={styles.addScheduleBtn}
+            onPress={() => setGuardPickerVisible(true)}
+          >
+            <Plus size={15} color={P.white} />
+            <Text style={styles.addScheduleTxt}>Add schedule</Text>
+          </TouchableOpacity>
+        </View>
         <Text style={styles.screenIntro}>Assign weekly coverage and publish shift details directly to each guard.</Text>
 
         <Text style={styles.fieldLabel}>GUARD SELECTION</Text>
@@ -348,11 +359,16 @@ export function ManagerRosterScreen() {
                       <Text style={styles.noRoster}>No schedule published</Text>
                     )}
                   </View>
-                  <View style={[styles.editBtn, { backgroundColor: roster ? P.blueSubtle : P.bg3, borderColor: roster ? P.blueBorder : P.b2 }]}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`${roster ? 'Edit' : 'Add'} schedule for ${guard.name}`}
+                    style={[styles.editBtn, { backgroundColor: roster ? P.blueSubtle : P.bg3, borderColor: roster ? P.blueBorder : P.b2 }]}
+                    onPress={event => { event.stopPropagation?.(); openEditForGuard(guard); }}
+                  >
                     <Text style={[styles.editBtnTxt, { color: roster ? P.info : P.t3 }]}>
                       {roster ? 'Edit' : '+ Add'}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 </TouchableOpacity>
               );
             })
@@ -703,6 +719,9 @@ const styles = StyleSheet.create({
   root:          { flex: 1, backgroundColor: P.bg0 },
   content:       { flex: 1, padding: SP.px20 },
   screenTitle:   { ...FONT.h2, marginBottom: SP.px16 },
+  titleRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: SP.px8 },
+  addScheduleBtn:{ minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: SP.px10, borderRadius: BR.sm, backgroundColor: P.blue },
+  addScheduleTxt:{ color: P.white, fontSize: 11, fontWeight: '800' },
   screenIntro:   { color: P.t3, fontSize: 13, lineHeight: 18, marginTop: -SP.px12, marginBottom: SP.px16 },
 
   guardDropdown: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: SP.px12, paddingHorizontal: SP.px12, marginBottom: SP.px16, borderRadius: BR.md, backgroundColor: P.bg1, borderWidth: 1, borderColor: P.b2 },

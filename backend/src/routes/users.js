@@ -17,7 +17,7 @@
  */
 const router = require('express').Router();
 const { body, param } = require('express-validator');
-const { User, Site }  = require('../models');
+const { User, Site, ShiftRoster }  = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
 const validate      = require('../middleware/validate');
 const asyncHandler  = require('../utils/asyncHandler');
@@ -254,12 +254,14 @@ router.delete('/users/:id',
     const user = await User.findOne({ _id: req.params.id, organisationId: req.user.organisationId });
     if (!user) return res.status(404).json({ error: 'User not found' });
     if (!isSelf && req.user.role === 'manager' && user.role !== 'admin' && user.role !== 'superadmin') {
-      const targetSiteIds = [user.siteId, ...(user.managedSiteIds || [])].filter(Boolean);
-      if (!targetSiteIds.some(id => userCanAccessSite(req.user, id))) return res.status(403).json({ error: 'Account is outside your assigned sites.' });
+      const targetSiteIds = [user.siteId, ...(user.assignedSiteIds || []), ...(user.managedSiteIds || [])].filter(Boolean).map(String);
+      const allowedSiteIds = await getManagerSiteIds(req.user);
+      if (!targetSiteIds.some(id => allowedSiteIds.includes(id))) return res.status(403).json({ error: 'Account is outside your assigned sites.' });
     }
     if (!isSelf && ['admin', 'superadmin'].includes(user.role) && !['admin', 'superadmin'].includes(req.user.role)) {
       return res.status(403).json({ error: 'Managers cannot delete administrator accounts.' });
     }
+    await ShiftRoster.deleteMany({ organisationId: req.user.organisationId, guardId: user._id });
     await User.deleteOne({ _id: user._id });
     await audit({ req, action: isSelf ? 'account_self_deleted' : 'account_deleted', targetModel: 'User', targetId: user._id, targetName: user.name });
     res.json({ message: 'User account permanently deleted' });
@@ -497,13 +499,34 @@ router.patch('/sites/:id',
 router.delete('/sites/:id',
   authenticate, requireRole('manager','admin','superadmin'),
   asyncHandler(async (req, res) => {
-    if (req.user.role === 'manager' && !userCanAccessSite(req.user, req.params.id)) return res.status(403).json({ error: 'Site is outside your assigned area.' });
-    const site = await Site.findOneAndUpdate(
-      { _id: req.params.id, organisationId: req.user.organisationId },
-      { active: false }, { new: true }
-    );
+    const site = await Site.findOne({ _id: req.params.id, organisationId: req.user.organisationId, active: true });
     if (!site) return res.status(404).json({ error: 'Site not found' });
-    res.json({ message: 'Site deactivated' });
+    if (req.user.role === 'manager' && !(await getManagerSiteIds(req.user)).includes(String(site._id))) {
+      return res.status(403).json({ error: 'Site is outside your assigned area.' });
+    }
+    site.active = false;
+    await site.save();
+    await User.updateMany(
+      { _id: site.managerId, organisationId: req.user.organisationId },
+      { $pull: { managedSiteIds: site._id } }
+    );
+    const affectedGuards = await User.find({
+      organisationId: req.user.organisationId,
+      role: 'guard',
+      $or: [{ siteId: site._id }, { assignedSiteIds: site._id }],
+    }).select('_id siteId assignedSiteIds');
+    for (const guard of affectedGuards) {
+      const remainingSiteIds = (guard.assignedSiteIds || []).filter(id => String(id) !== String(site._id));
+      const nextPrimarySite = String(guard.siteId || '') === String(site._id)
+        ? (remainingSiteIds[0] || null)
+        : guard.siteId;
+      await User.updateOne(
+        { _id: guard._id },
+        { $set: { siteId: nextPrimarySite, assignedSiteIds: remainingSiteIds } }
+      );
+    }
+    await audit({ req, action: 'site_deleted', targetModel: 'Site', targetId: site._id, targetName: site.name });
+    res.json({ message: 'Site deactivated and removed from active assignments.' });
   })
 );
 

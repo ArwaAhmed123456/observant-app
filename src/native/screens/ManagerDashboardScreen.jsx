@@ -77,7 +77,7 @@ export function ManagerDashboardScreen({ navigation }) {
     if (found && String(found.managerId || '') === currentUserId) return true;
     return false;
   };
-  const availableSites = (sites || []).filter(site => canSeeSite(site.id || site._id, site));
+  const availableSites = (sites || []).filter(site => site.active !== false && canSeeSite(site.id || site._id, site));
   const guardSiteIds = u => [...new Set([u.siteId, ...(u.assignedSiteIds || [])].filter(Boolean).map(String))];
   const guards   = (users || []).filter(u => u.role === 'guard' && guardSiteIds(u).some(id => canSeeSite(id)));
   const unread   = getUnreadAlerts(currentUser?.id || currentUser?._id);
@@ -879,7 +879,7 @@ export function ManagerDashboardScreen({ navigation }) {
 
       {/* Delete Worker Confirmation Modal with Exact Name Typing Validation */}
       <Modal visible={!!deleteWorkerTarget} transparent animationType="fade" onRequestClose={() => setDeleteWorkerTarget(null)}>
-        <View style={styles.modalOverlay}>
+        <View style={[styles.modalOverlay, { paddingHorizontal: S.md }]}>
           <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
             <View style={styles.deleteWorkerCard}>
               <View style={styles.deleteWorkerHeader}>
@@ -1109,7 +1109,7 @@ const styles = StyleSheet.create({
   alertPhotoImg: { width: '100%', height: 180 },
   alertPhotoZoomBadge: { position: 'absolute', bottom: 8, right: 8, backgroundColor: 'rgba(15,23,42,0.8)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: R.xs },
   alertPhotoZoomTxt: { color: COLORS.white, fontSize: 10, fontWeight: '700' },
-  deleteWorkerCard: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.borderSubtle, width: '100%', ...shadows.lg },
+  deleteWorkerCard: { backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.lg, borderWidth: 1, borderColor: COLORS.borderSubtle, alignSelf: 'stretch', ...shadows.lg },
   deleteWorkerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: S.md },
   deleteWorkerIconWrap: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(239, 68, 68, 0.15)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)' },
   deleteWorkerTitle: { fontSize: 18, fontWeight: '800', color: P.danger, marginBottom: 4 },
