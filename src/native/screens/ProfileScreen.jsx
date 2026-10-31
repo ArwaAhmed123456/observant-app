@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { useApp } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
+import { GuardLogoutButton } from '../components/GuardLogoutButton';
 import { P, SP, BR, FONT, SH_TOKENS, card, input, btnPrimary, btnDanger } from '../../ds';
 import {
   User, Lock, Bell, LogOut, ChevronRight, Shield,
@@ -56,7 +57,7 @@ export function ProfileScreen() {
 
   return (
     <View style={styles.root}>
-      <AppHeader />
+      <AppHeader right={<GuardLogoutButton />} />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         {/* Avatar section */}

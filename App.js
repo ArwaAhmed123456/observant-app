@@ -8,7 +8,7 @@ import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-
 import { StatusBar } from 'expo-status-bar';
 import {
   Home, Phone, MapPin, Calendar,
-  LayoutDashboard, FileText, Settings, Route, User
+  LayoutDashboard, FileText, Settings, Route, User, Building2
 } from 'lucide-react-native';
 import { COLORS } from './src/theme';
 
@@ -26,6 +26,7 @@ import { ManagerDashboardScreen }  from './src/native/screens/ManagerDashboardSc
 import { ManagerRosterScreen }     from './src/native/screens/ManagerRosterScreen';
 import { ManagerReportsScreen }    from './src/native/screens/ManagerReportsScreen';
 import { ManagerCheckpointScreen } from './src/native/screens/ManagerCheckpointScreen';
+import { ManagerSitesScreen }      from './src/native/screens/ManagerSitesScreen';
 import { SuperAdminScreen }        from './src/native/screens/SuperAdminScreen';
 
 const Stack = createNativeStackNavigator();
@@ -71,6 +72,7 @@ const tabScreenOptions = insets => ({ route }) => {
         Schedule:    <Calendar         color={color} size={size} />,
         Reports:     <FileText         color={color} size={size} />,
         Checkpoints: <Settings         color={color} size={size} />,
+        Sites:       <Building2        color={color} size={size} />,
       };
       return icons[route.name] || null;
     },
@@ -131,6 +133,7 @@ function ManagerTabs() {
       <Tab.Screen name="Schedule"    component={ManagerRosterScreen} />
       <Tab.Screen name="Reports"     component={ManagerReportsScreen} />
       <Tab.Screen name="Checkpoints" component={ManagerCheckpointScreen} />
+      <Tab.Screen name="Sites"       component={ManagerSitesScreen} />
     </Tab.Navigator>
   );
 }
@@ -181,6 +184,7 @@ export default function App() {
                   Schedule: 'manager/schedule',
                   Reports: 'manager/reports',
                   Checkpoints: 'manager/checkpoints',
+                  Sites: 'manager/sites',
                 } },
                 GuardCheckCallPath: 'manager/guards/:guardId/check-call-path',
               } },

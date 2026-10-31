@@ -9,6 +9,7 @@ import { authorizedImageSource } from '../../services/api';
 import { useApp, formatTime } from '../../context/AppContext';
 import { Camera, CheckCircle2, AlertTriangle, Play, Square, Navigation, ScanLine, Radio, Clock3, ShieldCheck } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
+import { GuardLogoutButton } from '../components/GuardLogoutButton';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, btnPrimary, btnGold, btnDanger } from '../../ds';
 import { readNfcTag } from '../../services/nfc';
@@ -178,7 +179,7 @@ export function PatrolScreen() {
 
   return (
     <View style={styles.root}>
-      <AppHeader />
+      <AppHeader right={<GuardLogoutButton />} />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
           <View style={styles.titleBlock}>

@@ -33,7 +33,7 @@ async function loadRemoteSnapshot(user) {
     apiGet('/api/check-calls?limit=100'),
     apiGet('/api/patrols?limit=100'),
     apiGet('/api/rosters'),
-    isManager ? apiGet('/api/users?active=all') : Promise.resolve({ users: [] }),
+    isManager ? apiGet('/api/users') : Promise.resolve({ users: [] }),
     isManager ? apiGet('/api/alerts?limit=100') : Promise.resolve({ alerts: [] }),
     isManager ? apiGet('/api/rosters/templates') : Promise.resolve({ templates: [] }),
     isManager ? apiGet('/api/audit-logs?limit=100') : Promise.resolve({ logs: [] }),
@@ -310,6 +310,18 @@ export function AppProvider({ children }) {
   const logout = useCallback(async () => {
     clearAllTimers();
     setCurrentUser(null);
+    setUsers([]);
+    setSites([]);
+    setCheckpoints([]);
+    setShiftSessions([]);
+    setCheckCalls([]);
+    setPatrolSessions([]);
+    setPatrolCaptures([]);
+    setRandomPromptLogs([]);
+    setAlerts([]);
+    setRosters([]);
+    setRosterTemplates([]);
+    setAuditLogs([]);
     setActiveCheckCall(null);
     setActivePatrol(null);
     setAntiIdlePrompt(false);
@@ -1851,7 +1863,7 @@ export function AppProvider({ children }) {
   // ─── Users management ─────────────────────────────────────────────────────
   const refreshUsers = useCallback(async () => {
     if (API_ENABLED) {
-      const { users: remoteUsers } = await apiGet('/api/users?active=all');
+      const { users: remoteUsers } = await apiGet('/api/users');
       const normalized = (remoteUsers || []).map(normalizeUser);
       setUsers(normalized);
       return normalized;

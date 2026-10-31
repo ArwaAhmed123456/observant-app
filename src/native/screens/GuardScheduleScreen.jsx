@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useApp, formatDate } from '../../context/AppContext';
 import { Calendar, ChevronLeft, ChevronRight, Clock, MapPin } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
+import { GuardLogoutButton } from '../components/GuardLogoutButton';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card } from '../../ds';
 import { getUKDateKey, getUKMondayDate } from '../../utils/scheduleDates';
@@ -46,7 +47,7 @@ export function GuardScheduleScreen() {
 
   return (
     <View style={styles.root}>
-      <AppHeader />
+      <AppHeader right={<GuardLogoutButton />} />
       <View style={styles.content}>
         <Text style={styles.screenTitle}>My Schedule</Text>
 

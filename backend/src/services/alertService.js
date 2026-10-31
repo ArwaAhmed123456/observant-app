@@ -5,6 +5,7 @@
 const mongoose = require('mongoose');
 const { Alert, User, Site } = require('../models');
 const fcm = require('./fcm');
+const { sendIncidentAlertEmail } = require('./incidentEmail');
 
 async function createAlert({ organisationId, siteId, guardId, type, title, message, note, photoUrl, photoUrls, category, location, refModel, refId }) {
   let validSiteId = siteId;
@@ -21,7 +22,7 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
       { role: 'manager', managedSiteIds: { $in: [validSiteId, siteId].filter(Boolean) } },
       { role: 'manager', siteId: { $in: [validSiteId, siteId].filter(Boolean) } },
     ],
-  }).select('_id fcmToken name notificationPreferences');
+  }).select('_id fcmToken name email notificationPreferences');
 
   // Fallback: if no site-specific manager configured, notify all active managers
   if (!managers.length) {
@@ -29,7 +30,7 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
       organisationId,
       active: true,
       role: { $in: ['manager', 'admin'] },
-    }).select('_id fcmToken name notificationPreferences');
+    }).select('_id fcmToken name email notificationPreferences');
   }
 
   const managerIds = managers.map(m => m._id);
@@ -78,6 +79,9 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
     : managers;
   fcm.notifyManagers(alert, pushManagers).catch(err =>
     console.error('[alertService] FCM error:', err.message)
+  );
+  sendIncidentAlertEmail(alert, managers).catch(err =>
+    console.error('[alertService] Incident email error:', err.message)
   );
 
   return alert;

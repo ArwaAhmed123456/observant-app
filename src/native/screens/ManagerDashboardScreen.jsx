@@ -79,7 +79,7 @@ export function ManagerDashboardScreen({ navigation }) {
   };
   const availableSites = (sites || []).filter(site => site.active !== false && canSeeSite(site.id || site._id, site));
   const guardSiteIds = u => [...new Set([u.siteId, ...(u.assignedSiteIds || [])].filter(Boolean).map(String))];
-  const guards   = (users || []).filter(u => u.role === 'guard' && guardSiteIds(u).some(id => canSeeSite(id)));
+  const guards   = (users || []).filter(u => u.role === 'guard' && u.active !== false && u.status !== 'inactive' && guardSiteIds(u).some(id => canSeeSite(id)));
   const unread   = getUnreadAlerts(currentUser?.id || currentUser?._id);
   const todayStr = new Date().toISOString().slice(0,10);
 

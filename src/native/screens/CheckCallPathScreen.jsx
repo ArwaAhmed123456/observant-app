@@ -16,6 +16,7 @@ import {
 import Svg, { Path, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
+import { GuardLogoutButton } from '../components/GuardLogoutButton';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, GR, card, SCREEN } from '../../ds';
 import { ChevronLeft, ChevronRight, X, Clock, CheckCircle, AlertTriangle, Radio, User, Phone, Mail, MapPin, Calendar } from 'lucide-react-native';
@@ -239,11 +240,14 @@ export function CheckCallPathScreen({ route, navigation }) {
   return (
     <View style={styles.root}>
       <AppHeader right={
-        navigation ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {!route?.params?.readOnly && <GuardLogoutButton />}
+        {route?.params?.readOnly && navigation ? (
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
             <X color={P.t3} size={20} />
           </TouchableOpacity>
-        ) : null
+        ) : null}
+        </View>
       } />
 
       <View style={styles.content}>

@@ -120,6 +120,7 @@ export function ManagerRosterScreen() {
   const isAllAdmin = currentUser.role === 'superadmin' || currentUser.role === 'admin';
   const guards = users.filter(u =>
     u.role === 'guard' &&
+    u.active !== false && u.status !== 'inactive' &&
     (isAllAdmin || managerSiteIds.size === 0 || guardSiteIds(u).some(id => managerSiteIds.has(id)))
   );
   const weekKey = toWeekKey(weekStart);

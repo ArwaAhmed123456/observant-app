@@ -17,6 +17,7 @@ import {
 } from 'lucide-react-native';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
+import { GuardLogoutButton } from '../components/GuardLogoutButton';
 import { EmptyState } from '../components/EmptyState';
 import {
   P, SP, BR, FONT, SH_TOKENS, GR, card, SCREEN, TAB_H, statusToken,
@@ -198,14 +199,10 @@ export function GuardHomeScreen({ navigation }) {
     <View style={s.root}>
       <StatusBar style={showSosConfirm || sosSent ? 'light' : 'dark'} />
       <AppHeader
-        right={
-          !isOnline ? (
-            <View style={s.offlinePill}>
-              <View style={s.offlineDot} />
-              <Text style={s.offlineTxt}>OFFLINE</Text>
-            </View>
-          ) : null
-        }
+        right={<View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {!isOnline ? <View style={s.offlinePill}><View style={s.offlineDot} /><Text style={s.offlineTxt}>OFFLINE</Text></View> : null}
+          <GuardLogoutButton />
+        </View>}
       />
 
       <ScrollView

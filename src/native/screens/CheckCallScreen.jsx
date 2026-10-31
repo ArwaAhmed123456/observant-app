@@ -13,6 +13,7 @@ import NetInfo from '@react-native-community/netinfo';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useApp, formatTime } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
+import { GuardLogoutButton } from '../components/GuardLogoutButton';
 import { P, SP, BR, FONT, SH_TOKENS, TAB_H, statusToken } from '../../ds';
 import { enqueue } from '../../services/offlineQueue';
 import { getWhat3WordsSync } from '../../utils/what3words';
@@ -199,7 +200,7 @@ export function CheckCallScreen() {
 
   return (
     <View style={s.root}>
-      <AppHeader title="Check Calls" subtitle={`${myCCs.length} logged today`} />
+      <AppHeader title="Check Calls" subtitle={`${myCCs.length} logged today`} right={<GuardLogoutButton />} />
 
       {/* Offline / pending sync banner */}
       {(!isOnline || pendingSync) && (

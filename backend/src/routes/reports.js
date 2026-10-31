@@ -27,7 +27,13 @@ function buildFilter(req) {
   if (from || to) {
     filter.firedAt = {};
     if (from) filter.firedAt.$gte = new Date(from);
-    if (to)   filter.firedAt.$lte = new Date(to);
+    // Date-only upper bounds represent the full selected day. Use an exclusive
+    // next-day bound so image evidence and report rows include late-day events.
+    if (to) {
+      const end = new Date(to);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(String(to))) end.setUTCDate(end.getUTCDate() + 1);
+      filter.firedAt.$lt = end;
+    }
   }
   return filter;
 }

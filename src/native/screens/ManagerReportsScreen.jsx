@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, Image,
   Modal, TextInput, Switch, Share, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,7 +9,7 @@ import { FileText, Download, Filter, X, ChevronDown, File } from 'lucide-react-n
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, input as inputStyle, btnPrimary } from '../../ds';
-import { API_ENABLED, apiGet } from '../../services/api';
+import { API_ENABLED, apiGet, authorizedImageSource } from '../../services/api';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
@@ -48,13 +48,32 @@ function isInRange(dateStr, range, customStart, customEnd) {
   return true;
 }
 
+const localDateKey = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+function getReportBounds(range, customStart, customEnd) {
+  const now = new Date();
+  const end = new Date(now);
+  const start = new Date(now);
+  if (range === 'today') start.setHours(0, 0, 0, 0);
+  else if (range === 'this_week') {
+    const weekday = start.getDay() || 7;
+    start.setDate(start.getDate() - weekday + 1);
+    start.setHours(0, 0, 0, 0);
+  } else if (range === 'this_month') {
+    start.setDate(1);
+    start.setHours(0, 0, 0, 0);
+  } else if (range === 'custom' && customStart && customEnd) {
+    return { from: customStart, to: customEnd };
+  } else return {};
+  return { from: localDateKey(start), to: localDateKey(end) };
+}
+
 export function ManagerReportsScreen() {
   const { currentUser, users, sites, shiftSessions, checkCalls, patrolSessions, patrolCaptures, checkpoints } = useApp();
 
   const managerSiteIds = (currentUser?.siteIds || [currentUser?.siteId]).filter(Boolean).map(String);
   const canSeeSite = siteId => currentUser?.role === 'admin' || currentUser?.role === 'superadmin' || managerSiteIds.includes(String(siteId || ''));
 
-  const guards = (users || []).filter(u => u.role === 'guard' && (canSeeSite(u.siteId) || !u.siteId));
+  const guards = (users || []).filter(u => u.role === 'guard' && u.active !== false && u.status !== 'inactive' && (canSeeSite(u.siteId) || !u.siteId));
 
   // Filters
   const [dateRange, setDateRange]         = useState('today');
@@ -64,6 +83,9 @@ export function ManagerReportsScreen() {
   const [siteFilter, setSiteFilter]       = useState('all');
   const [reportType, setReportType]       = useState('combined');
   const [includePhotos, setIncludePhotos] = useState(false);
+  const [serverReportRows, setServerReportRows] = useState({});
+  const [reportImagesLoading, setReportImagesLoading] = useState(false);
+  const [selectedEvidencePhoto, setSelectedEvidencePhoto] = useState(null);
 
   // Column toggles
   const [cols, setCols] = useState({
@@ -77,6 +99,35 @@ export function ManagerReportsScreen() {
   const [guardPickerModal, setGuardPickerModal] = useState(false);
   const [sitePickerModal, setSitePickerModal]   = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
+
+  useEffect(() => {
+    if (!API_ENABLED) return undefined;
+    if (dateRange === 'custom' && (!customStart || !customEnd)) {
+      setServerReportRows({});
+      setReportImagesLoading(false);
+      return undefined;
+    }
+    let current = true;
+    setReportImagesLoading(true);
+    const bounds = getReportBounds(dateRange, customStart, customEnd);
+    const query = [
+      ['type', reportType], ['includeImages', 'true'],
+      ...(guardFilter !== 'all' ? [['guardId', guardFilter]] : []),
+      ...(siteFilter !== 'all' ? [['siteId', siteFilter]] : []),
+      ...(bounds.from ? [['from', bounds.from]] : []),
+      ...(bounds.to ? [['to', bounds.to]] : []),
+    ].map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`).join('&');
+    apiGet(`/api/reports/shift-calls?${query}`)
+      .then(response => {
+        if (!current) return;
+        setServerReportRows(Object.fromEntries((response.rows || []).map(row => [String(row.id), row])));
+      })
+      .catch(error => {
+        if (current) console.warn('[Reports] Could not load photo evidence:', error.message);
+      })
+      .finally(() => { if (current) setReportImagesLoading(false); });
+    return () => { current = false; };
+  }, [dateRange, customStart, customEnd, guardFilter, siteFilter, reportType]);
 
   // Build report rows
   const rows = useMemo(() => {
@@ -97,6 +148,7 @@ export function ManagerReportsScreen() {
           const site  = (sites || []).find(s => s.id === cc.siteId || s._id === cc.siteId);
           const session = (shiftSessions || []).find(s => s.id === cc.sessionId);
           const timeVal = cc.firedAt || cc.respondedAt || cc.scheduledFor || new Date().toISOString();
+          const remoteRecord = serverReportRows[String(cc.id || cc._id)] || {};
           result.push({
             type: 'check_call',
             id: cc.id || cc._id,
@@ -110,6 +162,7 @@ export function ManagerReportsScreen() {
             date: formatDate(timeVal),
             manuallyLogged: !!cc.manuallyLogged || !!cc.isManualLog,
             loggedBy: cc.loggedBy || (cc.isManualLog ? 'Officer Direct' : undefined),
+            photos: remoteRecord.images || [],
           });
         });
     }
@@ -126,6 +179,7 @@ export function ManagerReportsScreen() {
           const guard = (users || []).find(u => u.id === ps.guardId || u._id === ps.guardId);
           const site  = (sites || []).find(s => s.id === ps.siteId || s._id === ps.siteId);
           const session = (shiftSessions || []).find(s => s.id === ps.sessionId);
+          const remoteRecord = serverReportRows[String(ps.id || ps._id)] || {};
           const captures = (patrolCaptures || []).filter(c => c.patrolId === ps.id || c.patrolId === ps._id);
           const siteCP = (checkpoints || []).filter(cp => cp.siteId === ps.siteId);
           result.push({
@@ -137,9 +191,9 @@ export function ManagerReportsScreen() {
             shiftTime: session ? `${formatTime(session.bookedOnAt)}${session.bookedOffAt ? ' – '+formatTime(session.bookedOffAt) : ''}` : '—',
             patrolTime: `${formatTime(ps.startedAt)}${ps.finishedAt ? ' – '+formatTime(ps.finishedAt) : ' (ongoing)'}`,
             patrolStatus: ps.status || 'in_progress',
-            checkpointsCapt: `${captures.length}/${siteCP.length || 0}`,
-            missingCheckpoints: (ps.missingCheckpoints || []).map(id => (checkpoints || []).find(cp => cp.id === id)?.name || id).join(', '),
-            photos: captures,
+            checkpointsCapt: `${remoteRecord.capturedCount ?? captures.length}/${siteCP.length || 0}`,
+            missingCheckpoints: (ps.missingCheckpoints || []).map(id => (checkpoints || []).find(cp => cp.id === id)?.name || id).join(', ') || (remoteRecord.missingCount ? `${remoteRecord.missingCount} required` : ''),
+            photos: (remoteRecord.images?.length ? remoteRecord.images : captures.map(capture => ({ ...capture, url: capture.url || capture.photoUrl || capture.photoUri }))).filter(photo => photo.url),
             date: formatDate(ps.startedAt),
             manuallyLogged: !!ps.manuallyLogged,
             loggedBy: ps.loggedBy,
@@ -149,7 +203,7 @@ export function ManagerReportsScreen() {
 
     return result.sort((a, b) => new Date(b.date) - new Date(a.date));
   }, [reportType, guardFilter, siteFilter, dateRange, customStart, customEnd,
-      checkCalls, patrolSessions, patrolCaptures, users, sites, shiftSessions, checkpoints, currentUser]);
+      checkCalls, patrolSessions, patrolCaptures, serverReportRows, users, sites, shiftSessions, checkpoints, currentUser]);
 
   const guardName = guardFilter !== 'all' ? (users || []).find(u => u.id === guardFilter || u._id === guardFilter)?.name || 'All Guards' : 'All Guards';
   const siteName  = siteFilter !== 'all' ? (sites || []).find(s => s.id === siteFilter || s._id === siteFilter)?.name || 'All Sites' : 'All Sites';
@@ -543,7 +597,7 @@ ${(reportType === 'combined' || reportType === 'patrols') && patrolRows.length >
               </>
             )}
 
-            {row.type === 'patrol' && (
+          {row.type === 'patrol' && (
               <>
                 {cols.patrolTime && <Text style={styles.rowDetail}>Patrol: {row.patrolTime}</Text>}
                 {cols.patrolCheckpoints && (
@@ -553,6 +607,24 @@ ${(reportType === 'combined' || reportType === 'patrols') && patrolRows.length >
                   </Text>
                 )}
               </>
+            )}
+
+            {!!row.photos?.length && (
+              <View style={styles.evidenceSection}>
+                <Text style={styles.evidenceTitle}>PHOTO EVIDENCE · {row.photos.length}</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.evidenceStrip}>
+                  {row.photos.map((photo, index) => {
+                    const uri = photo.url || photo.photoUrl || photo.photoUri;
+                    if (!uri) return null;
+                    return (
+                      <TouchableOpacity key={photo.id || photo._id || `${row.id}-${index}`} onPress={() => setSelectedEvidencePhoto(uri)} activeOpacity={0.85}>
+                        <Image source={authorizedImageSource(uri)} style={styles.evidenceThumb} resizeMode="cover" />
+                        <Text style={styles.evidenceCaption} numberOfLines={1}>{photo.checkpointName || `Photo ${index + 1}`}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
             )}
           </View>
         ))}
@@ -678,6 +750,13 @@ ${(reportType === 'combined' || reportType === 'patrols') && patrolRows.length >
           </View>
         </View>
       </Modal>
+
+      <Modal visible={!!selectedEvidencePhoto} transparent animationType="fade" onRequestClose={() => setSelectedEvidencePhoto(null)}>
+        <View style={styles.evidenceModal}>
+          <TouchableOpacity accessibilityLabel="Close photo evidence" style={styles.evidenceClose} onPress={() => setSelectedEvidencePhoto(null)}><X color={P.white} size={22} /></TouchableOpacity>
+          {selectedEvidencePhoto ? <Image source={authorizedImageSource(selectedEvidencePhoto)} style={styles.evidenceFullImage} resizeMode="contain" /> : null}
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -712,6 +791,14 @@ const styles = StyleSheet.create({
   rowDetail:    { color: P.t2, fontSize: 12, marginTop: 3 },
   rowResult:    { fontSize: 13, fontWeight: '700', marginTop: 4 },
   rowNote:      { color: P.t3, fontSize: 11, marginTop: 4, fontStyle: 'italic' },
+  evidenceSection: { marginTop: SP.px10, paddingTop: SP.px8, borderTopWidth: 1, borderTopColor: P.b1 },
+  evidenceTitle: { color: P.t3, fontSize: 9, fontWeight: '800', letterSpacing: 0.6, marginBottom: SP.px8 },
+  evidenceStrip: { gap: SP.px8, paddingRight: SP.px4 },
+  evidenceThumb: { width: 92, height: 72, borderRadius: BR.xs, backgroundColor: P.bg3 },
+  evidenceCaption: { maxWidth: 92, color: P.t3, fontSize: 9, marginTop: 3 },
+  evidenceModal: { flex: 1, backgroundColor: 'rgba(2,6,23,0.96)', justifyContent: 'center', alignItems: 'center', padding: SP.px16 },
+  evidenceClose: { position: 'absolute', zIndex: 2, top: 30, right: 18, width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.14)', alignItems: 'center', justifyContent: 'center' },
+  evidenceFullImage: { width: '100%', height: '82%' },
   manualLogBadge: { backgroundColor: P.infoSubtle, borderWidth: 1, borderColor: P.infoBorder, borderRadius: BR.xs, paddingHorizontal: 8, paddingVertical: 3, alignSelf: 'flex-start', marginVertical: 4 },
   manualLogBadgeTxt: { color: P.info, fontSize: 11, fontWeight: '700' },
   modalOverlay: { flex: 1, backgroundColor: P.overlay, justifyContent: 'flex-end' },
