@@ -16,6 +16,15 @@ import { getUKDayKey, isCurrentUKWeek } from '../utils/scheduleDates';
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
 
+function normalizeRosterTemplate(template) {
+  return {
+    ...template,
+    id: idOf(template),
+    guardId: idOf(template.guardId),
+    checkpointIds: (template.checkpointIds || []).map(idOf),
+  };
+}
+
 async function loadRemoteSnapshot(user) {
   const isManager = user.role === 'manager' || user.role === 'admin' || user.role === 'superadmin';
   const [sitesResult, shiftsResult, callsResult, patrolsResult, rostersResult, usersResult, alertsResult, templatesResult, auditResult] = await Promise.all([
@@ -42,7 +51,7 @@ async function loadRemoteSnapshot(user) {
     patrolCaptures: patrols.flatMap(patrol => patrol.captures || []),
     rosters: (rostersResult.rosters || []).map(normalizeRoster),
     alerts: (alertsResult.alerts || []).map(alert => ({ ...normalizeAlert(alert), read: !!alert.isRead })),
-    rosterTemplates: templatesResult.templates || [],
+    rosterTemplates: (templatesResult.templates || []).map(normalizeRosterTemplate),
     auditLogs: (auditResult.logs || []).map(log => ({
       id: idOf(log), action: log.action, actorName: log.actorName || log.actorId?.name || 'System',
       actorRole: log.actorRole || log.actorId?.role || 'system', targetName: log.targetName || '—',
@@ -170,7 +179,7 @@ export function AppProvider({ children }) {
     setRandomPromptLogs(rpl || []);
     setAlerts(al || []);
     setRosters(ro || []);
-    setRosterTemplates(rt || []);
+    setRosterTemplates((rt || []).map(normalizeRosterTemplate));
     setAuditLogs(aud || []);
 
     if (uid && u) {
@@ -1766,19 +1775,21 @@ export function AppProvider({ children }) {
   const saveRosterTemplate = useCallback(async (template) => {
     if (API_ENABLED) {
       const { template: saved } = await apiPost('/api/rosters/templates', template);
-      setRosterTemplates(previous => [...previous, saved]);
-      return saved;
+      const normalized = normalizeRosterTemplate(saved);
+      setRosterTemplates(previous => [...previous, normalized]);
+      return normalized;
     }
     const all = await load(KEYS.ROSTER_TEMPLATES) || [];
     const updated = [...all, { id: `rt_${Date.now()}`, createdAt: new Date().toISOString(), ...template }];
     await save(KEYS.ROSTER_TEMPLATES, updated);
     setRosterTemplates(updated);
+    return updated[updated.length - 1];
   }, []);
 
   const deleteRosterTemplate = useCallback(async (templateId) => {
     if (API_ENABLED) {
       await apiDelete(`/api/rosters/templates/${templateId}`);
-      setRosterTemplates(previous => previous.filter(item => item.id !== templateId));
+      setRosterTemplates(previous => previous.filter(item => String(item.id || item._id || '') !== String(templateId)));
       return;
     }
     const all = await load(KEYS.ROSTER_TEMPLATES) || [];

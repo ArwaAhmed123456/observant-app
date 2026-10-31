@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useApp, formatDate } from '../../context/AppContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ChevronLeft, ChevronRight, ChevronDown, Save, Bookmark, Trash2, Send, Clock, UserRound } from 'lucide-react-native';
+import { ChevronLeft, ChevronRight, ChevronDown, Save, Bookmark, Trash2, Send, Clock, UserRound, Plus } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, card, input, btnPrimary, btnGold } from '../../ds';
@@ -92,10 +92,21 @@ export function ManagerRosterScreen() {
   const [recurringWeekly, setRecurringWeekly] = useState(true);
   const [shiftInstructions, setShiftInstructions] = useState('');
   const [siteDrafts, setSiteDrafts] = useState({});
+  const [scheduleDataError, setScheduleDataError] = useState('');
+  const [refreshingScheduleData, setRefreshingScheduleData] = useState(false);
+
+  const reloadScheduleData = useCallback(async () => {
+    setRefreshingScheduleData(true);
+    setScheduleDataError('');
+    const results = await Promise.allSettled([refreshUsers(), refreshSites(), refreshRosters()]);
+    const failed = results.find(result => result.status === 'rejected');
+    if (failed) setScheduleDataError(failed.reason?.message || 'Schedule data could not be refreshed.');
+    setRefreshingScheduleData(false);
+  }, [refreshUsers, refreshSites, refreshRosters]);
 
   useFocusEffect(useCallback(() => {
-    Promise.allSettled([refreshUsers(), refreshSites(), refreshRosters()]);
-  }, [refreshUsers, refreshSites, refreshRosters]));
+    reloadScheduleData();
+  }, [reloadScheduleData]));
 
   const guardSiteIds = (guard) => [...new Set([guard.siteId, ...(guard.assignedSiteIds || [])].map(value => String(value?._id || value?.id || value || '')).filter(Boolean))];
   const guardSiteId = (guard) => guardSiteIds(guard)[0] || '';
@@ -258,9 +269,27 @@ export function ManagerRosterScreen() {
 
   const handleSaveTemplate = async () => {
     if (!templateName.trim()) { Alert.alert('Name required'); return; }
-    await saveRosterTemplate({ name: templateName.trim(), guardId: selectedGuard?.id, days: editDays, checkpointIds: editCheckpointIds });
-    setTemplateName('');
-    setSaveTemplateModal(false);
+    try {
+      await saveRosterTemplate({ name: templateName.trim(), guardId: selectedGuard?.id, days: editDays, checkpointIds: editCheckpointIds });
+      setTemplateName('');
+      setSaveTemplateModal(false);
+      Alert.alert('Template saved', `${templateName.trim()} is ready to use.`);
+    } catch (error) {
+      Alert.alert('Could not save template', error.message || 'Check your connection and try again.');
+    }
+  };
+
+  const handleDeleteTemplate = (template) => {
+    Alert.alert('Delete template?', `Remove “${template.name}” from saved schedule templates?`, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Delete', style: 'destructive', onPress: async () => {
+        try {
+          await deleteRosterTemplate(template.id || template._id);
+        } catch (error) {
+          Alert.alert('Could not delete template', error.message || 'Check your connection and try again.');
+        }
+      } },
+    ]);
   };
 
   return (
@@ -280,6 +309,14 @@ export function ManagerRosterScreen() {
           </TouchableOpacity>
         </View>
         <Text style={styles.screenIntro}>Assign weekly coverage and publish shift details directly to each guard.</Text>
+        {!!scheduleDataError && (
+          <View style={styles.loadErrorBox}>
+            <Text style={styles.loadErrorText}>{scheduleDataError}</Text>
+            <TouchableOpacity accessibilityRole="button" onPress={reloadScheduleData} disabled={refreshingScheduleData}>
+              <Text style={styles.retryText}>{refreshingScheduleData ? 'Refreshing…' : 'Retry'}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         <Text style={styles.fieldLabel}>GUARD SELECTION</Text>
         <TouchableOpacity style={styles.guardDropdown} onPress={() => setGuardPickerVisible(true)} activeOpacity={0.78}>
@@ -376,7 +413,7 @@ export function ManagerRosterScreen() {
         </ScrollView>
 
         {/* Edit Roster Modal */}
-        <Modal visible={editModalVisible} animationType="slide" transparent>
+        <Modal visible={editModalVisible} animationType="slide" transparent onRequestClose={() => setEditModalVisible(false)}>
           <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={[styles.modalCard, { paddingBottom: safeBottom + 16 }]}>
               <View style={styles.modalHeader}>
@@ -562,7 +599,7 @@ export function ManagerRosterScreen() {
         </Modal>
 
         {/* Time Picker Modal */}
-        <Modal visible={!!timeModal} transparent animationType="fade">
+        <Modal visible={!!timeModal} transparent animationType="fade" onRequestClose={() => { setTimeModal(null); setTimePickerOpen(null); }}>
           <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
             <View style={[styles.modalCard, { paddingBottom: safeBottom + 24 }]}>
               <Text style={styles.modalTitle}>Set Shift Times</Text>
@@ -638,7 +675,7 @@ export function ManagerRosterScreen() {
         </Modal>
 
         {/* Save Template Modal */}
-        <Modal visible={saveTemplateModal} transparent animationType="fade">
+        <Modal visible={saveTemplateModal} transparent animationType="fade" onRequestClose={() => setSaveTemplateModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={[styles.modalCard, { paddingBottom: safeBottom + 20 }]}>
               <Text style={styles.modalTitle}>Save as Template</Text>
@@ -659,7 +696,7 @@ export function ManagerRosterScreen() {
         </Modal>
 
         {/* Load Template Modal */}
-        <Modal visible={templateModal} transparent animationType="slide">
+        <Modal visible={templateModal} transparent animationType="slide" onRequestClose={() => setTemplateModal(false)}>
           <View style={styles.modalOverlay}>
             <View style={[styles.modalCard, { paddingBottom: safeBottom + 20 }]}>
               <Text style={styles.modalTitle}>Load Template</Text>
@@ -675,7 +712,7 @@ export function ManagerRosterScreen() {
                         {DAY_KEYS.filter(k => t.days?.[k]).map(k => DAY_LABELS[DAY_KEYS.indexOf(k)]).join(', ') || 'No days'}
                       </Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => deleteRosterTemplate(t.id)}>
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Delete ${t.name}`} onPress={() => handleDeleteTemplate(t)}>
                       <Trash2 color={P.danger} size={15} />
                     </TouchableOpacity>
                   </View>
@@ -722,6 +759,9 @@ const styles = StyleSheet.create({
   titleRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: SP.px8 },
   addScheduleBtn:{ minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: SP.px10, borderRadius: BR.sm, backgroundColor: P.blue },
   addScheduleTxt:{ color: P.white, fontSize: 11, fontWeight: '800' },
+  loadErrorBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: SP.px10, marginBottom: SP.px12, borderRadius: BR.sm, backgroundColor: P.dangerSubtle, borderWidth: 1, borderColor: P.dangerBorder },
+  loadErrorText: { flex: 1, color: P.danger, fontSize: 11 },
+  retryText: { color: P.info, fontSize: 12, fontWeight: '800', padding: 4 },
   screenIntro:   { color: P.t3, fontSize: 13, lineHeight: 18, marginTop: -SP.px12, marginBottom: SP.px16 },
 
   guardDropdown: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: SP.px12, paddingHorizontal: SP.px12, marginBottom: SP.px16, borderRadius: BR.md, backgroundColor: P.bg1, borderWidth: 1, borderColor: P.b2 },
