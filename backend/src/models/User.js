@@ -40,7 +40,7 @@ const userSchema = new mongoose.Schema({
 
   // Refresh token store (hashed)
   refreshTokenHash: { type: String, default: null, select: false },
-}, { timestamps: true });
+}, { timestamps: true, autoIndex: false });
 
 // Compound unique index: email is unique per organisation
 userSchema.index({ organisationId: 1, email: 1 }, { unique: true });

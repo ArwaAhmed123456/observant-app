@@ -12,7 +12,11 @@ const errorHandler = (err, req, res, next) => {
 
   // Mongoose duplicate key
   if (err.code === 11000) {
-    const field = Object.keys(err.keyValue || {})[0] || 'field';
+    const duplicateFields = Object.keys(err.keyPattern || err.keyValue || {});
+    if (duplicateFields.includes('email')) {
+      return res.status(409).json({ error: 'An account with this email already exists in your organisation.' });
+    }
+    const field = duplicateFields[0] || 'field';
     return res.status(409).json({ error: `Duplicate value for ${field}` });
   }
 

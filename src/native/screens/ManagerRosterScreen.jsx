@@ -474,7 +474,7 @@ export function ManagerRosterScreen() {
                 ))}
               </View>
 
-              <ScrollView style={{ maxHeight: 360 }}>
+              <ScrollView style={{ maxHeight: 360, flexShrink: 1 }} keyboardShouldPersistTaps="handled" keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}>
                 {DAY_KEYS.map((key, i) => {
                   const shift = editDays[key];
                   return (
@@ -594,60 +594,81 @@ export function ManagerRosterScreen() {
                 <Send color={P.black} size={15} />
                 <Text style={styles.publishBtnTxt}>{publishing ? 'Saving…' : 'Save & Assign Shift'}</Text>
               </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </Modal>
+              {timeModal && (
+                <View style={styles.timeEditorOverlay}>
+                  <View style={styles.modalHeader}>
+                    <View>
+                      <Text style={styles.modalTitle}>{timeModal.editing ? 'Edit shift times' : 'Add shift'}</Text>
+                      <Text style={styles.modalSub}>{DAY_LABELS[DAY_KEYS.indexOf(timeModal.dayKey)]} · choose start and end</Text>
+                    </View>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="Close shift time editor"
+                      onPress={() => { setTimeModal(null); setTimePickerOpen(null); }}
+                      style={styles.closeBtn}
+                    >
+                      <Text style={styles.closeBtnTxt}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView keyboardShouldPersistTaps="handled" style={{ flex: 1 }}>
+                    <Text style={styles.fieldLabel}>START TIME</Text>
+                    <View style={styles.timeInputRow}>
+                      <TextInput
+                        accessibilityLabel="Shift start time"
+                        style={[input, styles.timeInput]}
+                        value={startTime}
+                        onChangeText={setStartTime}
+                        placeholder="07:00"
+                        placeholderTextColor={P.t3}
+                        keyboardType="numbers-and-punctuation"
+                        maxLength={5}
+                      />
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="Choose shift start time"
+                        style={styles.timePickerButton}
+                        onPress={() => setTimePickerOpen(timePickerOpen === 'start' ? null : 'start')}
+                      >
+                        <Clock size={17} color={P.blue} />
+                        <Text style={styles.timePickerValue}>{startTime}</Text>
+                        <Text style={styles.timePickerHint}>PICK</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {timePickerOpen === 'start' && <TimeWheel value={startTime} onChange={setStartTime} />}
 
-        {/* Time Picker Modal */}
-        <Modal visible={!!timeModal} transparent animationType="fade" onRequestClose={() => { setTimeModal(null); setTimePickerOpen(null); }}>
-          <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-            <View style={[styles.modalCard, { paddingBottom: safeBottom + 24 }]}>
-              <Text style={styles.modalTitle}>Set Shift Times</Text>
-              
-              <Text style={styles.fieldLabel}>START TIME (HH:MM)</Text>
-              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                <TextInput
-                  style={[input, { flex: 1, color: P.t1, fontSize: 16, fontWeight: '800', fontFamily: undefined }]}
-                  value={startTime}
-                  onChangeText={setStartTime}
-                  placeholder="07:00"
-                  placeholderTextColor={P.t3}
-                  maxLength={5}
-                />
-                <TouchableOpacity
-                  style={[styles.navBtn, { paddingHorizontal: 12, paddingVertical: 10 }]}
-                  onPress={() => setTimePickerOpen(timePickerOpen === 'start' ? null : 'start')}
-                >
-                  <Clock size={16} color={P.blue} />
-                </TouchableOpacity>
-              </View>
-              {timePickerOpen === 'start' && <TimeWheel value={startTime} onChange={setStartTime} />}
-
-              <Text style={[styles.fieldLabel, { marginTop: SP.px16 }]}>END TIME (HH:MM)</Text>
-              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-                <TextInput
-                  style={[input, { flex: 1, color: P.t1, fontSize: 16, fontWeight: '800', fontFamily: undefined }]}
-                  value={endTime}
-                  onChangeText={setEndTime}
-                  placeholder="19:00"
-                  placeholderTextColor={P.t3}
-                  maxLength={5}
-                />
-                <TouchableOpacity
-                  style={[styles.navBtn, { paddingHorizontal: 12, paddingVertical: 10 }]}
-                  onPress={() => setTimePickerOpen(timePickerOpen === 'end' ? null : 'end')}
-                >
-                  <Clock size={16} color={P.blue} />
-                </TouchableOpacity>
-              </View>
-              {timePickerOpen === 'end' && <TimeWheel value={endTime} onChange={setEndTime} />}
-
-              <TouchableOpacity style={[btnPrimary, { marginTop: SP.px20 }]} onPress={confirmTime}>
-                <Text style={{ color: P.white, fontSize: 15, fontWeight: '800' }}>Confirm Shift Time</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => { setTimeModal(null); setTimePickerOpen(null); }}>
-                <Text style={styles.cancelBtnTxt}>Cancel</Text>
-              </TouchableOpacity>
+                    <Text style={[styles.fieldLabel, { marginTop: SP.px16 }]}>END TIME</Text>
+                    <View style={styles.timeInputRow}>
+                      <TextInput
+                        accessibilityLabel="Shift end time"
+                        style={[input, styles.timeInput]}
+                        value={endTime}
+                        onChangeText={setEndTime}
+                        placeholder="19:00"
+                        placeholderTextColor={P.t3}
+                        keyboardType="numbers-and-punctuation"
+                        maxLength={5}
+                      />
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="Choose shift end time"
+                        style={styles.timePickerButton}
+                        onPress={() => setTimePickerOpen(timePickerOpen === 'end' ? null : 'end')}
+                      >
+                        <Clock size={17} color={P.blue} />
+                        <Text style={styles.timePickerValue}>{endTime}</Text>
+                        <Text style={styles.timePickerHint}>PICK</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {timePickerOpen === 'end' && <TimeWheel value={endTime} onChange={setEndTime} />}
+                  </ScrollView>
+                  <TouchableOpacity style={[btnPrimary, { marginTop: SP.px12 }]} onPress={confirmTime}>
+                    <Text style={{ color: P.white, fontSize: 15, fontWeight: '800' }}>Confirm Shift Time</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.cancelBtn} onPress={() => { setTimeModal(null); setTimePickerOpen(null); }}>
+                    <Text style={styles.cancelBtnTxt}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </KeyboardAvoidingView>
         </Modal>
@@ -755,14 +776,14 @@ function TimeWheel({ value, onChange }) {
 const styles = StyleSheet.create({
   root:          { flex: 1, backgroundColor: P.bg0 },
   content:       { flex: 1, padding: SP.px20 },
-  screenTitle:   { ...FONT.h2, marginBottom: SP.px16 },
+  screenTitle:   { ...FONT.h2, marginBottom: 0 },
   titleRow:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: SP.px8 },
   addScheduleBtn:{ minHeight: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: SP.px10, borderRadius: BR.sm, backgroundColor: P.blue },
   addScheduleTxt:{ color: P.white, fontSize: 11, fontWeight: '800' },
   loadErrorBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: SP.px10, marginBottom: SP.px12, borderRadius: BR.sm, backgroundColor: P.dangerSubtle, borderWidth: 1, borderColor: P.dangerBorder },
   loadErrorText: { flex: 1, color: P.danger, fontSize: 11 },
   retryText: { color: P.info, fontSize: 12, fontWeight: '800', padding: 4 },
-  screenIntro:   { color: P.t3, fontSize: 13, lineHeight: 18, marginTop: -SP.px12, marginBottom: SP.px16 },
+  screenIntro:   { color: P.t3, fontSize: 13, lineHeight: 18, marginTop: SP.px4, marginBottom: SP.px16 },
 
   guardDropdown: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: SP.px12, paddingHorizontal: SP.px12, marginBottom: SP.px16, borderRadius: BR.md, backgroundColor: P.bg1, borderWidth: 1, borderColor: P.b2 },
   guardDropdownIcon:{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: BR.sm, backgroundColor: P.blueSubtle },
@@ -802,7 +823,10 @@ const styles = StyleSheet.create({
   editBtnTxt:    { fontSize: 12, fontWeight: '700' },
 
   modalOverlay:  { flex: 1, backgroundColor: P.overlay, justifyContent: 'flex-end' },
-  modalCard:     { backgroundColor: P.bg2, borderTopLeftRadius: BR.xl, borderTopRightRadius: BR.xl, padding: SP.px24, borderWidth: 1, borderColor: P.b2, ...SH_TOKENS.lg },
+  modalCard:     { position: 'relative', maxHeight: '92%', flexShrink: 1, backgroundColor: P.bg2, borderTopLeftRadius: BR.xl, borderTopRightRadius: BR.xl, padding: SP.px24, borderWidth: 1, borderColor: P.b2, ...SH_TOKENS.lg },
+  timeEditorOverlay: { position: 'absolute', zIndex: 20, elevation: 20, top: 0, left: 0, right: 0, bottom: 0, padding: SP.px24, paddingBottom: SP.px16, backgroundColor: P.bg2, borderTopLeftRadius: BR.xl, borderTopRightRadius: BR.xl },
+  timeInputRow: { flexDirection: 'row', alignItems: 'center', gap: SP.px8 },
+  timeInput: { flex: 0.8, color: P.t1, fontSize: 16, fontWeight: '800', fontFamily: undefined },
   modalHeader:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: SP.px16 },
   modalTitle:    { ...FONT.h3 },
   modalSub:      { color: P.t3, fontSize: 12, marginTop: 3 },

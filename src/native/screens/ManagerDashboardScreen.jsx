@@ -612,7 +612,7 @@ export function ManagerDashboardScreen({ navigation }) {
         <KeyboardAvoidingView
           style={styles.modalOverlay}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 20}
+          keyboardVerticalOffset={0}
         >
           <ScrollView
             style={styles.createGuardSheet}
@@ -716,7 +716,7 @@ export function ManagerDashboardScreen({ navigation }) {
         <KeyboardAvoidingView
           style={styles.modalOverlay}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 20}
+          keyboardVerticalOffset={0}
         >
           <ScrollView
             style={styles.createGuardSheet}
@@ -766,7 +766,7 @@ export function ManagerDashboardScreen({ navigation }) {
         <KeyboardAvoidingView
           style={styles.modalOverlay}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 20}
+          keyboardVerticalOffset={0}
         >
           <ScrollView
             style={styles.createGuardSheet}
@@ -820,8 +820,14 @@ export function ManagerDashboardScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
-      <Modal visible={!!manualGuard} transparent animationType="slide">
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <Modal visible={!!manualGuard} transparent animationType="slide" onRequestClose={() => { setManualGuard(null); setManualNote(''); }}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={0}>
+          <ScrollView
+            contentContainerStyle={styles.keyboardFormContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            showsVerticalScrollIndicator={false}
+          >
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>Manual Log</Text>
             <Text style={styles.modalSub}>
@@ -874,13 +880,23 @@ export function ManagerDashboardScreen({ navigation }) {
               <Text style={styles.cancelBtnTxt}>Cancel</Text>
             </TouchableOpacity>
           </View>
+          </ScrollView>
         </KeyboardAvoidingView>
       </Modal>
 
       {/* Delete Worker Confirmation Modal with Exact Name Typing Validation */}
       <Modal visible={!!deleteWorkerTarget} transparent animationType="fade" onRequestClose={() => setDeleteWorkerTarget(null)}>
-        <View style={[styles.modalOverlay, { paddingHorizontal: S.md }]}>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ width: '100%' }}>
+        <KeyboardAvoidingView
+          style={[styles.modalOverlay, { paddingHorizontal: S.md }]}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
+        >
+          <ScrollView
+            contentContainerStyle={styles.keyboardFormContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            showsVerticalScrollIndicator={false}
+          >
             <View style={styles.deleteWorkerCard}>
               <View style={styles.deleteWorkerHeader}>
                 <View style={styles.deleteWorkerIconWrap}>
@@ -962,8 +978,8 @@ export function ManagerDashboardScreen({ navigation }) {
                 <Text style={styles.cancelBtnTxt}>Cancel & Keep Account</Text>
               </TouchableOpacity>
             </View>
-          </KeyboardAvoidingView>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Enlarged Evidence Photo Modal */}
@@ -1067,6 +1083,7 @@ const styles = StyleSheet.create({
   badge:         { position: 'absolute', top: 0, right: 0, backgroundColor: COLORS.missed, borderRadius: 8, minWidth: 16, height: 16, alignItems: 'center', justifyContent: 'center' },
   badgeText:     { color: COLORS.white, fontSize: 9, fontWeight: '800' },
   modalOverlay:  { flex: 1, backgroundColor: COLORS.bgOverlay, justifyContent: 'flex-end' },
+  keyboardFormContent: { flexGrow: 1, justifyContent: 'center', paddingVertical: S.md },
   modalCard:     { backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderWidth: 1, borderColor: COLORS.borderSubtle, ...shadows.lg },
   createGuardSheet:{ width: '100%', maxHeight: '92%', backgroundColor: COLORS.bgCard, borderTopLeftRadius: R.xxl, borderTopRightRadius: R.xxl, padding: S.xxl, borderTopWidth: 0.5, borderColor: COLORS.borderSubtle },
   guardFieldsRow:{ flexDirection: 'row', gap: S.md, marginBottom: S.md },

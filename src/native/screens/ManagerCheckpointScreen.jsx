@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Modal, TextInput, Alert, Switch,
+  Modal, TextInput, Alert, Switch, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp } from '../../context/AppContext';
 import { Plus, Trash2, X, MapPin, Navigation, Radio, ScanLine } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
@@ -13,6 +14,7 @@ import { readNfcTag } from '../../services/nfc';
 const isPhysicalNfcTag = value => /^[a-f0-9]{8,32}$/i.test(String(value || ''));
 
 export function ManagerCheckpointScreen() {
+  const insets = useSafeAreaInsets();
   const { currentUser, sites, checkpoints, saveCheckpoints, deleteSite } = useApp();
 
   const isAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
@@ -250,8 +252,18 @@ export function ManagerCheckpointScreen() {
         </ScrollView>
 
         {/* Add Checkpoint Modal */}
-        <Modal visible={addModal} transparent animationType="fade">
-          <View style={styles.modalOverlay}>
+        <Modal visible={addModal} transparent animationType="fade" onRequestClose={() => setAddModal(false)}>
+          <KeyboardAvoidingView
+            style={styles.modalOverlay}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
+          >
+            <ScrollView
+              contentContainerStyle={[styles.keyboardModalContent, { paddingBottom: Math.max(insets.bottom, 16) }]}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              showsVerticalScrollIndicator={false}
+            >
             <View style={styles.modalCard}>
               <View style={styles.modalHead}>
                 <Text style={styles.modalTitle}>Add Checkpoint</Text>
@@ -324,7 +336,8 @@ export function ManagerCheckpointScreen() {
                 </Text>
               </TouchableOpacity>
             </View>
-          </View>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </Modal>
       </View>
     </View>
@@ -365,7 +378,8 @@ const styles = StyleSheet.create({
   deleteBtn:      { padding: 6, backgroundColor: P.dangerSubtle, borderRadius: BR.xs },
 
   modalOverlay:   { flex: 1, backgroundColor: P.overlay, justifyContent: 'center', paddingHorizontal: SP.px20 },
-  modalCard:      { backgroundColor: P.bg2, borderRadius: BR.xl, padding: SP.px24, borderWidth: 1, borderColor: P.b2, ...SH_TOKENS.lg },
+  keyboardModalContent: { flexGrow: 1, justifyContent: 'center', paddingVertical: SP.px12 },
+  modalCard:      { width: '100%', backgroundColor: P.bg2, borderRadius: BR.xl, padding: SP.px24, borderWidth: 1, borderColor: P.b2, ...SH_TOKENS.lg },
   modalHead:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SP.px4 },
   modalTitle:     { ...FONT.h3 },
   closeBtn:       { width: 30, height: 30, backgroundColor: P.bg3, borderRadius: 15, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: P.b2 },
