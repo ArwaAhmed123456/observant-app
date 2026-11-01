@@ -1602,7 +1602,7 @@ export function AppProvider({ children }) {
   }, []);
 
   // ─── Patrol: Finish ───────────────────────────────────────────────────────
-  const finishPatrol = useCallback(async (patrolId, forceFinish = false) => {
+  const finishPatrol = useCallback(async (patrolId, forceFinish = false, exceptionDescription = '') => {
     if (API_ENABLED) {
       try {
         const localCaptures = await load(KEYS.PATROL_CAPTURES) || [];
@@ -1631,7 +1631,7 @@ export function AppProvider({ children }) {
             setActivePatrol(latestSaved);
           }
         }
-        const { patrol } = await apiPost(`/api/patrols/${patrolId}/finish`, { forceFinish });
+        const { patrol } = await apiPost(`/api/patrols/${patrolId}/finish`, { forceFinish, managerNote: String(exceptionDescription || '').trim() });
         const saved = normalizePatrol(patrol);
         setPatrolSessions(previous => previous.map(item => item.id === saved.id ? saved : item));
         setActivePatrol(null);
@@ -1647,7 +1647,7 @@ export function AppProvider({ children }) {
             setPatrolCaptures(latest.captures || []);
             setActivePatrol(latest);
           } catch (_) { /* Keep the server's precise missing list if refresh is unavailable. */ }
-          return { incomplete: true, serverAuthoritative: true, missing: error.missingCheckpointIds || [], patrol: latest };
+          return { incomplete: true, serverAuthoritative: true, missing: error.missingCheckpointIds || [], missingNames: error.missingCheckpointNames || [], patrol: latest };
         }
         throw error;
       }
@@ -1657,8 +1657,8 @@ export function AppProvider({ children }) {
     if (!patrol) return;
 
     const rosterCheckpointIds = getTodayRoster(patrol.guardId, patrol.siteId)?.checkpointIds || [];
-    const assignedIds = patrol.assignedCheckpointIds?.length ? patrol.assignedCheckpointIds : rosterCheckpointIds;
-    const siteCheckpoints = checkpoints.filter(cp => cp.siteId === patrol.siteId && (cp.required || cp.nfcRequired) && (!assignedIds.length || assignedIds.includes(cp.id)));
+    const assignedIds = Array.isArray(patrol.assignedCheckpointIds) ? patrol.assignedCheckpointIds : rosterCheckpointIds;
+    const siteCheckpoints = checkpoints.filter(cp => cp.siteId === patrol.siteId && (cp.required || cp.nfcRequired) && (!Array.isArray(assignedIds) || assignedIds.includes(cp.id)));
     const capturesForPatrol = (await load(KEYS.PATROL_CAPTURES) || []).filter(capture => capture.patrolId === patrolId);
     const missing = siteCheckpoints.filter(cp => {
       const capture = capturesForPatrol.find(item => item.checkpointId === cp.id);
@@ -1672,7 +1672,7 @@ export function AppProvider({ children }) {
     const now = new Date().toISOString();
     const updatedPatrols = allPatrols.map(p =>
       p.id === patrolId
-        ? { ...p, finishedAt: now, missingCheckpoints: missing, status: missing.length > 0 ? 'incomplete' : 'complete' }
+          ? { ...p, finishedAt: now, managerNote: missing.length > 0 ? String(exceptionDescription || '').trim() : p.managerNote || null, missingCheckpoints: missing, status: missing.length > 0 ? 'incomplete' : 'complete' }
         : p
     );
     await save(KEYS.PATROL_SESSIONS, updatedPatrols);
@@ -1696,7 +1696,7 @@ export function AppProvider({ children }) {
         type: 'patrol_incomplete',
         guardId: patrol.guardId,
         siteId: patrol.siteId,
-        message: `⚠️ ${guard?.name || 'Guard'} finished patrol at ${site?.name || 'site'} with ${missing.length} checkpoint(s) missing.`,
+        message: `⚠️ ${guard?.name || 'Guard'} finished patrol at ${site?.name || 'site'} with ${missing.length} checkpoint(s) missing. ${String(exceptionDescription || '').trim()}`,
       });
     }
 

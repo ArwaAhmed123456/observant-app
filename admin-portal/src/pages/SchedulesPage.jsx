@@ -42,6 +42,13 @@ function getMonday(d) {
   return `${year}-${month}-${dayNum}`;
 }
 
+function addCalendarMonthMinusDay(date) {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const targetDay = Math.min(date.getDate(), new Date(year, month + 1, 0).getDate());
+  return new Date(year, month, targetDay - 1, 12);
+}
+
 export default function SchedulesPage({ session }) {
   const [weekStartDate, setWeekStartDate] = useState(() => getMonday(new Date()));
   const [rosters, setRosters] = useState([]);
@@ -58,6 +65,7 @@ export default function SchedulesPage({ session }) {
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState('');
   const [durationWeeks, setDurationWeeks] = useState(1);
+  const [customEndDate, setCustomEndDate] = useState('');
 
   // Shift assignment form state
   const [formData, setFormData] = useState({
@@ -118,9 +126,34 @@ export default function SchedulesPage({ session }) {
     setWeekStartDate(getMonday(current));
   };
 
+  const changeAssignmentWeek = (offset) => {
+    const next = new Date(`${weekStartDate}T12:00:00`);
+    next.setDate(next.getDate() + offset * 7);
+    const nextWeek = getMonday(next);
+    setWeekStartDate(nextWeek);
+    const end = new Date(`${customEndDate || weekStartDate}T12:00:00`);
+    end.setDate(end.getDate() + offset * 7);
+    setCustomEndDate(`${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`);
+  };
+
+  const formatDateLabel = value => new Date(`${value}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  const getAssignmentEndDate = () => {
+    const start = new Date(`${weekStartDate}T12:00:00`);
+    const end = durationWeeks === 'month'
+      ? addCalendarMonthMinusDay(start)
+      : durationWeeks === 'custom'
+        ? new Date(`${customEndDate}T12:00:00`)
+      : new Date(start);
+    if (durationWeeks !== 'month' && durationWeeks !== 'custom') end.setDate(end.getDate() + (Number(durationWeeks) * 7) - 1);
+    return `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+  };
+
   const openCreateModal = () => {
     setEditingRoster(null);
     setDurationWeeks(1);
+    const end = new Date(`${weekStartDate}T12:00:00`);
+    end.setDate(end.getDate() + 6);
+    setCustomEndDate(`${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`);
     setFormData({
       guardId: guards[0]?._id || guards[0]?.id || '',
       siteId: sites[0]?._id || sites[0]?.id || '',
@@ -196,20 +229,35 @@ export default function SchedulesPage({ session }) {
         siteId: formData.siteId,
         days: daysPayload,
       };
-      for (let index = 0; index < (editingRoster ? 1 : durationWeeks); index += 1) {
+      const startDate = new Date(`${weekStartDate}T12:00:00`);
+      const endDate = new Date(`${getAssignmentEndDate()}T12:00:00`);
+      if (Number.isNaN(endDate.getTime()) || endDate < startDate) throw new Error('Choose an end date on or after the selected start Monday.');
+      const spanDays = Math.round((endDate - startDate) / 86400000) + 1;
+      const rosterWeeks = editingRoster ? 1 : Math.ceil(spanDays / 7);
+      let publishedWeeks = 0;
+      for (let index = 0; index < rosterWeeks; index += 1) {
         const weekDate = new Date(`${weekStartDate}T12:00:00`);
         weekDate.setDate(weekDate.getDate() + index * 7);
         const targetWeek = `${weekDate.getFullYear()}-${String(weekDate.getMonth() + 1).padStart(2, '0')}-${String(weekDate.getDate()).padStart(2, '0')}`;
+        const weekDaysPayload = Object.fromEntries(Object.entries(daysPayload).filter(([day]) => {
+          const dayIndex = DAYS.indexOf(day);
+          const shiftDate = new Date(weekDate);
+          shiftDate.setDate(shiftDate.getDate() + dayIndex);
+          return shiftDate >= startDate && shiftDate <= endDate;
+        }));
+        if (Object.keys(weekDaysPayload).length === 0) continue;
         const res = await fetch(`${API}/api/rosters`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.accessToken}` },
-          body: JSON.stringify({ ...payload, weekStartDate: targetWeek, recurringWeekly: editingRoster ? undefined : durationWeeks === 1 }),
+          body: JSON.stringify({ ...payload, days: weekDaysPayload, weekStartDate: targetWeek, recurringWeekly: editingRoster ? undefined : durationWeeks === 1 }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `Failed to save roster for ${targetWeek}`);
+        publishedWeeks += 1;
       }
+      if (publishedWeeks === 0) throw new Error('None of the selected working days fall within this date range. Choose different days or a longer range.');
 
-      setSuccessMsg(`Roster published for ${editingRoster ? 1 : durationWeeks} week${(editingRoster ? 1 : durationWeeks) === 1 ? '' : 's'}. Guard acceptance is required.`);
+      setSuccessMsg(`Roster published for ${formatDateLabel(weekStartDate)} to ${formatDateLabel(getAssignmentEndDate())}. Guard acceptance is required.`);
       setShowModal(false);
       fetchData();
       setTimeout(() => setSuccessMsg(''), 4000);
@@ -449,6 +497,17 @@ export default function SchedulesPage({ session }) {
             )}
 
             <form onSubmit={handleSaveRoster} className="mt-4 space-y-4">
+              {!editingRoster && <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <label className="field-label">Start week (Monday–Sunday)</label>
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <button type="button" className="secondary-button px-3" aria-label="Previous week" onClick={() => changeAssignmentWeek(-1)}><Icon name="chevronLeft" /></button>
+                  <div className="text-center">
+                    <div className="text-sm font-bold text-slate-900">{formatDateLabel(weekStartDate)} – {formatDateLabel(getAssignmentEndDate())}</div>
+                    <div className="mt-1 text-xs text-slate-500">{durationWeeks === 'month' ? '1 calendar month' : durationWeeks === 'custom' ? 'Custom date range' : `${durationWeeks} week${durationWeeks === 1 ? '' : 's'}`} · end date included</div>
+                  </div>
+                  <button type="button" className="secondary-button px-3" aria-label="Next week" onClick={() => changeAssignmentWeek(1)}><Icon name="chevronRight" /></button>
+                </div>
+              </div>}
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
                   <label className="field-label">Security Officer *</label>
@@ -488,8 +547,11 @@ export default function SchedulesPage({ session }) {
               {!editingRoster && <div>
                 <label className="field-label">Repeat for consecutive weeks</label>
                 <select className="form-input mt-1" value={durationWeeks} onChange={e => setDurationWeeks(Number(e.target.value))}>
-                  {[1, 2, 3].map(weeks => <option key={weeks} value={weeks}>{weeks} week{weeks > 1 ? 's' : ''}</option>)}
+                  {[1, 2, 3, 4].map(weeks => <option key={weeks} value={weeks}>{weeks} week{weeks > 1 ? 's' : ''}</option>)}
+                  <option value="month">1 calendar month</option>
+                  <option value="custom">Custom end date</option>
                 </select>
+                {durationWeeks === 'custom' && <input type="date" min={weekStartDate} className="form-input mt-2" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} required />}
               </div>}
 
               <div className="grid gap-3 sm:grid-cols-2">

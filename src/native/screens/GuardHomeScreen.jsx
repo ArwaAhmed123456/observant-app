@@ -682,7 +682,7 @@ export function GuardHomeScreen({ navigation }) {
       </Modal>
 
       {/* ── Book Off Confirm ── */}
-      <Modal visible={showBookOff} transparent animationType="slide">
+      <Modal visible={showBookOff} transparent animationType="fade" onRequestClose={() => setShowBookOff(false)}>
         <View style={s.sheetOverlay}>
           <View style={s.sheet}>
             <LinearGradient colors={['#FFFFFF', '#F4F6FA']} style={StyleSheet.absoluteFillObject} />
@@ -972,8 +972,8 @@ const s = StyleSheet.create({
   sosSentResolveTxt:{ color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: 1 },
 
   // Sheet (book-off)
-  sheetOverlay:    { flex: 1, backgroundColor: P.overlay, justifyContent: 'flex-end' },
-  sheet:           { borderTopLeftRadius: BR.xxl, borderTopRightRadius: BR.xxl, padding: SP.px32, borderWidth: 1, borderColor: P.b3, overflow: 'hidden' },
+  sheetOverlay:    { flex: 1, backgroundColor: P.overlay, justifyContent: 'center', alignItems: 'center', padding: SP.px20 },
+  sheet:           { width: '100%', maxWidth: 420, backgroundColor: P.white, borderRadius: BR.xxl, padding: SP.px24, borderWidth: 1, borderColor: P.b2, overflow: 'hidden', ...SH_TOKENS.lg },
   sheetHandle:     { width: 40, height: 4, backgroundColor: P.b3, borderRadius: 2, alignSelf: 'center', marginBottom: SP.px20 },
   sheetTitle:      { fontSize: 20, fontWeight: '800', color: P.t1, marginBottom: SP.px8 },
   sheetSub:        { fontSize: 14, color: P.t3, marginBottom: SP.px24 },

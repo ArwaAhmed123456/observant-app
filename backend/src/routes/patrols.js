@@ -20,7 +20,7 @@
 const router = require('express').Router();
 const { body } = require('express-validator');
 const {
-  PatrolSession, PatrolCheckpoint, RandomPromptLog, ShiftSession, ShiftRoster, User
+  PatrolSession, PatrolCheckpoint, RandomPromptLog, ShiftSession, ShiftRoster, User, Site
 } = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
 const validate     = require('../middleware/validate');
@@ -143,13 +143,7 @@ router.post('/start',
       responded: false, managerAlerted: false, expiresAt: { $gt: new Date() },
     }).sort({ triggeredAt: -1 });
     if (req.body.triggeredByAntiIdle && !activePrompt) return res.status(410).json({ error: 'There is no active surprise patrol response window.' });
-    const roster = await ShiftRoster.findOne({ organisationId: orgId, guardId, siteId: session.siteId, weekStartDate: getMondayOfWeek() }).select('days checkpointIds');
-    const assignedCheckpointIds = roster?.days?.[dayKey()] && roster.checkpointIds?.length ? roster.checkpointIds : [];
-
-    // If already has an in-progress patrol, return it
-    const existing = await PatrolSession.findOne({
-      organisationId: orgId, guardId, status: 'in_progress'
-    });
+    const existing = await PatrolSession.findOne({ organisationId: orgId, guardId, status: 'in_progress' });
     if (existing) {
       if (activePrompt) {
         activePrompt.responded = true;
@@ -159,6 +153,22 @@ router.post('/start',
       }
       return res.json({ patrol: existing, alreadyActive: true });
     }
+
+    const site = await Site.findOne({ _id: session.siteId, organisationId: orgId, active: true }).select('_id name');
+    if (!site) return res.status(409).json({ error: 'This shift has no active assigned site. Ask your manager to assign a site before starting a patrol.', code: 'PATROL_SITE_REQUIRED' });
+    const scheduledDay = dayKey(session.bookedOnAt || new Date());
+    const sessionWeekStart = getMondayOfWeek(session.bookedOnAt || new Date());
+    let roster = await ShiftRoster.findOne({ organisationId: orgId, guardId, siteId: session.siteId, weekStartDate: sessionWeekStart }).select('days checkpointIds');
+    if (!roster) roster = await ShiftRoster.findOne({ organisationId: orgId, guardId, siteId: session.siteId, recurringWeekly: true, weekStartDate: { $lt: sessionWeekStart } }).sort({ weekStartDate: -1 }).select('days checkpointIds');
+    if (!roster?.days?.[scheduledDay]) return res.status(409).json({ error: 'No patrol shift is assigned at this site for this duty period. Ask your manager to correct the rota.', code: 'PATROL_ROSTER_REQUIRED' });
+    const configuredIds = roster.checkpointIds?.length ? roster.checkpointIds : null;
+    const assignedCheckpoints = await PatrolCheckpoint.find({
+      organisationId: orgId, siteId: session.siteId, active: true,
+      ...(configuredIds ? { _id: { $in: configuredIds } } : {}),
+      $or: [{ required: true }, { nfcRequired: true }],
+    }).select('_id');
+    if (!assignedCheckpoints.length) return res.status(409).json({ error: 'No required patrol checkpoints are configured for this site and shift. Ask your manager to assign photo or NFC checkpoints.', code: 'PATROL_CHECKPOINTS_REQUIRED' });
+    const assignedCheckpointIds = assignedCheckpoints.map(checkpoint => checkpoint._id);
 
     const latest = await PatrolSession.findOne({ organisationId: orgId, guardId, status: { $in: ['complete', 'incomplete'] } }).sort({ finishedAt: -1 });
     if (latest?.finishedAt && Date.now() - new Date(latest.finishedAt).getTime() < 60 * 60 * 1000 && !activePrompt) {
@@ -258,7 +268,7 @@ router.post('/:id/capture',
 // ── Finish patrol ─────────────────────────────────────────────────────────────
 router.post('/:id/finish',
   authenticate, requireRole('guard'),
-  [body('forceFinish').optional().isBoolean()],
+  [body('forceFinish').optional().isBoolean(), body('managerNote').optional().isString().isLength({ max: 500 })],
   asyncHandler(async (req, res) => {
     const orgId   = req.user.organisationId;
     const guardId = req.user._id;
@@ -274,9 +284,9 @@ router.post('/:id/finish',
       organisationId: orgId,
       siteId: patrol.siteId,
       active: true,
-      ...(patrol.assignedCheckpointIds?.length ? { _id: { $in: patrol.assignedCheckpointIds } } : {}),
+      _id: { $in: patrol.assignedCheckpointIds || [] },
       $or: [{ required: true }, { nfcRequired: true }],
-    }).select('_id required nfcRequired');
+    }).select('_id name required nfcRequired');
 
     const missingIds   = required.filter(cp => {
       const cpIdStr = String(cp._id);
@@ -290,9 +300,13 @@ router.post('/:id/finish',
       return res.status(422).json({
         incomplete: true,
         missingCheckpointIds: missingIds,
+        missingCheckpointNames: required.filter(checkpoint => missingIds.includes(String(checkpoint._id))).map(checkpoint => checkpoint.name),
         message: `${missingIds.length} required checkpoint(s) are missing photo or NFC verification.`,
       });
     }
+    const managerNote = String(req.body.managerNote || '').trim();
+    if (managerNote.length > 500) return res.status(400).json({ error: 'The exception description must be 500 characters or fewer.' });
+    if (missingIds.length > 0 && managerNote.length < 5) return res.status(400).json({ error: 'Describe why checkpoint evidence is missing (at least 5 characters).', code: 'EXCEPTION_DESCRIPTION_REQUIRED' });
 
     const latest = await PatrolSession.findOne({ organisationId: orgId, guardId, _id: { $ne: patrol._id }, status: { $in: ['complete', 'incomplete'] } }).sort({ finishedAt: -1 });
     if (latest?.finishedAt && Date.now() - new Date(latest.finishedAt).getTime() < 30 * 60 * 1000 && !patrol.triggeredByAntiIdle) {
@@ -305,6 +319,7 @@ router.post('/:id/finish',
     patrol.finishedAt           = now;
     patrol.status               = status;
     patrol.missingCheckpointIds = missingIds;
+    if (missingIds.length > 0) patrol.managerNote = managerNote;
     await patrol.save();
 
     // Update session patrol counter
@@ -323,7 +338,7 @@ router.post('/:id/finish',
         type: status === 'incomplete' ? 'patrol_missing_checkpoints' : 'patrol_complete',
         title: status === 'incomplete' ? '⚠️ Patrol finished with missing checkpoints' : 'Patrol completed',
         message: status === 'incomplete'
-          ? `${guard?.name || 'Guard'} finished a patrol with ${missingIds.length} checkpoint(s) missing.`
+          ? `${guard?.name || 'Guard'} finished a patrol with ${missingIds.length} checkpoint(s) missing. Reason: ${managerNote}`
           : `${guard?.name || 'Guard'} completed all required patrol checkpoints.`,
         photoUrls: evidencePhotos,
         refModel: 'PatrolSession',

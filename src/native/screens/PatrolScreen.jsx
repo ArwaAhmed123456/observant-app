@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Image, Modal, ActivityIndicator, Alert,
+  Image, Modal, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -33,6 +33,7 @@ export function PatrolScreen() {
   const [starting, setStarting] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [incompleteModal, setIncompleteModal] = useState(null);
+  const [exceptionDescription, setExceptionDescription] = useState('');
   const [workingCheckpoint, setWorkingCheckpoint] = useState(null);
   const [now, setNow] = useState(Date.now());
 
@@ -44,13 +45,14 @@ export function PatrolScreen() {
   const activeSession = getGuardActiveSession(currentUser.id);
   const patrolSiteId = activeSession?.siteId || currentUser.siteId;
   const site = sites.find(item => String(item.id || item._id) === String(patrolSiteId));
-  const assignedIds = activePatrol?.assignedCheckpointIds?.length
-    ? activePatrol.assignedCheckpointIds
-    : getTodayRoster(currentUser.id, patrolSiteId)?.checkpointIds || [];
+  const assignedIds = activePatrol
+    ? (activePatrol.assignedCheckpointIds || [])
+    : (getTodayRoster(currentUser.id, patrolSiteId)?.checkpointIds || []);
   const siteCheckpoints = getSiteCheckpoints(patrolSiteId);
   const checkpoints = assignedIds.length
     ? siteCheckpoints.filter(checkpoint => assignedIds.includes(checkpoint.id))
-    : siteCheckpoints;
+    : activePatrol ? [] : siteCheckpoints;
+  const requiredCheckpointCount = checkpoints.filter(checkpoint => checkpoint.required || checkpoint.nfcRequired).length;
   const todayPatrols = getTodayPatrols(currentUser.id);
   const savedCaptures = activePatrol ? getPatrolCaptures(activePatrol.id) : [];
   const captures = savedCaptures.length ? savedCaptures : activePatrol?.captures || [];
@@ -72,6 +74,14 @@ export function PatrolScreen() {
   const handleStartPatrol = async () => {
     if (!activeSession) {
       Alert.alert('Book on required', 'Book on before starting a site patrol.');
+      return;
+    }
+    if (!site) {
+      Alert.alert('Site assignment required', 'Your active shift has no active site assigned. Ask your manager to assign a site before starting a patrol.');
+      return;
+    }
+    if (!requiredCheckpointCount) {
+      Alert.alert('No patrol checkpoints assigned', 'Ask your manager to assign at least one photo or NFC checkpoint to this site and shift before starting a patrol.');
       return;
     }
     setStarting(true);
@@ -141,21 +151,12 @@ export function PatrolScreen() {
           return !(photoDone && nfcDone);
         });
 
-        if (reallyMissing.length === 0) {
-          // All required captures were taken! Auto-finish so guard is not blocked by server sync timing
-          const forcedResult = await finishPatrol(activePatrol.id, true);
-          if (forcedResult?.patrol?.status === 'incomplete') {
-            Alert.alert('Patrol submitted with exceptions', 'The server still records missing checkpoint evidence. Your manager has been notified.');
-          } else {
-            Alert.alert('Patrol complete', 'All manager-required checkpoint evidence has been recorded. Your next surprise check may arrive at any time.');
-          }
-          return;
-        }
-
-        const missingNames = reallyMissing
-          .map(id => checkpoints.find(checkpoint => checkpoint.id === id)?.name || id)
-          .join(', ');
-        setIncompleteModal({ patrolId: activePatrol.id, missing: reallyMissing, missingNames });
+        const serverNames = new Map((result.missing || []).map((id, index) => [String(id), result.missingNames?.[index]]));
+        const missingNames = reallyMissing.length
+          ? reallyMissing.map(id => checkpoints.find(checkpoint => checkpoint.id === id)?.name || serverNames.get(String(id)) || 'Assigned checkpoint').join(', ')
+          : result.missingNames?.join(', ') || 'The server could not verify one or more checkpoint records.';
+        setExceptionDescription('');
+        setIncompleteModal({ patrolId: activePatrol.id, missing: reallyMissing.length ? reallyMissing : result.missing || [], missingNames });
       } else {
         Alert.alert('Patrol complete', 'All manager-required checkpoint evidence has been recorded. Your next surprise check may arrive at any time.');
       }
@@ -165,10 +166,16 @@ export function PatrolScreen() {
   };
 
   const handleForceFinish = async () => {
+    const description = exceptionDescription.trim();
+    if (description.length < 5) {
+      Alert.alert('Description required', 'Explain why the required checkpoint evidence is missing (at least 5 characters).');
+      return;
+    }
     setIncompleteModal(null);
     setFinishing(true);
     try {
-      await finishPatrol(incompleteModal.patrolId, true);
+      await finishPatrol(incompleteModal.patrolId, true, description);
+      setExceptionDescription('');
       Alert.alert('Patrol submitted with exceptions', 'Your manager has been notified that required evidence is missing.');
     } catch (error) {
       Alert.alert('Could not finish patrol', error.message || 'Check your connection and try again.');
@@ -193,10 +200,10 @@ export function PatrolScreen() {
           </View>
         </View>
 
-        {!activeSession && (
+        {(!activeSession || !site) && (
           <View style={styles.warnCard}>
             <AlertTriangle color={P.warn} size={18} />
-            <Text style={styles.warnTxt}>Book on to your shift before starting a patrol.</Text>
+            <Text style={styles.warnTxt}>{!activeSession ? 'Book on to your shift before starting a patrol.' : 'Your active shift has no active site assignment. Ask your manager to assign a site.'}</Text>
           </View>
         )}
 
@@ -242,7 +249,7 @@ export function PatrolScreen() {
               <Text style={styles.taskSectionHint}>Evidence is checked before completion</Text>
             </View>
             {checkpoints.length === 0 ? (
-              <View style={styles.noTasks}><ShieldCheck color={P.gold} size={22} /><Text style={styles.noTasksTitle}>No checkpoints assigned</Text><Text style={styles.noTasksText}>Ask your manager to add required patrol checkpoints to your shift.</Text></View>
+              <View style={styles.noTasks}><ShieldCheck color={P.gold} size={22} /><Text style={styles.noTasksTitle}>No checkpoints assigned to this patrol</Text><Text style={styles.noTasksText}>This patrol has no assigned evidence tasks. New patrols are blocked until a site and required checkpoints are assigned.</Text></View>
             ) : checkpoints.map((checkpoint, index) => {
               const capture = captures.find(item => item.checkpointId === checkpoint.id);
               const photoDone = !checkpoint.required || Boolean(capture?.photoUri);
@@ -285,6 +292,11 @@ export function PatrolScreen() {
               {finishing ? <ActivityIndicator color={P.white} /> : <><Square color={P.white} size={16} /><Text style={styles.finishBtnTxt}>Finish patrol</Text></>}
             </TouchableOpacity>
           </View>
+        ) : !activePatrol && activeSession && (!site || requiredCheckpointCount === 0) ? (
+          <View style={styles.warnCard}>
+            <AlertTriangle color={P.warn} size={18} />
+            <Text style={styles.warnTxt}>{!site ? 'No active site is assigned to this shift. Ask your manager to fix the site assignment.' : 'No required photo or NFC checkpoints are assigned. Ask your manager to configure the patrol route first.'}</Text>
+          </View>
         ) : !activePatrol && activeSession ? (
           <View style={styles.startPanel}>
             <View style={styles.startGlow} />
@@ -318,15 +330,27 @@ export function PatrolScreen() {
       </ScrollView>
 
       <Modal visible={!!incompleteModal} transparent animationType="fade" onRequestClose={() => setIncompleteModal(null)}>
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalCard}>
             <View style={styles.modalIconCircle}><AlertTriangle color={P.warn} size={26} /></View>
             <Text style={styles.modalTitle}>Required evidence missing</Text>
-            <Text style={styles.modalSub}>These manager-required checkpoints still need proof:{'\n\n'}<Text style={{ color: P.warn, fontWeight: '700' }}>{incompleteModal?.missingNames}</Text>{'\n\n'}Finishing anyway sends an exception alert to your manager.</Text>
+            <Text style={styles.modalSub}>These manager-required checkpoints still need proof:{'\n\n'}<Text style={{ color: P.warn, fontWeight: '700' }}>{incompleteModal?.missingNames}</Text>{'\n\n'}Explain why evidence is missing. This note will be included in the manager alert.</Text>
+            <TextInput
+              style={styles.exceptionInput}
+              value={exceptionDescription}
+              onChangeText={setExceptionDescription}
+              placeholder="Describe the issue (required)"
+              placeholderTextColor={P.t3}
+              multiline
+              maxLength={500}
+              textAlignVertical="top"
+              returnKeyType="default"
+            />
+            <Text style={styles.exceptionCounter}>{exceptionDescription.trim().length}/500 · minimum 5 characters</Text>
             <TouchableOpacity style={[btnGold, styles.modalButton]} onPress={handleForceFinish} disabled={finishing}><Text style={styles.modalForceTxt}>{finishing ? 'Submitting…' : 'Finish with exception'}</Text></TouchableOpacity>
             <TouchableOpacity style={styles.modalBack} onPress={() => setIncompleteModal(null)}><Text style={styles.modalBackTxt}>Return to checkpoints</Text></TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -422,4 +446,6 @@ const styles = StyleSheet.create({
   modalForceTxt: { color: P.white, fontSize: 14, fontWeight: '800' },
   modalBack: { width: '100%', backgroundColor: P.bg3, borderRadius: BR.md, paddingVertical: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: P.b2 },
   modalBackTxt: { color: P.t2, fontSize: 14, fontWeight: '600' },
+  exceptionInput: { width: '100%', minHeight: 86, borderWidth: 1, borderColor: P.b2, borderRadius: BR.md, backgroundColor: P.white, padding: 12, color: P.t1, fontSize: 13, marginBottom: 5 },
+  exceptionCounter: { alignSelf: 'flex-end', color: P.t3, fontSize: 10, marginBottom: SP.px12 },
 });

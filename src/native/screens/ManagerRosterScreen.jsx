@@ -21,6 +21,13 @@ function addDays(date, n) {
   return d;
 }
 
+function addOneCalendarMonthMinusDay(date) {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const targetDay = Math.min(date.getDate(), new Date(year, month + 1, 0).getDate());
+  return new Date(year, month, targetDay - 1, 12);
+}
+
 function toWeekKey(date) {
   const d = new Date(date);
   const year = d.getFullYear();
@@ -74,6 +81,7 @@ export function ManagerRosterScreen() {
   } = useApp();
 
   const [weekStart, setWeekStart]         = useState(getUKMondayDate(new Date()));
+  const [assignmentWeekStart, setAssignmentWeekStart] = useState(getUKMondayDate(new Date()));
   const [selectedGuard, setSelectedGuard] = useState(null);
   const [selectedRosterSiteId, setSelectedRosterSiteId] = useState('');
   const [editDays, setEditDays]           = useState({ ...DEFAULT_DAYS });
@@ -91,6 +99,8 @@ export function ManagerRosterScreen() {
   const [checkCallInterval, setCheckCallInterval] = useState(60);
   const [recurringWeekly, setRecurringWeekly] = useState(true);
   const [durationWeeks, setDurationWeeks] = useState(1);
+  const [durationPreset, setDurationPreset] = useState('1-week');
+  const [customEndDate, setCustomEndDate] = useState('');
   const [shiftInstructions, setShiftInstructions] = useState('');
   const [siteDrafts, setSiteDrafts] = useState({});
   const [scheduleDataError, setScheduleDataError] = useState('');
@@ -131,6 +141,9 @@ export function ManagerRosterScreen() {
 
   const openEditForGuard = (guard) => {
     setDurationWeeks(1);
+    setDurationPreset('1-week');
+    setAssignmentWeekStart(new Date(weekStart));
+    setCustomEndDate(toWeekKey(addDays(new Date(weekStart), 6)));
     setSelectedGuard(guard);
     const gId = guard.id || guard._id;
     const existingRosters = getWeekRosters(weekKey).filter(roster => String(roster.guardId?._id || roster.guardId?.id || roster.guardId || '') === String(gId));
@@ -204,7 +217,8 @@ export function ManagerRosterScreen() {
       },
     };
     const assignedIds = guardSiteIds(selectedGuard);
-    const existingSiteIds = new Set(getWeekRosters(weekKey)
+    const assignmentStartKey = toWeekKey(assignmentWeekStart);
+    const existingSiteIds = new Set(getWeekRosters(assignmentStartKey)
       .filter(roster => String(roster.guardId?._id || roster.guardId?.id || roster.guardId || '') === String(selectedGuard.id || selectedGuard._id))
       .map(roster => String(roster.siteId?._id || roster.siteId?.id || roster.siteId || '')));
     const scheduledSites = assignedIds.map(siteId => ({ siteId, ...(drafts[siteId] || {}) }))
@@ -212,12 +226,27 @@ export function ManagerRosterScreen() {
         DAY_KEYS.some(key => draft.days[key]) || draft.siteId === selectedRosterSiteId || existingSiteIds.has(draft.siteId)
       ));
     if (!scheduledSites.length) return Alert.alert('Add a shift first', 'Choose at least one working day for an assigned site.');
-    const targetWeeks = Array.from({ length: durationWeeks }, (_, index) => toWeekKey(addDays(weekStart, index * 7)));
-    for (const targetWeek of targetWeeks) {
+    const rangeEnd = durationPreset === '1-month'
+      ? addOneCalendarMonthMinusDay(assignmentWeekStart)
+      : durationPreset === 'custom'
+        ? new Date(`${customEndDate}T12:00:00`)
+        : addDays(assignmentWeekStart, durationWeeks * 7 - 1);
+    if (Number.isNaN(rangeEnd.getTime()) || rangeEnd < assignmentWeekStart) {
+      return Alert.alert('Invalid date range', 'Choose an end date on or after the selected start Monday.');
+    }
+    const rangeDays = Math.round((rangeEnd - assignmentWeekStart) / 86400000) + 1;
+    const weekCount = Math.ceil(rangeDays / 7);
+    const targetWeeks = Array.from({ length: weekCount }, (_, index) => toWeekKey(addDays(assignmentWeekStart, index * 7)));
+    const daysForWeek = (days, weekStart) => Object.fromEntries(DAY_KEYS.map((key, index) => {
+      const date = addDays(weekStart, index);
+      return [key, date >= assignmentWeekStart && date <= rangeEnd ? days[key] : null];
+    }));
+      for (const targetWeek of targetWeeks) {
+        const targetDate = new Date(`${targetWeek}T12:00:00`);
       const plannedBySite = new Map(getWeekRosters(targetWeek)
         .filter(roster => String(roster.guardId?._id || roster.guardId?.id || roster.guardId || '') === String(selectedGuard.id || selectedGuard._id))
         .map(roster => [String(roster.siteId?._id || roster.siteId?.id || roster.siteId || ''), roster.days || {}]));
-      scheduledSites.forEach(draft => plannedBySite.set(draft.siteId, draft.days));
+      scheduledSites.forEach(draft => plannedBySite.set(draft.siteId, daysForWeek(draft.days, targetDate)));
       const planned = [...plannedBySite.entries()];
       for (let i = 0; i < planned.length; i += 1) {
         for (let j = i + 1; j < planned.length; j += 1) {
@@ -236,11 +265,13 @@ export function ManagerRosterScreen() {
       const savedRosters = [];
       for (const targetWeek of targetWeeks) {
         for (const draft of scheduledSites) {
+          const weekDays = daysForWeek(draft.days, new Date(`${targetWeek}T12:00:00`));
+          if (!DAY_KEYS.some(key => weekDays[key])) continue;
           savedRosters.push(await publishRoster({
             guardId, siteId: draft.siteId, weekStartDate: targetWeek,
-            days: draft.days, checkpointIds: draft.checkpointIds || [],
+            days: weekDays, checkpointIds: draft.checkpointIds || [],
             checkCallInterval: draft.checkCallInterval || 60,
-            recurringWeekly: durationWeeks === 1 ? (draft.recurringWeekly ?? true) : false,
+            recurringWeekly: durationPreset === '1-week' ? (draft.recurringWeekly ?? true) : false,
             shiftInstructions: String(draft.shiftInstructions || '').trim(),
             publishedBy: currentUser.id || currentUser._id,
             publishedAt: new Date().toISOString(),
@@ -260,7 +291,7 @@ export function ManagerRosterScreen() {
         : notified
           ? `${selectedGuard.name} was notified. The shifts are awaiting guard acceptance.`
           : `Schedules saved, but no push was sent because the guard has no registered device.`;
-      Alert.alert('Rota published', `${notification} ${durationWeeks > 1 ? `for ${durationWeeks} weeks (${targetWeeks[0]} to ${targetWeeks[targetWeeks.length - 1]}).` : ''}\n\n${siteNames}`);
+      Alert.alert('Rota published', `${notification} ${durationPreset !== '1-week' ? `for ${durationPreset === '1-month' ? '1 calendar month' : `${durationWeeks} weeks`} (${formatDate(assignmentWeekStart)} to ${formatDate(rangeEnd)}).` : ''}\n\n${siteNames}`);
     } catch (error) {
       Alert.alert('Could not publish rota', error.message || 'Check your connection and try again.');
     } finally {
@@ -428,7 +459,7 @@ export function ManagerRosterScreen() {
               <View style={styles.modalHeader}>
                 <View>
                   <Text style={styles.modalTitle}>{selectedGuard?.name}</Text>
-                  <Text style={styles.modalSub}>{formatDate(weekStart)} – {formatDate(addDays(weekStart, 6))}</Text>
+                  <Text style={styles.modalSub}>{formatDate(assignmentWeekStart)} – {formatDate(durationPreset === '1-month' ? addOneCalendarMonthMinusDay(assignmentWeekStart) : durationPreset === 'custom' ? new Date(`${customEndDate}T12:00:00`) : addDays(assignmentWeekStart, durationWeeks * 7 - 1))}</Text>
                 </View>
                 <TouchableOpacity onPress={() => setEditModalVisible(false)} style={styles.closeBtn}>
                   <Text style={styles.closeBtnTxt}>✕</Text>
@@ -470,20 +501,35 @@ export function ManagerRosterScreen() {
               </View>
               {guardSiteIds(selectedGuard || {}).length > 1 && (
                 <Text style={[styles.emptyHint, { marginTop: -6, marginBottom: 10 }]}>
-                  Set different shifts for each site. Saving publishes every assigned site that has working days.
+                  Configure days and times separately for each site. Each site tab keeps its own draft; saving publishes the selected date range for every site with shifts.
                 </Text>
               )}
+              {!!selectedRosterSiteId && <Text style={[styles.fieldLabel, { marginBottom: 7 }]}>SHIFTS FOR {sites.find(site => String(site.id || site._id) === selectedRosterSiteId)?.name || 'SELECTED SITE'}</Text>}
+
+              <Text style={styles.fieldLabel}>CHOOSE THE START WEEK</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                <TouchableOpacity style={styles.navBtn} accessibilityLabel="Previous start week" onPress={() => { setAssignmentWeekStart(value => addDays(value, -7)); setCustomEndDate(value => { const d = new Date(`${value}T12:00:00`); return toWeekKey(addDays(d, -7)); }); }}><ChevronLeft color={P.t2} size={18} /></TouchableOpacity>
+                <View style={{ flex: 1, alignItems: 'center' }}>
+                  <Text style={{ color: P.t1, fontWeight: '800', fontSize: 13 }}>{formatDate(assignmentWeekStart)} – {formatDate(addDays(assignmentWeekStart, 6))}</Text>
+                  <Text style={{ color: P.t3, fontSize: 10, marginTop: 3 }}>Monday to Sunday · use arrows to choose the dates</Text>
+                </View>
+                <TouchableOpacity style={styles.navBtn} accessibilityLabel="Next start week" onPress={() => { setAssignmentWeekStart(value => addDays(value, 7)); setCustomEndDate(value => { const d = new Date(`${value}T12:00:00`); return toWeekKey(addDays(d, 7)); }); }}><ChevronRight color={P.t2} size={18} /></TouchableOpacity>
+              </View>
 
               <Text style={styles.fieldLabel}>ASSIGN FOR</Text>
               <View style={styles.daySelector}>
-                {[1, 2, 3].map(weeks => <TouchableOpacity key={weeks} style={[styles.daySelectorPill, durationWeeks === weeks && styles.daySelectorPillActive]} onPress={() => setDurationWeeks(weeks)}><Text style={[styles.daySelectorText, durationWeeks === weeks && styles.daySelectorTextActive]}>{weeks} week{weeks > 1 ? 's' : ''}</Text></TouchableOpacity>)}
+                {[1, 2, 3, 4].map(weeks => <TouchableOpacity key={weeks} style={[styles.daySelectorPill, durationPreset === `${weeks}-week` && styles.daySelectorPillActive]} onPress={() => { setDurationWeeks(weeks); setDurationPreset(`${weeks}-week`); }}><Text style={[styles.daySelectorText, durationPreset === `${weeks}-week` && styles.daySelectorTextActive]}>{weeks} week{weeks > 1 ? 's' : ''}</Text></TouchableOpacity>)}
+                <TouchableOpacity style={[styles.daySelectorPill, durationPreset === '1-month' && styles.daySelectorPillActive]} onPress={() => setDurationPreset('1-month')}><Text style={[styles.daySelectorText, durationPreset === '1-month' && styles.daySelectorTextActive]}>1 calendar month</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.daySelectorPill, durationPreset === 'custom' && styles.daySelectorPillActive]} onPress={() => setDurationPreset('custom')}><Text style={[styles.daySelectorText, durationPreset === 'custom' && styles.daySelectorTextActive]}>Custom end date</Text></TouchableOpacity>
               </View>
+              {durationPreset === 'custom' && <TextInput value={customEndDate} onChangeText={setCustomEndDate} placeholder="End date · YYYY-MM-DD" keyboardType="numbers-and-punctuation" autoCapitalize="none" style={styles.input} />}
+              <Text style={[styles.emptyHint, { marginTop: -6, marginBottom: 8 }]}>This assignment covers {formatDate(assignmentWeekStart)} through {formatDate(durationPreset === '1-month' ? addOneCalendarMonthMinusDay(assignmentWeekStart) : durationPreset === 'custom' ? new Date(`${customEndDate}T12:00:00`) : addDays(assignmentWeekStart, durationWeeks * 7 - 1))} ({durationPreset === '1-month' ? '1 calendar month' : durationPreset === 'custom' ? 'custom date range' : `${durationWeeks} week${durationWeeks > 1 ? 's' : ''}`} inclusive).</Text>
 
               <Text style={styles.fieldLabel}>SELECT WORKING DAYS</Text>
               <View style={styles.daySelector}>
                 {DAY_KEYS.map((key, index) => (
                   <TouchableOpacity key={key} style={[styles.daySelectorPill, editDays[key] && styles.daySelectorPillActive]} onPress={() => toggleDay(key)}>
-                    <Text style={[styles.daySelectorText, editDays[key] && styles.daySelectorTextActive]}>{DAY_LABELS[index]}</Text>
+                    <Text style={[styles.daySelectorText, editDays[key] && styles.daySelectorTextActive]}>{DAY_LABELS[index]} {addDays(assignmentWeekStart, index).getDate()}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
