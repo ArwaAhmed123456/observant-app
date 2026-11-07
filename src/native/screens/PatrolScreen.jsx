@@ -49,9 +49,12 @@ export function PatrolScreen() {
     ? (activePatrol.assignedCheckpointIds || [])
     : (getTodayRoster(currentUser.id, patrolSiteId)?.checkpointIds || []);
   const siteCheckpoints = getSiteCheckpoints(patrolSiteId);
+  // If patrol is active but has no assignedCheckpointIds (e.g. started before
+  // checkpoints were configured, or client-side optimistic fallback), show all
+  // required site checkpoints so the guard can still capture evidence.
   const checkpoints = assignedIds.length
     ? siteCheckpoints.filter(checkpoint => assignedIds.includes(checkpoint.id))
-    : activePatrol ? [] : siteCheckpoints;
+    : siteCheckpoints.filter(cp => cp.required || cp.nfcRequired);
   const requiredCheckpointCount = checkpoints.filter(checkpoint => checkpoint.required || checkpoint.nfcRequired).length;
   const todayPatrols = getTodayPatrols(currentUser.id);
   const savedCaptures = activePatrol ? getPatrolCaptures(activePatrol.id) : [];

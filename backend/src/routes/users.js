@@ -263,6 +263,11 @@ router.delete('/users/:id',
     }
     await ShiftRoster.deleteMany({ organisationId: req.user.organisationId, guardId: user._id });
     await Alert.deleteMany({ organisationId: req.user.organisationId, guardId: user._id });
+    // Close any open shift sessions so the guard stops generating alerts
+    await require('../models').ShiftSession.updateMany(
+      { organisationId: req.user.organisationId, guardId: user._id, bookedOffAt: null },
+      { bookedOffAt: new Date(), autoClosedOnDelete: true }
+    );
     await User.deleteOne({ _id: user._id });
     await audit({ req, action: isSelf ? 'account_self_deleted' : 'account_deleted', targetModel: 'User', targetId: user._id, targetName: user.name });
     res.json({ message: 'User account permanently deleted' });
