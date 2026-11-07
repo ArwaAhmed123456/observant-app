@@ -17,7 +17,7 @@
  */
 const router = require('express').Router();
 const { body, param } = require('express-validator');
-const { User, Site, ShiftRoster }  = require('../models');
+const { User, Site, ShiftRoster, Alert }  = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
 const validate      = require('../middleware/validate');
 const asyncHandler  = require('../utils/asyncHandler');
@@ -262,6 +262,7 @@ router.delete('/users/:id',
       return res.status(403).json({ error: 'Managers cannot delete administrator accounts.' });
     }
     await ShiftRoster.deleteMany({ organisationId: req.user.organisationId, guardId: user._id });
+    await Alert.deleteMany({ organisationId: req.user.organisationId, guardId: user._id });
     await User.deleteOne({ _id: user._id });
     await audit({ req, action: isSelf ? 'account_self_deleted' : 'account_deleted', targetModel: 'User', targetId: user._id, targetName: user.name });
     res.json({ message: 'User account permanently deleted' });
