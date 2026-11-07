@@ -55,7 +55,11 @@ export function PatrolScreen() {
   const checkpoints = assignedIds.length
     ? siteCheckpoints.filter(checkpoint => assignedIds.includes(checkpoint.id))
     : siteCheckpoints.filter(cp => cp.required || cp.nfcRequired);
-  const requiredCheckpointCount = checkpoints.filter(checkpoint => checkpoint.required || checkpoint.nfcRequired).length;
+  // Count required checkpoints — fall back to total site required checkpoints
+  // so the start-patrol guard check doesn't wrongly block when assignedIds is empty
+  const requiredCheckpointCount = checkpoints.length > 0
+    ? checkpoints.filter(cp => cp.required || cp.nfcRequired).length
+    : siteCheckpoints.filter(cp => cp.required || cp.nfcRequired).length;
   const todayPatrols = getTodayPatrols(currentUser.id);
   const savedCaptures = activePatrol ? getPatrolCaptures(activePatrol.id) : [];
   const captures = savedCaptures.length ? savedCaptures : activePatrol?.captures || [];

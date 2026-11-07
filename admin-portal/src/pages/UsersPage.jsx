@@ -58,7 +58,7 @@ export default function UsersPage({ session, onNavigate }) {
     setError('');
     try {
       const [usersRes, sitesRes] = await Promise.all([
-        fetch(`${API}/api/users?active=all`, {
+        fetch(`${API}/api/users`, {
           headers: { Authorization: `Bearer ${session.accessToken}`, Accept: 'application/json' },
         }),
         fetch(`${API}/api/sites`, {

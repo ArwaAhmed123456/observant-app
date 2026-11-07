@@ -195,13 +195,20 @@ export function AppProvider({ children }) {
     if (!API_ENABLED || !currentUser) return undefined;
     const refreshOperations = async () => {
       try {
-        const [shifts, calls, patrols, alerts, prompts, rostersResult] = await Promise.all([
+        const [shifts, calls, patrols, alerts, prompts, rostersResult, checkpointsResult] = await Promise.all([
           apiGet('/api/shifts?limit=100'),
           apiGet('/api/check-calls?limit=100'),
           apiGet('/api/patrols?limit=100'),
           currentUser.role === 'guard' ? Promise.resolve({ alerts: [] }) : apiGet('/api/alerts?limit=100'),
           apiGet('/api/patrols/random-prompt?limit=100'),
           apiGet('/api/rosters'),
+          // Refresh checkpoints so guards see newly-assigned checkpoints without re-logging in
+          (async () => {
+            const sitesRes = await apiGet('/api/sites');
+            const siteList = sitesRes.sites || [];
+            const cpBySite = await Promise.all(siteList.map(site => apiGet(`/api/patrols/checkpoints?siteId=${encodeURIComponent(site._id || site.id)}`)));
+            return { checkpoints: cpBySite.flatMap(r => (r.checkpoints || []).map(normalizeCheckpoint)) };
+          })(),
         ]);
         setShiftSessions((shifts.sessions || []).map(normalizeSession));
         const activeShift = (shifts.sessions || []).find(session => idOf(session.guardId) === currentUser.id && !session.bookedOffAt);
@@ -219,6 +226,7 @@ export function AppProvider({ children }) {
           setActivePatrol({ ...normalizePatrol(detail.patrol), resumedFromServer: true });
         }
         setAlerts((alerts.alerts || []).map(alert => ({ ...normalizeAlert(alert), read: !!alert.isRead })));
+        if (checkpointsResult.checkpoints?.length) setCheckpoints(checkpointsResult.checkpoints);
         const promptList = prompts.logs || [];
         setRandomPromptLogs(promptList.map(prompt => ({ ...prompt, id: idOf(prompt), guardId: idOf(prompt.guardId), sessionId: idOf(prompt.shiftSessionId) })));
         if (currentUser.role === 'guard') setAntiIdlePrompt(promptList.some(prompt =>
@@ -2000,7 +2008,11 @@ export function AppProvider({ children }) {
   }, [alerts, users]);
 
   const getSiteCheckpoints = useCallback((siteId) =>
-    checkpoints.filter(cp => String(cp.siteId?._id || cp.siteId?.id || cp.siteId || '') === String(siteId || '')).sort((a, b) => a.order - b.order),
+    checkpoints.filter(cp => {
+      const cpSiteId = String(cp.siteId?._id || cp.siteId?.id || cp.siteId || '');
+      const targetId = String(siteId?._id || siteId?.id || siteId || '');
+      return cpSiteId && targetId && cpSiteId === targetId;
+    }).sort((a, b) => a.order - b.order),
   [checkpoints]);
 
   const getPatrolCaptures = useCallback((patrolId) =>
