@@ -11,8 +11,11 @@ async function sendPush(tokens, { title, body, data = {} }) {
     .map(to => ({
       to, title, body,
       data: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, String(value)])),
-      sound: 'default', priority: 'high', channelId: 'observant_alerts',
+      sound: 'notification.wav',
+      priority: 'high',
+      channelId: 'observant_alerts',
       _displayInForeground: true,
+      badge: 1,
     }));
   if (!messages.length) return { success: false, reason: 'No supported Expo push tokens' };
   try {
