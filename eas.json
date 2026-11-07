@@ -47,8 +47,7 @@
         "buildType": "app-bundle"
       },
       "ios": {
-        "buildConfiguration": "Release",
-        "appleTeamId": "QM8VK8RT5S"
+        "buildConfiguration": "Release"
       }
     }
   },
