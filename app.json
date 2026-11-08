@@ -78,6 +78,8 @@
         {
           "icon": "./assets/icon.png",
           "color": "#0B192C",
+          "enableRemoteNotifications": true,
+          "enableBackgroundRemoteNotifications": true,
           "sounds": [
             "./assets/notification.wav"
           ]

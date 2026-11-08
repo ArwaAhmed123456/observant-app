@@ -1,4 +1,4 @@
-const { Alert } = require('../models');
+const { Alert, User } = require('../models');
 
 function init() {
   console.log('[Push] Expo Push Service ready');
@@ -25,10 +25,20 @@ async function sendPush(tokens, { title, body, data = {} }) {
       body: JSON.stringify(messages),
     });
     const payload = await response.json();
-    const receipts = payload.data || [];
-    const successCount = receipts.filter(item => item.status === 'ok').length;
-    const failureCount = messages.length - successCount;
-    return { success: response.ok && successCount > 0, successCount, failureCount };
+    const tickets = Array.isArray(payload.data) ? payload.data : payload.data ? [payload.data] : [];
+    const successCount = tickets.filter(item => item.status === 'ok').length;
+    const failures = tickets
+      .map((ticket, index) => ({ ticket, token: messages[index]?.to }))
+      .filter(({ ticket }) => ticket.status !== 'ok');
+    for (const { ticket, token } of failures) {
+      const code = ticket.details?.error || ticket.message || 'Unknown push error';
+      console.error(`[Push] Expo rejected notification (${code}): ${ticket.message || 'no details'}`);
+      if (code === 'DeviceNotRegistered' && token) {
+        await User.updateMany({ fcmToken: token }, { $set: { fcmToken: null } });
+      }
+    }
+    if (!response.ok) console.error('[Push] Expo request failed:', JSON.stringify(payload.errors || payload));
+    return { success: response.ok && successCount > 0, successCount, failureCount: messages.length - successCount };
   } catch (error) {
     console.error('[Push] Expo delivery failed:', error.message);
     return { success: false, successCount: 0, failureCount: messages.length, reason: error.message };

@@ -43,7 +43,10 @@ export function PatrolScreen() {
   }, []);
 
   const activeSession = getGuardActiveSession(currentUser.id);
-  const patrolSiteId = activeSession?.siteId || currentUser.siteId;
+  // A patrol is pinned to the site it started at. The active shift or profile
+  // site can be empty (or change after a multi-site assignment), so prefer the
+  // site stored on the active patrol when rendering its checkpoints.
+  const patrolSiteId = activePatrol?.siteId || activeSession?.siteId || currentUser.siteId;
   const site = sites.find(item => String(item.id || item._id) === String(patrolSiteId));
   const assignedIds = activePatrol
     ? (activePatrol.assignedCheckpointIds || [])
@@ -277,32 +280,34 @@ export function PatrolScreen() {
               const busy = workingCheckpoint === checkpoint.id;
               return (
                 <View key={checkpoint.id || checkpoint._id || index} style={[styles.taskCard, complete && styles.taskCardDone]}>
-                  <View style={[styles.taskIndex, complete && styles.taskIndexDone]}>
-                    {complete ? <CheckCircle2 color={P.ok} size={19} /> : <Text style={styles.taskIndexText}>{String(index + 1).padStart(2, '0')}</Text>}
-                  </View>
-                  <View style={styles.taskBody}>
-                    <Text style={styles.cpName}>{checkpoint.name}</Text>
-                    <View style={styles.proofChips}>
-                      {checkpoint.nfcRequired && (
-                        <View style={[styles.proofChip, hasNfc && styles.proofChipDone]}>
-                          <Radio size={12} color={hasNfc ? P.ok : P.blue} />
-                          <Text style={styles.proofChipText}>{hasNfc ? 'NFC verified' : 'NFC tag required'}</Text>
-                        </View>
-                      )}
-                      <View style={[styles.proofChip, hasPhoto && styles.proofChipDone]}>
-                        <Camera size={12} color={hasPhoto ? P.ok : checkpoint.required ? P.goldDark : P.t3} />
-                        <Text style={styles.proofChipText}>
-                          {hasPhoto ? 'Photo captured' : checkpoint.required ? 'Photo required' : 'Photo option'}
-                        </Text>
-                      </View>
+                  <View style={styles.taskMainRow}>
+                    <View style={[styles.taskIndex, complete && styles.taskIndexDone]}>
+                      {complete ? <CheckCircle2 color={P.ok} size={19} /> : <Text style={styles.taskIndexText}>{String(index + 1).padStart(2, '0')}</Text>}
                     </View>
-                    {capture && (
-                      <Text style={styles.captureMeta}>
-                        {capture.photoUri ? 'Photo captured' : ''}{capture.photoUri && capture.nfcVerifiedAt ? ' · ' : ''}{capture.nfcVerifiedAt ? 'NFC verified' : ''} · {formatTime(capture.capturedAt)}
-                        {capture.what3words ? ` · ${capture.what3words}` : ''}
-                        {capture.altitude != null ? ` · Alt: ${Math.round(capture.altitude)}m` : ''}
-                      </Text>
-                    )}
+                    <View style={styles.taskBody}>
+                      <Text style={styles.cpName}>{checkpoint.name}</Text>
+                      <View style={styles.proofChips}>
+                        {checkpoint.nfcRequired && (
+                          <View style={[styles.proofChip, hasNfc && styles.proofChipDone]}>
+                            <Radio size={12} color={hasNfc ? P.ok : P.blue} />
+                            <Text style={styles.proofChipText}>{hasNfc ? 'NFC verified' : 'NFC tag required'}</Text>
+                          </View>
+                        )}
+                        <View style={[styles.proofChip, hasPhoto && styles.proofChipDone]}>
+                          <Camera size={12} color={hasPhoto ? P.ok : checkpoint.required ? P.goldDark : P.t3} />
+                          <Text style={styles.proofChipText}>
+                            {hasPhoto ? 'Photo captured' : checkpoint.required ? 'Photo required' : 'Photo option'}
+                          </Text>
+                        </View>
+                      </View>
+                      {capture && (
+                        <Text style={styles.captureMeta}>
+                          {capture.photoUri ? 'Photo captured' : ''}{capture.photoUri && capture.nfcVerifiedAt ? ' · ' : ''}{capture.nfcVerifiedAt ? 'NFC verified' : ''} · {formatTime(capture.capturedAt)}
+                          {capture.what3words ? ` · ${capture.what3words}` : ''}
+                          {capture.altitude != null ? ` · Alt: ${Math.round(capture.altitude)}m` : ''}
+                        </Text>
+                      )}
+                    </View>
                   </View>
                   <View style={styles.taskActions}>
                     {checkpoint.nfcRequired && !hasNfc && (
@@ -449,8 +454,9 @@ const styles = StyleSheet.create({
   noTasks: { alignItems: 'center', padding: SP.px24, borderRadius: BR.md, backgroundColor: '#FFFBEB', borderWidth: 1, borderColor: P.goldBorder, marginBottom: SP.px12 },
   noTasksTitle: { color: P.t1, fontSize: 14, fontWeight: '800', marginTop: 8 },
   noTasksText: { color: P.t3, fontSize: 12, textAlign: 'center', lineHeight: 18, marginTop: 5 },
-  taskCard: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: BR.md, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: P.b1, marginBottom: 9 },
+  taskCard: { gap: 10, padding: 12, borderRadius: BR.md, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: P.b1, marginBottom: 9 },
   taskCardDone: { backgroundColor: '#F3FBF5', borderColor: P.okBorder },
+  taskMainRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   taskIndex: { width: 30, height: 30, borderRadius: 10, backgroundColor: P.infoSubtle, alignItems: 'center', justifyContent: 'center' },
   taskIndexDone: { backgroundColor: P.okSubtle },
   taskIndexText: { color: P.info, fontSize: 11, fontWeight: '800' },
@@ -465,7 +471,7 @@ const styles = StyleSheet.create({
   completeText: { color: P.okDark, fontSize: 11, fontWeight: '800' },
   taskAction: { minWidth: 76, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 5, backgroundColor: P.blue, borderRadius: BR.xs, paddingHorizontal: 9, paddingVertical: 9 },
   taskActionDone: { backgroundColor: '#059669' },
-  taskActions: { alignItems: 'flex-end', gap: 6 },
+  taskActions: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 8, paddingLeft: 40 },
   nfcAction: { backgroundColor: P.goldDark },
   taskActionText: { color: P.white, fontSize: 11, fontWeight: '800' },
   finishButton: { marginTop: SP.px12 },

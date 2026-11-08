@@ -182,6 +182,7 @@ router.patch('/me/fcm-token',
   validate,
   asyncHandler(async (req, res) => {
     await User.findByIdAndUpdate(req.user._id, { fcmToken: req.body.fcmToken });
+    console.info(`[Push] Expo token registered for user ${req.user._id}`);
     res.json({ message: 'FCM token updated' });
   })
 );

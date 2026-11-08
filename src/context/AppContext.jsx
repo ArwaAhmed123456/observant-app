@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { AppState, Alert } from 'react-native';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import { load, save, KEYS, seedIfEmpty } from '../data/store';
 import {
   API_ENABLED, apiGet, apiPost, apiPatch, apiDelete, restoreTokens, setTokens,
@@ -124,7 +125,6 @@ export function AppProvider({ children }) {
             setters[key]?.(value);
           });
           setCurrentUser(user);
-          registerPushNotifications();
           const activeShift = snapshot.shiftSessions.find(session => session.guardId === user.id && !session.bookedOffAt);
           const pendingCall = snapshot.checkCalls.find(call => call.guardId === user.id && !call.response);
           const activePatrolRecord = snapshot.patrolSessions.find(patrol => patrol.guardId === user.id && patrol.status === 'in_progress');
@@ -190,6 +190,33 @@ export function AppProvider({ children }) {
   }, []);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Register after sign-in/session restore, refresh a rolled token, and retry
+  // after the app returns to the foreground.
+  useEffect(() => {
+    if (!API_ENABLED || !currentUser?.id) return undefined;
+    let mounted = true;
+    let registration = null;
+    const register = () => {
+      if (!mounted || registration) return;
+      registration = registerPushNotifications()
+        .catch(error => {
+          console.warn('[Observant] Push registration retry failed:', error?.message || error);
+          return false;
+        })
+        .finally(() => { registration = null; });
+    };
+    register();
+    const tokenSubscription = Notifications.addPushTokenListener(register);
+    const appStateSubscription = AppState.addEventListener('change', state => {
+      if (state === 'active') register();
+    });
+    return () => {
+      mounted = false;
+      tokenSubscription.remove();
+      appStateSubscription.remove();
+    };
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (!API_ENABLED || !currentUser) return undefined;
@@ -308,7 +335,6 @@ export function AppProvider({ children }) {
           const detail = await apiGet(`/api/patrols/${activePatrolRecord.id}`);
           setActivePatrol(normalizePatrol(detail.patrol));
         }
-        registerPushNotifications();
         await save(KEYS.CURRENT_USER_ID, user.id);
         return { success: true, user };
       } catch (error) {
