@@ -203,24 +203,10 @@ export async function seedIfEmpty() {
     return;
   }
 
-  // Subsequent launches — ensure every seed user is present (by email)
-  // so demo credentials always work even if AsyncStorage was partially cleared.
-  let updatedUsers = [...existing];
-  let changed = false;
-
-  for (const seedUser of SEED_USERS) {
-    const alreadyExists = updatedUsers.some(
-      u => u.email.toLowerCase() === seedUser.email.toLowerCase()
-    );
-    if (!alreadyExists) {
-      updatedUsers.unshift(seedUser);
-      changed = true;
-    }
-  }
-
-  // Ensure status property exists on all users
-  const withStatus = updatedUsers.map(u => ({ ...u, status: u.status || 'active' }));
-  if (changed || withStatus.some(u => !existing.find(e => e.id === u.id)?.status)) {
+  // Subsequent launches — do not re-insert deleted users.
+  // Ensure status property exists on all existing users
+  const withStatus = existing.map(u => ({ ...u, status: u.status || 'active' }));
+  if (withStatus.some(u => !existing.find(e => e.id === u.id)?.status)) {
     await save(KEYS.USERS, withStatus);
   }
 

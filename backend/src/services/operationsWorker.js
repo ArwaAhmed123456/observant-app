@@ -61,21 +61,24 @@ async function expireCheckCalls(now = new Date()) {
       { new: true }
     );
     if (!call) continue;
+    // Check if guard exists and is active — if deleted or deactivated, clean up without alerting
+    const guard = await User.findOne({ _id: call.guardId, active: true }).select('name badgeNumber');
+    if (!guard) {
+      await CheckCall.deleteOne({ _id: call._id });
+      continue;
+    }
     if (call.sessionId) await ShiftSession.findByIdAndUpdate(call.sessionId, {
       $inc: { missedCheckCallCount: 1 },
       $set: { nextCheckCallAt: (() => { const next = new Date(call.scheduledFor || call.firedAt); next.setMinutes(0, 0, 0); return new Date(next.getTime() + HOUR); })() },
     });
-    const [guard, site] = await Promise.all([
-      User.findById(call.guardId).select('name badgeNumber'),
-      Site.findById(call.siteId).select('name'),
-    ]);
+    const site = await Site.findById(call.siteId).select('name');
     await createAlert({
       organisationId: call.organisationId,
       siteId: call.siteId,
       guardId: call.guardId,
       type: 'check_call_missed',
-      title: `Missed Check Call · ${guard?.name || 'Officer'}`,
-      message: `${guard?.name || 'Officer'} (${guard?.badgeNumber || '—'}) did not respond within the 10-minute window${site?.name ? ` at ${site.name}` : ''}.`,
+      title: `Missed Check Call · ${guard.name}`,
+      message: `${guard.name} (${guard.badgeNumber || '—'}) did not respond within the 10-minute window${site?.name ? ` at ${site.name}` : ''}.`,
       refModel: 'CheckCall',
       refId: call._id,
     });
@@ -139,17 +142,20 @@ async function alertIgnoredPrompts(now = new Date()) {
       { new: true }
     );
     if (!claimed) continue;
-    const [guard, site] = await Promise.all([
-      User.findById(item.guardId).select('name badgeNumber'),
-      Site.findById(item.siteId).select('name'),
-    ]);
+    // Check if guard exists and is active — if deleted or deactivated, clean up without alerting
+    const guard = await User.findOne({ _id: item.guardId, active: true }).select('name badgeNumber');
+    if (!guard) {
+      await RandomPromptLog.deleteOne({ _id: item._id });
+      continue;
+    }
+    const site = await Site.findById(item.siteId).select('name');
     await createAlert({
       organisationId: item.organisationId,
       siteId: item.siteId,
       guardId: item.guardId,
       type: 'random_prompt_ignored',
-      title: `Surprise Patrol Missed · ${guard?.name || 'Officer'}`,
-      message: `${guard?.name || 'Officer'} (${guard?.badgeNumber || '—'}) did not acknowledge the surprise patrol within the 10-minute window${site?.name ? ` at ${site.name}` : ''}.`,
+      title: `Surprise Patrol Missed · ${guard.name}`,
+      message: `${guard.name} (${guard.badgeNumber || '—'}) did not acknowledge the surprise patrol within the 10-minute window${site?.name ? ` at ${site.name}` : ''}.`,
       refModel: 'RandomPromptLog',
       refId: item._id,
     });

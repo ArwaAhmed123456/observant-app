@@ -49,23 +49,29 @@ export function PatrolScreen() {
     ? (activePatrol.assignedCheckpointIds || [])
     : (getTodayRoster(currentUser.id, patrolSiteId)?.checkpointIds || []);
   const siteCheckpoints = getSiteCheckpoints(patrolSiteId);
-  // If patrol is active but has no assignedCheckpointIds (e.g. started before
-  // checkpoints were configured, or client-side optimistic fallback), show all
-  // required site checkpoints so the guard can still capture evidence.
-  const checkpoints = assignedIds.length
-    ? siteCheckpoints.filter(checkpoint => assignedIds.includes(checkpoint.id))
-    : siteCheckpoints.filter(cp => cp.required || cp.nfcRequired);
-  // Count required checkpoints — fall back to total site required checkpoints
-  // so the start-patrol guard check doesn't wrongly block when assignedIds is empty
+  const assignedSet = new Set((assignedIds || []).map(id => String(id?.id || id?._id || id || '')));
+  let checkpoints = assignedSet.size > 0
+    ? siteCheckpoints.filter(cp => assignedSet.has(String(cp.id || cp._id || '')))
+    : siteCheckpoints;
+  // If assignedSet filtered everything out (e.g. outdated IDs from rota or newly added checkpoints), fall back to all site checkpoints!
+  if (checkpoints.length === 0 && siteCheckpoints.length > 0) {
+    checkpoints = siteCheckpoints;
+  }
   const requiredCheckpointCount = checkpoints.length > 0
-    ? checkpoints.filter(cp => cp.required || cp.nfcRequired).length
-    : siteCheckpoints.filter(cp => cp.required || cp.nfcRequired).length;
+    ? checkpoints.length
+    : siteCheckpoints.length;
   const todayPatrols = getTodayPatrols(currentUser.id);
   const savedCaptures = activePatrol ? getPatrolCaptures(activePatrol.id) : [];
   const captures = savedCaptures.length ? savedCaptures : activePatrol?.captures || [];
   const completedCount = checkpoints.filter(checkpoint => {
-    const capture = captures.find(item => item.checkpointId === checkpoint.id);
-    return (!checkpoint.required || Boolean(capture?.photoUri)) && (!checkpoint.nfcRequired || Boolean(capture?.nfcVerifiedAt));
+    const cpId = String(checkpoint.id || checkpoint._id || '');
+    const capture = captures.find(item => {
+      const itemCpId = String(item.checkpointId?._id || item.checkpointId?.id || item.checkpointId || '');
+      return itemCpId === cpId;
+    });
+    const hasPhoto = Boolean(capture?.photoUri || capture?.photoUrl || capture?.publicId);
+    const hasNfc = Boolean(capture?.nfcVerifiedAt);
+    return (!checkpoint.required || hasPhoto) && (!checkpoint.nfcRequired || hasNfc);
   }).length;
   const progress = checkpoints.length > 0 ? completedCount / checkpoints.length : 0;
   const pendingPrompt = useMemo(() => [...(randomPromptLogs || [])].reverse().find(log =>
@@ -106,9 +112,9 @@ export function PatrolScreen() {
       let nfcTagId = null;
       if (proofType === 'photo') {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== 'granted') throw new Error('Camera access is required to capture this manager-requested site photo.');
+        if (status !== 'granted') throw new Error('Camera access is required to capture site photos. Please enable Camera permissions in iOS Settings.');
         const result = await ImagePicker.launchCameraAsync({
-          mediaTypes: ['images'], quality: 0.6, allowsEditing: false,
+          quality: 0.6, allowsEditing: false,
         });
         if (result.canceled || !result.assets?.[0]) return;
         photoUri = result.assets[0].uri;
@@ -151,7 +157,7 @@ export function PatrolScreen() {
         const proofCaptures = result.serverAuthoritative ? (result.patrol?.captures || []) : captures;
         const reallyMissing = (result.missing || []).filter(id => {
           const capture = proofCaptures.find(item => String(item.checkpointId?._id || item.checkpointId?.id || item.checkpointId || '') === String(id));
-          const cp = checkpoints.find(c => c.id === id);
+          const cp = checkpoints.find(c => String(c.id || c._id) === String(id));
           if (!cp) return true;
           const photoDone = !cp?.required || Boolean(capture?.photoUri || capture?.photoUrl || capture?.publicId);
           const nfcDone = !cp?.nfcRequired || Boolean(capture?.nfcVerifiedAt);
@@ -160,7 +166,7 @@ export function PatrolScreen() {
 
         const serverNames = new Map((result.missing || []).map((id, index) => [String(id), result.missingNames?.[index]]));
         const missingNames = reallyMissing.length
-          ? reallyMissing.map(id => checkpoints.find(checkpoint => checkpoint.id === id)?.name || serverNames.get(String(id)) || 'Assigned checkpoint').join(', ')
+          ? reallyMissing.map(id => checkpoints.find(checkpoint => String(checkpoint.id || checkpoint._id) === String(id))?.name || serverNames.get(String(id)) || 'Assigned checkpoint').join(', ')
           : result.missingNames?.join(', ') || 'The server could not verify one or more checkpoint records.';
         setExceptionDescription('');
         setIncompleteModal({ patrolId: activePatrol.id, missing: reallyMissing.length ? reallyMissing : result.missing || [], missingNames });
@@ -258,22 +264,37 @@ export function PatrolScreen() {
             {checkpoints.length === 0 ? (
               <View style={styles.noTasks}><ShieldCheck color={P.gold} size={22} /><Text style={styles.noTasksTitle}>No checkpoints assigned to this patrol</Text><Text style={styles.noTasksText}>This patrol has no assigned evidence tasks. New patrols are blocked until a site and required checkpoints are assigned.</Text></View>
             ) : checkpoints.map((checkpoint, index) => {
-              const capture = captures.find(item => item.checkpointId === checkpoint.id);
-              const photoDone = !checkpoint.required || Boolean(capture?.photoUri);
-              const nfcDone = !checkpoint.nfcRequired || Boolean(capture?.nfcVerifiedAt);
-              const complete = photoDone && nfcDone;
+              const cpId = String(checkpoint.id || checkpoint._id || '');
+              const capture = captures.find(item => {
+                const itemCpId = String(item.checkpointId?._id || item.checkpointId?.id || item.checkpointId || '');
+                return itemCpId === cpId;
+              });
+              const hasPhoto = Boolean(capture?.photoUri || capture?.photoUrl || capture?.publicId);
+              const hasNfc = Boolean(capture?.nfcVerifiedAt);
+              const photoSatisfied = !checkpoint.required || hasPhoto;
+              const nfcSatisfied = !checkpoint.nfcRequired || hasNfc;
+              const complete = photoSatisfied && nfcSatisfied;
               const busy = workingCheckpoint === checkpoint.id;
               return (
-                <View key={checkpoint.id} style={[styles.taskCard, complete && styles.taskCardDone]}>
+                <View key={checkpoint.id || checkpoint._id || index} style={[styles.taskCard, complete && styles.taskCardDone]}>
                   <View style={[styles.taskIndex, complete && styles.taskIndexDone]}>
                     {complete ? <CheckCircle2 color={P.ok} size={19} /> : <Text style={styles.taskIndexText}>{String(index + 1).padStart(2, '0')}</Text>}
                   </View>
                   <View style={styles.taskBody}>
                     <Text style={styles.cpName}>{checkpoint.name}</Text>
                     <View style={styles.proofChips}>
-                      {checkpoint.nfcRequired && <View style={[styles.proofChip, nfcDone && styles.proofChipDone]}><Radio size={12} color={nfcDone ? P.ok : P.blue} /><Text style={styles.proofChipText}>{nfcDone ? 'NFC verified' : 'NFC tag required'}</Text></View>}
-                      {checkpoint.required && <View style={[styles.proofChip, photoDone && styles.proofChipDone]}><Camera size={12} color={photoDone ? P.ok : P.goldDark} /><Text style={styles.proofChipText}>{photoDone ? 'Photo captured' : 'Site photo required'}</Text></View>}
-                      {!checkpoint.required && !checkpoint.nfcRequired && <Text style={styles.proofChipText}>Optional checkpoint</Text>}
+                      {checkpoint.nfcRequired && (
+                        <View style={[styles.proofChip, hasNfc && styles.proofChipDone]}>
+                          <Radio size={12} color={hasNfc ? P.ok : P.blue} />
+                          <Text style={styles.proofChipText}>{hasNfc ? 'NFC verified' : 'NFC tag required'}</Text>
+                        </View>
+                      )}
+                      <View style={[styles.proofChip, hasPhoto && styles.proofChipDone]}>
+                        <Camera size={12} color={hasPhoto ? P.ok : checkpoint.required ? P.goldDark : P.t3} />
+                        <Text style={styles.proofChipText}>
+                          {hasPhoto ? 'Photo captured' : checkpoint.required ? 'Photo required' : 'Photo option'}
+                        </Text>
+                      </View>
                     </View>
                     {capture && (
                       <Text style={styles.captureMeta}>
@@ -283,14 +304,22 @@ export function PatrolScreen() {
                       </Text>
                     )}
                   </View>
-                  {complete ? (
-                    <View style={styles.completeBadge}><CheckCircle2 size={16} color={P.ok} /><Text style={styles.completeText}>Done</Text></View>
-                  ) : (
-                    <View style={styles.taskActions}>
-                      {checkpoint.nfcRequired && !nfcDone && <TouchableOpacity style={[styles.taskAction, styles.nfcAction]} onPress={() => handleCheckpointProof(checkpoint, 'nfc')} disabled={busy}><Radio color={P.white} size={14} /><Text style={styles.taskActionText}>{busy ? 'Wait' : 'Scan NFC'}</Text></TouchableOpacity>}
-                      {checkpoint.required && !photoDone && <TouchableOpacity style={styles.taskAction} onPress={() => handleCheckpointProof(checkpoint, 'photo')} disabled={busy}>{busy ? <ActivityIndicator color={P.white} size="small" /> : <Camera color={P.white} size={14} />}<Text style={styles.taskActionText}>{busy ? 'Wait' : 'Photo'}</Text></TouchableOpacity>}
-                    </View>
-                  )}
+                  <View style={styles.taskActions}>
+                    {checkpoint.nfcRequired && !hasNfc && (
+                      <TouchableOpacity style={[styles.taskAction, styles.nfcAction]} onPress={() => handleCheckpointProof(checkpoint, 'nfc')} disabled={busy}>
+                        <Radio color={P.white} size={14} />
+                        <Text style={styles.taskActionText}>{busy ? 'Wait' : 'Scan NFC'}</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      style={[styles.taskAction, hasPhoto && styles.taskActionDone]}
+                      onPress={() => handleCheckpointProof(checkpoint, 'photo')}
+                      disabled={busy}
+                    >
+                      {busy ? <ActivityIndicator color={P.white} size="small" /> : <Camera color={P.white} size={14} />}
+                      <Text style={styles.taskActionText}>{busy ? 'Wait' : hasPhoto ? 'Retake' : 'Photo'}</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               );
             })}
@@ -311,6 +340,23 @@ export function PatrolScreen() {
             <Text style={styles.startHeading}>{antiIdlePrompt ? 'Surprise patrol requested' : 'Ready to patrol?'}</Text>
             <Text style={styles.startDescription}>Follow your assigned route, scan required NFC cards, and capture the site photos requested by your manager.</Text>
             <View style={styles.startMeta}><View style={styles.metaItem}><Radio size={14} color={P.blue} /><Text style={styles.metaText}>NFC verified</Text></View><View style={styles.metaItem}><Camera size={14} color={P.goldDark} /><Text style={styles.metaText}>Photo evidence</Text></View></View>
+
+            {checkpoints.length > 0 && (
+              <View style={styles.previewRouteCard}>
+                <Text style={styles.previewRouteTitle}>Assigned checkpoints ({checkpoints.length})</Text>
+                {checkpoints.map((cp, idx) => (
+                  <View key={cp.id || cp._id || idx} style={styles.previewRouteItem}>
+                    <Text style={styles.previewRouteIdx}>{String(idx + 1).padStart(2, '0')}</Text>
+                    <Text style={styles.previewRouteTxt}>{cp.name}</Text>
+                    <View style={styles.previewRouteIcons}>
+                      <Camera size={12} color={cp.required ? P.goldDark : P.t3} />
+                      {cp.nfcRequired && <Radio size={12} color={P.blue} />}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
             <TouchableOpacity style={[btnPrimary, styles.startBtn, starting && styles.disabled]} onPress={handleStartPatrol} disabled={starting}>
               {starting ? <ActivityIndicator color={P.white} /> : <><Play color={P.white} size={18} /><Text style={styles.startBtnTxt}>{antiIdlePrompt ? 'Respond & start patrol' : 'Start patrol'}</Text></>}
             </TouchableOpacity>
@@ -418,6 +464,7 @@ const styles = StyleSheet.create({
   completeBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingLeft: 3 },
   completeText: { color: P.okDark, fontSize: 11, fontWeight: '800' },
   taskAction: { minWidth: 76, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 5, backgroundColor: P.blue, borderRadius: BR.xs, paddingHorizontal: 9, paddingVertical: 9 },
+  taskActionDone: { backgroundColor: '#059669' },
   taskActions: { alignItems: 'flex-end', gap: 6 },
   nfcAction: { backgroundColor: P.goldDark },
   taskActionText: { color: P.white, fontSize: 11, fontWeight: '800' },
@@ -431,9 +478,15 @@ const styles = StyleSheet.create({
   startIcon: { width: 52, height: 52, borderRadius: 17, backgroundColor: P.infoSubtle, borderWidth: 1, borderColor: P.infoBorder, alignItems: 'center', justifyContent: 'center', marginBottom: SP.px12 },
   startHeading: { color: P.t1, fontSize: 19, fontWeight: '800' },
   startDescription: { color: P.t3, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 8 },
-  startMeta: { flexDirection: 'row', gap: 18, marginTop: SP.px16, marginBottom: SP.px20 },
+  startMeta: { flexDirection: 'row', gap: 18, marginTop: SP.px16, marginBottom: SP.px16 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { color: P.t2, fontSize: 11, fontWeight: '700' },
+  previewRouteCard: { width: '100%', backgroundColor: P.bg2, borderRadius: BR.md, padding: SP.px12, borderWidth: 1, borderColor: P.b1, marginBottom: SP.px16 },
+  previewRouteTitle: { color: P.t3, fontSize: 10, fontWeight: '800', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6 },
+  previewRouteItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4, borderBottomWidth: 0.5, borderBottomColor: P.b1 },
+  previewRouteIdx: { color: P.info, fontSize: 10, fontWeight: '800', width: 18 },
+  previewRouteTxt: { color: P.t1, fontSize: 12, fontWeight: '600', flex: 1 },
+  previewRouteIcons: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   startBtn: { width: '100%', marginBottom: 0 },
   startBtnTxt: { color: P.white, fontSize: 15, fontWeight: '800' },
   historySection: { marginTop: SP.px8 },

@@ -15,10 +15,6 @@ async function sendPush(tokens, { title, body, data = {} }) {
       priority: 'high',
       channelId: 'observant_alerts',
       _displayInForeground: true,
-      // iOS: wake app in background and allow notification service extension to modify
-      'content-available': 1,
-      mutableContent: true,
-      // iOS: badge increment
       badge: 1,
     }));
   if (!messages.length) return { success: false, reason: 'No supported Expo push tokens' };

@@ -124,6 +124,7 @@ export function AppProvider({ children }) {
             setters[key]?.(value);
           });
           setCurrentUser(user);
+          registerPushNotifications();
           const activeShift = snapshot.shiftSessions.find(session => session.guardId === user.id && !session.bookedOffAt);
           const pendingCall = snapshot.checkCalls.find(call => call.guardId === user.id && !call.response);
           const activePatrolRecord = snapshot.patrolSessions.find(patrol => patrol.guardId === user.id && patrol.status === 'in_progress');
@@ -138,10 +139,9 @@ export function AppProvider({ children }) {
             }
           }
         } catch (error) {
-          if (error.status === 401) {
-            await setTokens(null);
-            await save(KEYS.CURRENT_USER_ID, null);
-          }
+          await setTokens(null);
+          await save(KEYS.CURRENT_USER_ID, null);
+          setCurrentUser(null);
           console.warn('[Observant] Could not restore server session:', error.message);
         }
       }
@@ -204,10 +204,19 @@ export function AppProvider({ children }) {
           apiGet('/api/rosters'),
           // Refresh checkpoints so guards see newly-assigned checkpoints without re-logging in
           (async () => {
-            const sitesRes = await apiGet('/api/sites');
-            const siteList = sitesRes.sites || [];
-            const cpBySite = await Promise.all(siteList.map(site => apiGet(`/api/patrols/checkpoints?siteId=${encodeURIComponent(site._id || site.id)}`)));
-            return { checkpoints: cpBySite.flatMap(r => (r.checkpoints || []).map(normalizeCheckpoint)) };
+            try {
+              const sitesRes = await apiGet('/api/sites');
+              const siteList = sitesRes.sites || [];
+              const cpBySite = await Promise.allSettled(
+                siteList.map(site => apiGet(`/api/patrols/checkpoints?siteId=${encodeURIComponent(site._id || site.id)}`))
+              );
+              const successfulCheckpoints = cpBySite
+                .filter(res => res.status === 'fulfilled' && Array.isArray(res.value?.checkpoints))
+                .flatMap(res => res.value.checkpoints.map(normalizeCheckpoint));
+              return { checkpoints: successfulCheckpoints };
+            } catch {
+              return { checkpoints: [] };
+            }
           })(),
         ]);
         setShiftSessions((shifts.sessions || []).map(normalizeSession));
@@ -234,6 +243,11 @@ export function AppProvider({ children }) {
           && (!prompt.expiresAt || new Date(prompt.expiresAt).getTime() > Date.now())
         ));
       } catch (error) {
+        if (error.status === 401 || error.message?.includes('expired') || error.message?.includes('deactivated') || error.message?.includes('not found') || error.message?.includes('revoked')) {
+          console.warn('[Observant] Active account no longer valid or deleted. Signing out.');
+          logout();
+          return;
+        }
         console.warn('[Observant] Operation refresh failed:', error.message);
       }
     };
@@ -336,6 +350,7 @@ export function AppProvider({ children }) {
     setShiftEndWarning(false);
     await save(KEYS.CURRENT_USER_ID, null);
     if (API_ENABLED) {
+      try { await apiPatch('/api/auth/me/fcm-token', { fcmToken: null }); } catch {}
       try { await apiPost('/api/auth/logout', {}); } catch {}
       await setTokens(null);
     }
@@ -629,15 +644,19 @@ export function AppProvider({ children }) {
   const deleteUser = useCallback(async (userId) => {
     if (!userId) return { success: false, error: 'No user selected' };
     const idStr = String(userId);
+    const isSelf = String(currentUser?.id || currentUser?._id || '') === idStr;
     if (API_ENABLED) {
       try {
         await apiDelete(`/api/users/${idStr}`);
         setUsers(previous => previous.filter(user => String(user.id || user._id || '') !== idStr));
+        if (isSelf) {
+          await logout();
+        }
         return { success: true };
       } catch (error) { return { success: false, error: error.message }; }
     }
     const allUsers = await load(KEYS.USERS) || [];
-    const target = allUsers.find(u => String(u.id || u._id || '') === idStr) || (String(currentUser?.id || currentUser?._id || '') === idStr ? currentUser : null);
+    const target = allUsers.find(u => String(u.id || u._id || '') === idStr) || (isSelf ? currentUser : null);
     if (!target) return { success: false, error: 'User not found' };
 
     const updatedList = allUsers.filter(u => String(u.id || u._id || '') !== idStr);
@@ -651,8 +670,12 @@ export function AppProvider({ children }) {
       severity: 'warning',
     });
 
+    if (isSelf) {
+      await logout();
+    }
+
     return { success: true };
-  }, [currentUser, addAuditLog]);
+  }, [currentUser, addAuditLog, logout]);
 
   const deleteAccount = useCallback(async (userId = null) => {
     const targetId = userId || currentUser?.id || currentUser?._id;

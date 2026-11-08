@@ -78,7 +78,9 @@ export async function apiRequest(path, options = {}, retry = true) {
   if (response.status === 401 && retry && !path.includes('/api/auth/login') && !path.includes('/api/auth/refresh')) {
     if (await refreshAccessToken()) return apiRequest(path, options, false);
     await setTokens(null);
-    throw new Error('Your session expired. Please sign in again.');
+    const error = new Error('Your session expired. Please sign in again.');
+    error.status = 401;
+    throw error;
   }
 
   const payload = await response.json().catch(() => ({}));

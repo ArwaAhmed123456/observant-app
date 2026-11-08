@@ -162,12 +162,20 @@ router.post('/start',
     if (!roster) roster = await ShiftRoster.findOne({ organisationId: orgId, guardId, siteId: session.siteId, recurringWeekly: true, weekStartDate: { $lt: sessionWeekStart } }).sort({ weekStartDate: -1 }).select('days checkpointIds');
     if (!roster?.days?.[scheduledDay]) return res.status(409).json({ error: 'No patrol shift is assigned at this site for this duty period. Ask your manager to correct the rota.', code: 'PATROL_ROSTER_REQUIRED' });
     const configuredIds = roster.checkpointIds?.length ? roster.checkpointIds : null;
-    const assignedCheckpoints = await PatrolCheckpoint.find({
-      organisationId: orgId, siteId: session.siteId, active: true,
-      ...(configuredIds ? { _id: { $in: configuredIds } } : {}),
-      $or: [{ required: true }, { nfcRequired: true }],
-    }).select('_id');
-    if (!assignedCheckpoints.length) return res.status(409).json({ error: 'No required patrol checkpoints are configured for this site and shift. Ask your manager to assign photo or NFC checkpoints.', code: 'PATROL_CHECKPOINTS_REQUIRED' });
+    let assignedCheckpoints = [];
+    if (configuredIds?.length) {
+      assignedCheckpoints = await PatrolCheckpoint.find({
+        organisationId: orgId, siteId: session.siteId, active: true,
+        _id: { $in: configuredIds },
+      }).select('_id');
+    }
+    // Fall back to all active checkpoints configured for this site if none matched
+    if (!assignedCheckpoints.length) {
+      assignedCheckpoints = await PatrolCheckpoint.find({
+        organisationId: orgId, siteId: session.siteId, active: true,
+      }).select('_id');
+    }
+    if (!assignedCheckpoints.length) return res.status(409).json({ error: 'No patrol checkpoints are configured for this site. Ask your manager to add checkpoints in the Checkpoints tab before starting a patrol.', code: 'PATROL_CHECKPOINTS_REQUIRED' });
     const assignedCheckpointIds = assignedCheckpoints.map(checkpoint => checkpoint._id);
 
     const latest = await PatrolSession.findOne({ organisationId: orgId, guardId, status: { $in: ['complete', 'incomplete'] } }).sort({ finishedAt: -1 });
@@ -219,14 +227,9 @@ router.post('/:id/capture',
 
     const checkpoint = await PatrolCheckpoint.findOne({ _id: checkpointId, organisationId: req.user.organisationId, siteId: patrol.siteId, active: true });
     if (!checkpoint) return res.status(400).json({ error: 'Checkpoint does not belong to this active patrol site.' });
-    if (patrol.assignedCheckpointIds?.length && !patrol.assignedCheckpointIds.map(String).includes(String(checkpoint._id))) {
-      return res.status(400).json({ error: 'This checkpoint is not assigned to your current rota.' });
-    }
 
-    if (!checkpoint.required && !checkpoint.nfcRequired) return res.status(400).json({ error: 'This checkpoint has no required proof method.' });
-    if (!req.file && !nfcTagId) return res.status(400).json({ error: 'Capture a required photo or scan the assigned NFC card.' });
-    if (req.file && !checkpoint.required) return res.status(400).json({ error: 'A photo is not required for this checkpoint.' });
-    if (nfcTagId && !checkpoint.nfcRequired) return res.status(400).json({ error: 'An NFC scan is not required for this checkpoint.' });
+    if (!req.file && !nfcTagId) return res.status(400).json({ error: 'Capture a photo or scan the assigned NFC card.' });
+    if (nfcTagId && !checkpoint.nfcRequired && !checkpoint.nfcTagId) return res.status(400).json({ error: 'An NFC scan is not configured for this checkpoint.' });
     const cleanTagId = value => String(value || '').replace(/[^a-f0-9]/gi, '').toLowerCase();
     if (nfcTagId && !/^[a-f0-9]{8,32}$/i.test(cleanTagId(nfcTagId))) return res.status(400).json({ error: 'Invalid NFC card ID. Scan the physical checkpoint card again.' });
     if (nfcTagId && checkpoint.nfcRequired && cleanTagId(nfcTagId) !== cleanTagId(checkpoint.nfcTagId)) {

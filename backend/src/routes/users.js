@@ -263,6 +263,10 @@ router.delete('/users/:id',
     }
     await ShiftRoster.deleteMany({ organisationId: req.user.organisationId, guardId: user._id });
     await Alert.deleteMany({ organisationId: req.user.organisationId, guardId: user._id });
+    // Remove all pending check calls and random prompts so the deleted guard stops generating alerts/notifications
+    await require('../models').CheckCall.deleteMany({ guardId: user._id });
+    await require('../models').RandomPromptLog.deleteMany({ guardId: user._id });
+    await require('../models').PatrolSession.deleteMany({ guardId: user._id, status: 'in_progress' });
     // Close any open shift sessions so the guard stops generating alerts
     await require('../models').ShiftSession.updateMany(
       { organisationId: req.user.organisationId, guardId: user._id, bookedOffAt: null },

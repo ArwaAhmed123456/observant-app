@@ -140,7 +140,7 @@ router.post('/refresh',
 
 // ── Logout ────────────────────────────────────────────────────────────────────
 router.post('/logout', authenticate, asyncHandler(async (req, res) => {
-  await User.findByIdAndUpdate(req.user._id, { refreshTokenHash: null });
+  await User.findByIdAndUpdate(req.user._id, { refreshTokenHash: null, fcmToken: null });
   res.json({ message: 'Logged out' });
 }));
 

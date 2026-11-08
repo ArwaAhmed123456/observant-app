@@ -31,8 +31,21 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.WAKE_LOCK",
+        "android.permission.NFC",
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "VIBRATE",
+        "NFC",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.WAKE_LOCK",
         "android.permission.NFC"
-      ]
+      ],
+      "runtimeVersion": "1.0.0"
     },
     "ios": {
       "supportsTablet": true,
@@ -40,7 +53,10 @@
       "appleTeamId": "QM8VK8RT5S",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["remote-notification", "fetch"],
+        "UIBackgroundModes": [
+          "remote-notification",
+          "fetch"
+        ],
         "NSCameraUsageDescription": "Observant requires camera access to capture patrol checkpoint photos and incident evidence.",
         "NSLocationWhenInUseUsageDescription": "Observant uses your location to verify security guard checkpoint patrols.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Observant uses location tracking during active security patrol tours.",
@@ -48,6 +64,9 @@
         "NSPhotoLibraryUsageDescription": "Observant requires photo library access to attach incident evidence and checkpoint photos.",
         "NSPhotoLibraryAddUsageDescription": "Observant requires permission to save captured patrol photos to your library.",
         "NFCReaderUsageDescription": "Observant requires NFC access to scan security checkpoint tags during patrols."
+      },
+      "runtimeVersion": {
+        "policy": "appVersion"
       }
     },
     "web": {
@@ -59,8 +78,9 @@
         {
           "icon": "./assets/icon.png",
           "color": "#0B192C",
-          "sounds": ["./assets/notification.wav"],
-          "mode": "production"
+          "sounds": [
+            "./assets/notification.wav"
+          ]
         }
       ],
       [
@@ -85,9 +105,12 @@
     ],
     "extra": {
       "eas": {
-          "projectId": "186f259e-7f65-45b0-85ca-77788730578a"
+        "projectId": "186f259e-7f65-45b0-85ca-77788730578a"
       }
     },
-    "owner": "miraclehayats-team"
+    "owner": "miraclehayats-team",
+    "updates": {
+      "url": "https://u.expo.dev/186f259e-7f65-45b0-85ca-77788730578a"
+    }
   }
 }

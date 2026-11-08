@@ -35,7 +35,6 @@ export async function registerPushNotifications() {
           allowAlert: true,
           allowBadge: true,
           allowSound: true,
-          allowCriticalAlerts: true,   // allows sound even in Do Not Disturb
           provideAppNotificationSettings: true,
         },
       });
