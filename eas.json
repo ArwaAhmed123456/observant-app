@@ -49,6 +49,16 @@
       "ios": {
         "buildConfiguration": "Release"
       }
+    },
+    "production-internal": {
+      "autoIncrement": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://observant-api-zl49.onrender.com"
+      },
+      "ios": {
+        "buildConfiguration": "Release"
+      }
     }
   },
   "submit": {
