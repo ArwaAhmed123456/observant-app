@@ -39,6 +39,8 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // ── Global middleware ─────────────────────────────────────────────────────────
+// Trust Render's proxy so rate limiting and IP detection work correctly
+app.set('trust proxy', 1);
 app.use(helmet());
 const allowedOrigins = (process.env.CORS_ORIGINS || '*').split(',').map(value => value.trim());
 app.use(cors({
@@ -55,7 +57,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // ── Rate limiting ─────────────────────────────────────────────────────────────
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,  // 15 minutes
-  max:      300,
+  max:      1000,
   standardHeaders: true,
   legacyHeaders:   false,
   message: { error: 'Too many requests, please slow down' },
