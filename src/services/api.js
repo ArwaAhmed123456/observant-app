@@ -66,13 +66,19 @@ export async function apiRequest(path, options = {}, retry = true) {
   if (session?.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
 
   let response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      headers,
-    });
-  } catch {
-    throw new Error(`Cannot reach the Observant server at ${API_BASE_URL}. Check the server URL and connection.`);
+  // Retry up to 3 times on network errors with exponential backoff
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+      break; // success — exit retry loop
+    } catch {
+      if (attempt === maxAttempts) {
+        throw new Error(`Cannot reach the Observant server at ${API_BASE_URL}. Check the server URL and connection.`);
+      }
+      // Wait before retrying: 1s, then 3s
+      await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+    }
   }
 
   if (response.status === 401 && retry && !path.includes('/api/auth/login') && !path.includes('/api/auth/refresh')) {
