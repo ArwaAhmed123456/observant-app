@@ -66,8 +66,11 @@ export async function apiRequest(path, options = {}, retry = true) {
   if (session?.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
 
   let response;
-  // Retry up to 3 times on network errors with exponential backoff
-  const maxAttempts = 3;
+  // Retry up to 4 times with progressive backoff.
+  // Render free-tier cold-starts can take 20-30 seconds; this keeps retrying
+  // over that window before surfacing an error to the user.
+  const maxAttempts = 4;
+  const delays = [3000, 7000, 15000]; // waits between retries: 3s, 7s, 15s
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
@@ -76,8 +79,8 @@ export async function apiRequest(path, options = {}, retry = true) {
       if (attempt === maxAttempts) {
         throw new Error(`Cannot reach the Observant server at ${API_BASE_URL}. Check the server URL and connection.`);
       }
-      // Wait before retrying: 1s, then 3s
-      await new Promise(resolve => setTimeout(resolve, attempt * 1500));
+      // Progressive wait to ride out a Render cold-start (the server wakes in ~20s)
+      await new Promise(resolve => setTimeout(resolve, delays[attempt - 1] || 15000));
     }
   }
 

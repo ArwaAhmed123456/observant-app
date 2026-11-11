@@ -113,7 +113,7 @@ async function start() {
   fcm.init();
   startOperationsWorker();
 
-  // ── Keep-alive: ping /health every 10 minutes to prevent Render free-tier sleep ──
+  // ── Keep-alive: ping /health every 5 minutes to prevent Render free-tier sleep ──
   const http = require('http');
   const https = require('https');
   const SELF_URL = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
@@ -124,7 +124,7 @@ async function start() {
     }).on('error', err => {
       console.warn('[Keep-alive] ping failed:', err.message);
     });
-  }, 10 * 60 * 1000); // every 10 minutes
+  }, 5 * 60 * 1000); // every 5 minutes (Render sleeps after 15 min inactivity)
   const server = app.listen(PORT, () =>
     console.log(`[Server] Observant API running on port ${PORT} [${process.env.NODE_ENV || 'development'}]`)
   );

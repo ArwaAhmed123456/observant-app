@@ -176,13 +176,23 @@ router.post('/change-password', authenticate,
 );
 
 // ── Update Expo push token ────────────────────────────────────────────────────
+// Accept a valid Expo token OR explicit null/empty string (to clear on logout)
 router.patch('/me/fcm-token',
   authenticate,
-    [body('fcmToken').matches(/^Expo(nent)?PushToken\[[^\]]+\]$/).withMessage('Invalid Expo push token')],
-  validate,
   asyncHandler(async (req, res) => {
-    await User.findByIdAndUpdate(req.user._id, { fcmToken: req.body.fcmToken });
-    console.info(`[Push] Expo token registered for user ${req.user._id}`);
+    const { fcmToken } = req.body;
+    // null / '' / missing → clear the token (logout path)
+    // Otherwise validate it looks like a real Expo token
+    if (fcmToken != null && fcmToken !== '') {
+      if (!/^Expo(nent)?PushToken\[[^\]]+\]$/.test(fcmToken)) {
+        return res.status(422).json({ error: 'Invalid Expo push token format' });
+      }
+      await User.findByIdAndUpdate(req.user._id, { fcmToken });
+      console.info(`[Push] Expo token registered for user ${req.user._id}`);
+    } else {
+      await User.findByIdAndUpdate(req.user._id, { fcmToken: null });
+      console.info(`[Push] Expo token cleared for user ${req.user._id}`);
+    }
     res.json({ message: 'FCM token updated' });
   })
 );
