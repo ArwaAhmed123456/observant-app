@@ -260,6 +260,10 @@ export function AppProvider({ children }) {
         if (active && !activePatrol) {
           const detail = await apiGet(`/api/patrols/${active.id}`);
           setActivePatrol({ ...normalizePatrol(detail.patrol), resumedFromServer: true });
+        } else if (!active && activePatrol) {
+          // Server has no in-progress patrol — clear the stale local one
+          setActivePatrol(null);
+          setPatrolCaptures([]);
         }
         setAlerts((alerts.alerts || []).map(alert => ({ ...normalizeAlert(alert), read: !!alert.isRead })));
         if (checkpointsResult.checkpoints?.length) setCheckpoints(checkpointsResult.checkpoints);
@@ -1705,6 +1709,20 @@ export function AppProvider({ children }) {
             setActivePatrol(latest);
           } catch (_) { /* Keep the server's precise missing list if refresh is unavailable. */ }
           return { incomplete: true, serverAuthoritative: true, missing: error.missingCheckpointIds || [], missingNames: error.missingCheckpointNames || [], patrol: latest };
+        }
+        // Network error — check if server already completed this patrol
+        if (error.message?.includes('Cannot reach')) {
+          try {
+            const detail = await apiGet(`/api/patrols/${patrolId}`);
+            const serverPatrol = normalizePatrol(detail.patrol);
+            if (serverPatrol.status === 'complete' || serverPatrol.status === 'incomplete') {
+              // Server already has it finished — clear locally
+              setPatrolSessions(previous => previous.map(item => item.id === serverPatrol.id ? serverPatrol : item));
+              setActivePatrol(null);
+              setPatrolCaptures(serverPatrol.captures || []);
+              return { incomplete: false, patrol: serverPatrol };
+            }
+          } catch (_) { /* Server truly unreachable */ }
         }
         throw error;
       }
