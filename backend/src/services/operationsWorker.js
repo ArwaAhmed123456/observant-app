@@ -1,4 +1,4 @@
-const { ShiftSession, CheckCall, RandomPromptLog, User, Site } = require('../models');
+const { ShiftSession, CheckCall, RandomPromptLog, PatrolSession, User, Site } = require('../models');
 const { createAlert } = require('./alertService');
 const { sendPush } = require('./fcm');
 const { sendRoutinePatrolDigests } = require('./routineDigest');
@@ -111,6 +111,39 @@ async function fireDueRandomPrompts(now = new Date()) {
   }
 }
 
+// Recover active shifts created before server-side initial prompt scheduling
+// was deployed. Avoid duplicates while a patrol or response window is active.
+async function scheduleMissingRandomPrompts(now = new Date()) {
+  const sessions = await ShiftSession.find({
+    bookedOffAt: null,
+    nextRandomPromptAt: null,
+  }).limit(100);
+
+  for (const session of sessions) {
+    const [activePatrol, pendingPrompt] = await Promise.all([
+      PatrolSession.exists({
+        organisationId: session.organisationId,
+        shiftSessionId: session._id,
+        status: 'in_progress',
+      }),
+      RandomPromptLog.exists({
+        organisationId: session.organisationId,
+        shiftSessionId: session._id,
+        responded: false,
+        managerAlerted: false,
+        expiresAt: { $gt: now },
+      }),
+    ]);
+    if (activePatrol || pendingPrompt) continue;
+
+    const nextPromptAt = new Date(now.getTime() + (10 + Math.random() * 20) * 60 * 1000);
+    await ShiftSession.updateOne(
+      { _id: session._id, bookedOffAt: null, nextRandomPromptAt: null },
+      { $set: { nextRandomPromptAt: nextPromptAt } }
+    );
+  }
+}
+
 async function warnShiftsEndingSoon(now = new Date()) {
   const due = await ShiftSession.find({
     bookedOffAt: null,
@@ -171,6 +204,7 @@ function startOperationsWorker() {
       const now = new Date();
       await fireDueCheckCalls(now);
       await expireCheckCalls(now);
+      await scheduleMissingRandomPrompts(now);
       await fireDueRandomPrompts(now);
       await warnShiftsEndingSoon(now);
       await alertIgnoredPrompts(now);
@@ -184,4 +218,4 @@ function startOperationsWorker() {
   tick();
 }
 
-module.exports = { startOperationsWorker, fireDueCheckCalls, expireCheckCalls, fireDueRandomPrompts, warnShiftsEndingSoon, alertIgnoredPrompts };
+module.exports = { startOperationsWorker, fireDueCheckCalls, expireCheckCalls, fireDueRandomPrompts, scheduleMissingRandomPrompts, warnShiftsEndingSoon, alertIgnoredPrompts };
