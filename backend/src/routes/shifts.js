@@ -122,7 +122,9 @@ router.post('/book-on',
       scheduledEnd,
       scheduledEndAt,
       nextCheckCallAt: new Date(now.getTime() + 60 * 60 * 1000),
-      nextRandomPromptAt: null,
+      // Schedule the first patrol prompt on the server so it still fires when
+      // the guard's app is backgrounded or closed.
+      nextRandomPromptAt: new Date(now.getTime() + (10 + Math.random() * 20) * 60 * 1000),
       punctuality,
       punctualityMinutes: diffMins,
     });

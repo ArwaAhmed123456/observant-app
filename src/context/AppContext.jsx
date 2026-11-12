@@ -1486,6 +1486,11 @@ export function AppProvider({ children }) {
     if (patrolTimerRef.current) clearTimeout(patrolTimerRef.current);
     if (antiIdleTimerRef.current) clearTimeout(antiIdleTimerRef.current);
 
+    // In API mode, the backend worker schedules and pushes patrol prompts.
+    // Client timers stop while iOS backgrounds the app, so don't create a
+    // competing local-only prompt that the server cannot acknowledge.
+    if (API_ENABLED) return;
+
     const base = lastPatrolEndTime ? new Date(lastPatrolEndTime) : new Date();
     const nextPatrolAt = new Date(base.getTime() + PATROL_INTERVAL_MS);
     const antiIdleDelay = ANTI_IDLE_MIN_MS + Math.random() * (ANTI_IDLE_MAX_MS - ANTI_IDLE_MIN_MS);
