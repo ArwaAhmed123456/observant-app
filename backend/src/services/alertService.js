@@ -74,9 +74,21 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
   });
 
   // Fire push notifications asynchronously with full officer telemetry
+  // For patrol_complete: only push if routinePatrolPush is explicitly enabled (opt-in)
+  // For ALL other alert types (missed check calls, SOS, incidents, etc.): push to everyone
+  // who has NOT set exceptionOnly to restrict to exceptions only.
+  // Default: all alert types go through unless manager has exceptionOnly=true AND
+  // this is a routine/non-exception alert type.
+  const exceptionAlertTypes = ['check_call_missed', 'random_prompt_ignored', 'sos', 'incident', 'patrol_incomplete'];
   const pushManagers = type === 'patrol_complete'
-    ? managers.filter(manager => !manager.notificationPreferences?.exceptionOnly && manager.notificationPreferences?.routinePatrolPush === true)
-    : managers;
+    ? managers.filter(manager => manager.notificationPreferences?.routinePatrolPush === true)
+    : managers.filter(manager => {
+        // If manager set exceptionOnly, only send genuinely exceptional alerts
+        if (manager.notificationPreferences?.exceptionOnly) {
+          return exceptionAlertTypes.includes(type);
+        }
+        return true; // send everything by default
+      });
   fcm.notifyManagers(alert, pushManagers).catch(err =>
     console.error('[alertService] FCM error:', err.message)
   );

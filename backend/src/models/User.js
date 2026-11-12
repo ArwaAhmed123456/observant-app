@@ -7,7 +7,7 @@ const bcrypt   = require('bcryptjs');
 
 const notificationPreferencesSchema = new mongoose.Schema({
   exceptionOnly: { type: Boolean, default: false },
-  routinePatrolPush: { type: Boolean, default: false },
+  routinePatrolPush: { type: Boolean, default: true },  // ON by default — managers get patrol notifications
   dailyPatrolEmailDigest: { type: Boolean, default: false },
   includePatrolPhotosInDigest: { type: Boolean, default: true },
   lastRoutineDigestAt: { type: Date, default: null },
