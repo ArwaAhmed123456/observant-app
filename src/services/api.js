@@ -1,4 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const TOKEN_KEY = 'obs_auth_tokens';
 const configuredUrl = process.env.EXPO_PUBLIC_API_URL || '';
@@ -29,6 +31,44 @@ export async function getAccessToken() {
 export function authorizedImageSource(uri) {
   const accessToken = tokens?.accessToken;
   return { uri, ...(accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : {}) };
+}
+
+function getMultipartFile(body) {
+  const parts = body?._parts;
+  if (!Array.isArray(parts)) return null;
+  const filePart = parts.find(([, value]) => value && typeof value === 'object' && typeof value.uri === 'string');
+  if (!filePart) return null;
+  const [fieldName, file] = filePart;
+  const parameters = {};
+  for (const [key, value] of parts) {
+    if (key !== fieldName && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')) {
+      parameters[key] = String(value);
+    }
+  }
+  return { fieldName, file, parameters };
+}
+
+async function sendRequest(url, options, isFormData) {
+  const multipartFile = Platform.OS === 'ios' && isFormData ? getMultipartFile(options.body) : null;
+  if (!multipartFile) return fetch(url, options);
+
+  const result = await FileSystem.uploadAsync(url, multipartFile.file.uri, {
+    httpMethod: options.method || 'POST',
+    uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+    fieldName: multipartFile.fieldName,
+    mimeType: multipartFile.file.type || 'application/octet-stream',
+    parameters: multipartFile.parameters,
+    headers: options.headers,
+  });
+  const payload = (() => {
+    try { return JSON.parse(result.body || '{}'); }
+    catch { return {}; }
+  })();
+  return {
+    status: result.status,
+    ok: result.status >= 200 && result.status < 300,
+    json: async () => payload,
+  };
 }
 
 async function refreshAccessToken() {
@@ -73,11 +113,12 @@ export async function apiRequest(path, options = {}, retry = true) {
   const delays = [3000, 7000, 15000]; // waits between retries: 3s, 7s, 15s
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+      response = await sendRequest(`${API_BASE_URL}${path}`, { ...options, headers }, isFormData);
       break; // success — exit retry loop
-    } catch {
+    } catch (error) {
       if (attempt === maxAttempts) {
-        throw new Error(`Cannot reach the Observant server at ${API_BASE_URL}. Check the server URL and connection.`);
+        const cause = error?.message ? ` (${error.message})` : '';
+        throw new Error(`Cannot reach the Observant server at ${API_BASE_URL}. Check the server URL and connection.${cause}`);
       }
       // Progressive wait to ride out a Render cold-start (the server wakes in ~20s)
       await new Promise(resolve => setTimeout(resolve, delays[attempt - 1] || 15000));
