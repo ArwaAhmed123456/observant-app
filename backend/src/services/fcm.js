@@ -38,6 +38,33 @@ async function sendPush(tokens, { title, body, data = {} }) {
       }
     }
     if (!response.ok) console.error('[Push] Expo request failed:', JSON.stringify(payload.errors || payload));
+
+    // Asynchronously check delivery receipts from Apple (APNs) after 5 seconds.
+    // Expo /send only queues the notification; Apple delivery errors (like InvalidProviderToken)
+    // appear in the receipts endpoint.
+    const ticketIds = tickets.filter(item => item.id).map(item => item.id);
+    if (ticketIds.length) {
+      setTimeout(async () => {
+        try {
+          const receiptRes = await fetch('https://exp.host/--/api/v2/push/getReceipts', {
+            method: 'POST',
+            headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: ticketIds }),
+          });
+          const receiptData = await receiptRes.json();
+          if (receiptData?.data) {
+            for (const [id, receipt] of Object.entries(receiptData.data)) {
+              if (receipt.status === 'error') {
+                console.error(`[Push] Apple APNs rejected delivery for ticket ${id}: ${receipt.message} (${receipt.details?.error || receipt.details?.apns?.reason || ''})`);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[Push] Receipt inspection warning:', e.message);
+        }
+      }, 5000);
+    }
+
     return { success: response.ok && successCount > 0, successCount, failureCount: messages.length - successCount };
   } catch (error) {
     console.error('[Push] Expo delivery failed:', error.message);
