@@ -144,6 +144,32 @@ async function scheduleMissingRandomPrompts(now = new Date()) {
   }
 }
 
+// Backfill hourly reminders for active shifts created before server scheduling
+// was enabled, and for sessions left without a next reminder after recovery.
+async function scheduleMissingCheckCalls(now = new Date()) {
+  const sessions = await ShiftSession.find({
+    bookedOffAt: null,
+    nextCheckCallAt: null,
+  }).limit(100);
+
+  const nextHour = new Date(now);
+  nextHour.setMinutes(0, 0, 0);
+  nextHour.setHours(nextHour.getHours() + 1);
+
+  for (const session of sessions) {
+    const pendingCall = await CheckCall.exists({
+      sessionId: session._id,
+      response: null,
+    });
+    if (pendingCall) continue;
+
+    await ShiftSession.updateOne(
+      { _id: session._id, bookedOffAt: null, nextCheckCallAt: null },
+      { $set: { nextCheckCallAt: nextHour } }
+    );
+  }
+}
+
 async function warnShiftsEndingSoon(now = new Date()) {
   const due = await ShiftSession.find({
     bookedOffAt: null,
@@ -204,6 +230,7 @@ function startOperationsWorker() {
       const now = new Date();
       await fireDueCheckCalls(now);
       await expireCheckCalls(now);
+      await scheduleMissingCheckCalls(now);
       await scheduleMissingRandomPrompts(now);
       await fireDueRandomPrompts(now);
       await warnShiftsEndingSoon(now);
@@ -218,4 +245,4 @@ function startOperationsWorker() {
   tick();
 }
 
-module.exports = { startOperationsWorker, fireDueCheckCalls, expireCheckCalls, fireDueRandomPrompts, scheduleMissingRandomPrompts, warnShiftsEndingSoon, alertIgnoredPrompts };
+module.exports = { startOperationsWorker, fireDueCheckCalls, expireCheckCalls, fireDueRandomPrompts, scheduleMissingCheckCalls, scheduleMissingRandomPrompts, warnShiftsEndingSoon, alertIgnoredPrompts };
