@@ -28,8 +28,18 @@ export async function registerPushNotifications() {
     }
 
     // Request permission — on iOS this triggers the system dialog
+    const canReceiveNotifications = permission => {
+      if (Platform.OS !== 'ios') return permission.granted;
+      const status = permission.ios?.status;
+      return permission.granted || [
+        Notifications.IosAuthorizationStatus.AUTHORIZED,
+        Notifications.IosAuthorizationStatus.PROVISIONAL,
+        Notifications.IosAuthorizationStatus.EPHEMERAL,
+      ].includes(status);
+    };
+
     let permission = await Notifications.getPermissionsAsync();
-    if (!permission.granted) {
+    if (!canReceiveNotifications(permission)) {
       permission = await Notifications.requestPermissionsAsync({
         ios: {
           allowAlert: true,
@@ -39,7 +49,11 @@ export async function registerPushNotifications() {
         },
       });
     }
-    if (!permission.granted) return false;
+    if (!canReceiveNotifications(permission)) {
+      const status = Platform.OS === 'ios' ? permission.ios?.status : permission.status;
+      console.warn(`[Observant] Push notifications are not authorized (status: ${status || 'unknown'}). Enable them in device Settings.`);
+      return false;
+    }
 
     const projectId = Constants.easConfig?.projectId
       || Constants.expoConfig?.extra?.eas?.projectId;
@@ -51,7 +65,7 @@ export async function registerPushNotifications() {
     await apiPatch('/api/auth/me/fcm-token', { fcmToken: token.data });
     return true;
   } catch (error) {
-    console.warn('[Observant] Push registration was unavailable:', error.message);
+    console.warn('[Observant] Push registration failed:', error.message);
     return false;
   }
 }
