@@ -30,8 +30,8 @@ async function loadRemoteSnapshot(user) {
   const isManager = user.role === 'manager' || user.role === 'admin' || user.role === 'superadmin';
   const [sitesResult, shiftsResult, callsResult, patrolsResult, rostersResult, usersResult, alertsResult, templatesResult, auditResult] = await Promise.all([
     apiGet('/api/sites'),
-    apiGet('/api/shifts?limit=100'),
-    apiGet('/api/check-calls?limit=100'),
+    apiGet('/api/shifts?limit=500'),
+    apiGet('/api/check-calls?limit=500'),
     apiGet('/api/patrols?limit=100'),
     apiGet('/api/rosters'),
     isManager ? apiGet('/api/users') : Promise.resolve({ users: [] }),
@@ -223,8 +223,8 @@ export function AppProvider({ children }) {
     const refreshOperations = async () => {
       try {
         const [shifts, calls, patrols, alerts, prompts, rostersResult, checkpointsResult] = await Promise.all([
-          apiGet('/api/shifts?limit=100'),
-          apiGet('/api/check-calls?limit=100'),
+          apiGet('/api/shifts?limit=500'),
+          apiGet('/api/check-calls?limit=500'),
           apiGet('/api/patrols?limit=100'),
           currentUser.role === 'guard' ? Promise.resolve({ alerts: [] }) : apiGet('/api/alerts?limit=100'),
           apiGet('/api/patrols/random-prompt?limit=100'),

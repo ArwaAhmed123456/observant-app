@@ -2,86 +2,82 @@
 
 export const INITIAL_SITES = [
   {
-    id: 'site-1',
-    name: 'Apex Tower - Financial Center',
-    address: '100 Bishopsgate, City Center',
+    id: '6aef099c741e8672af1fa0b3',
+    name: 'Totmonslow Solar Farm',
+    address: 'Totmonslow, Staffordshire',
     zone: 'Zone Alpha',
     requiredCheckpoints: [
-      { id: 'cp-1-1', name: 'Main Lobby & Turnstiles', description: 'Inspect visitor badges & speed gates', requiredPhoto: true },
-      { id: 'cp-1-2', name: 'Loading Bay & Service Lift', description: 'Check bay roller doors & padlock seal', requiredPhoto: true },
-      { id: 'cp-1-3', name: 'Basement Parking B2', description: 'Inspect fire exits and barrier gates', requiredPhoto: true },
-      { id: 'cp-1-4', name: 'Server Room Corridor 4F', description: 'Verify biometric access log and HVAC sound', requiredPhoto: true },
-      { id: 'cp-1-5', name: 'Rooftop Helipad & Plant Room', description: 'Inspect perimeter safety rail and plant locks', requiredPhoto: true }
-    ]
-  },
-  {
-    id: 'site-2',
-    name: 'Highland Logistics Hub',
-    address: '44 Freight Way, Industrial Estate',
-    zone: 'Zone Bravo',
-    requiredCheckpoints: [
-      { id: 'cp-2-1', name: 'North Security Gate & Boom', description: 'Inspect ANPR cameras and vehicle barriers', requiredPhoto: true },
-      { id: 'cp-2-2', name: 'Container Yard Bay 12-18', description: 'Check refrigerated container seals', requiredPhoto: true },
-      { id: 'cp-2-3', name: 'Distribution Center Bay 4', description: 'Inspect dock levelers & warehouse doors', requiredPhoto: true },
-      { id: 'cp-2-4', name: 'Perimeter Sensor Post 9', description: 'Verify electric fence tension & warning lamps', requiredPhoto: true },
-      { id: 'cp-2-5', name: 'Fleet Overnight Staging', description: 'Check parked tractor units and fuel tanks', requiredPhoto: true }
-    ]
-  },
-  {
-    id: 'site-3',
-    name: 'Marina Gateway Maritime Dock',
-    address: 'Pier 7, Commercial Docks',
-    zone: 'Zone Delta',
-    requiredCheckpoints: [
-      { id: 'cp-3-1', name: 'Harbor Gatehouse', description: 'Inspect terminal entry gate and visitor logs', requiredPhoto: true },
-      { id: 'cp-3-2', name: 'Dry Dock Perimeter South', description: 'Verify mooring lines and safety fencing', requiredPhoto: true },
-      { id: 'cp-3-3', name: 'Fuel & Hazardous Tank Farm', description: 'Inspect emergency cutoff valve & bund walls', requiredPhoto: true },
-      { id: 'cp-3-4', name: 'Customs Bonded Warehouse', description: 'Inspect tamper-evident seal on main shutter', requiredPhoto: true }
+      { id: 'cp-1-1', name: 'Main Security Gate & Barrier', description: 'Inspect gate access and lock seal', requiredPhoto: true },
+      { id: 'cp-1-2', name: 'Inverter Enclosure 1', description: 'Inspect safety disconnect and warning lamps', requiredPhoto: true },
+      { id: 'cp-1-3', name: 'North Boundary Perimeter', description: 'Inspect perimeter fence line', requiredPhoto: true },
+      { id: 'cp-1-4', name: 'Main Control Room & CCTV', description: 'Verify monitoring telemetry and logbook', requiredPhoto: true }
     ]
   }
 ];
 
 export const INITIAL_USERS = [
   {
-    id: 'guard-1',
-    name: 'Ahmad Khan',
+    id: '6aef019b741e8672af1fa0a7',
+    name: 'Abdullah Malik',
     role: 'guard',
-    badgeNumber: 'SEC-8042',
-    phone: '+44 7700 900142',
-    assignedSiteId: 'site-1',
+    badgeNumber: '10147851784414348',
+    phone: '+44 7700 900101',
+    assignedSiteId: '6aef099c741e8672af1fa0b3',
     avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
     status: 'Booked On',
     experienceYears: 4
   },
   {
-    id: 'guard-2',
-    name: 'Marcus Vance',
+    id: '6aef0194741e8672af1fa0a1',
+    name: 'Ukasha Ayaz',
     role: 'guard',
-    badgeNumber: 'SEC-7419',
-    phone: '+44 7700 900781',
-    assignedSiteId: 'site-2',
+    badgeNumber: '10174378210489548',
+    phone: '+44 7700 900102',
+    assignedSiteId: '6aef099c741e8672af1fa0b3',
     avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80',
     status: 'Off Duty',
-    experienceYears: 6
+    experienceYears: 5
   },
   {
-    id: 'guard-3',
-    name: 'David Chen',
+    id: '6aef0198741e8672af1fa0a5',
+    name: 'Asad Iqbal',
     role: 'guard',
-    badgeNumber: 'SEC-9104',
-    phone: '+44 7700 900355',
-    assignedSiteId: 'site-3',
+    badgeNumber: '10146018742234308',
+    phone: '+44 7700 900103',
+    assignedSiteId: '6aef099c741e8672af1fa0b3',
     avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80',
+    status: 'Off Duty',
+    experienceYears: 3
+  },
+  {
+    id: '6aef0191741e8672af1fa09f',
+    name: 'Waqar Javaid',
+    role: 'guard',
+    badgeNumber: '10128344678243956',
+    phone: '+44 7700 900104',
+    assignedSiteId: '6aef099c741e8672af1fa0b3',
+    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=150&auto=format&fit=crop&q=80',
+    status: 'Off Duty',
+    experienceYears: 4
+  },
+  {
+    id: '6aef0196741e8672af1fa0a3',
+    name: 'Rehman Saleem',
+    role: 'guard',
+    badgeNumber: '10132649517121228',
+    phone: '+44 7700 900105',
+    assignedSiteId: '6aef099c741e8672af1fa0b3',
+    avatar: 'https://images.unsplash.com/photo-1492562080023-ab3db95bfbce?w=150&auto=format&fit=crop&q=80',
     status: 'Off Duty',
     experienceYears: 2
   },
   {
-    id: 'mgr-1',
-    name: 'Elena Rostova',
+    id: 'abid_mgr',
+    name: 'Abid Fiaz',
     role: 'manager',
-    badgeNumber: 'MGR-1002',
+    badgeNumber: 'MGR-001',
     phone: '+44 7700 900999',
-    assignedSiteIds: ['site-1', 'site-2', 'site-3'],
+    assignedSiteIds: ['6aef099c741e8672af1fa0b3'],
     avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
     status: 'Active Command',
     department: 'Regional Security Operations'

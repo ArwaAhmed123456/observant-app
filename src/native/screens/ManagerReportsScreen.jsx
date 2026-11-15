@@ -35,7 +35,10 @@ function isInRange(dateStr, range, customStart, customEnd) {
     const day = mon.getDay() || 7;
     mon.setDate(mon.getDate() - (day - 1));
     mon.setHours(0,0,0,0);
-    return d >= mon && d <= today;
+    const sunEnd = new Date(mon);
+    sunEnd.setDate(sunEnd.getDate() + 7);
+    sunEnd.setHours(8,0,0,0); // include through Monday 08:00 for Sunday night shifts
+    return d >= mon && d <= sunEnd;
   }
   if (range === 'this_month') {
     return d.getMonth() === today.getMonth() && d.getFullYear() === today.getFullYear();
@@ -58,6 +61,8 @@ function getReportBounds(range, customStart, customEnd) {
     const weekday = start.getDay() || 7;
     start.setDate(start.getDate() - weekday + 1);
     start.setHours(0, 0, 0, 0);
+    end.setDate(start.getDate() + 7);
+    end.setHours(8, 0, 0, 0);
   } else if (range === 'this_month') {
     start.setDate(1);
     start.setHours(0, 0, 0, 0);
@@ -76,7 +81,7 @@ export function ManagerReportsScreen() {
   const guards = (users || []).filter(u => u.role === 'guard' && u.active !== false && u.status !== 'inactive' && (canSeeSite(u.siteId) || !u.siteId));
 
   // Filters
-  const [dateRange, setDateRange]         = useState('today');
+  const [dateRange, setDateRange]         = useState('this_week');
   const [customStart, setCustomStart]     = useState('');
   const [customEnd, setCustomEnd]         = useState('');
   const [guardFilter, setGuardFilter]     = useState('all');
@@ -146,17 +151,21 @@ export function ManagerReportsScreen() {
         .forEach(cc => {
           const guard = (users || []).find(u => u.id === cc.guardId || u._id === cc.guardId);
           const site  = (sites || []).find(s => s.id === cc.siteId || s._id === cc.siteId);
-          const session = (shiftSessions || []).find(s => s.id === cc.sessionId);
+          const session = (shiftSessions || []).find(s => String(s.id || s._id) === String(cc.sessionId));
           const timeVal = cc.firedAt || cc.respondedAt || cc.scheduledFor || new Date().toISOString();
           const remoteRecord = serverReportRows[String(cc.id || cc._id)] || {};
           result.push({
             type: 'check_call',
             id: cc.id || cc._id,
+            sessionId: cc.sessionId ? String(cc.sessionId) : null,
             guardName: guard?.name || cc.guardName || 'Officer',
             badgeNumber: guard?.badgeNumber || cc.badgeNumber || '—',
             site: site?.name || cc.siteName || '—',
             shiftTime: session ? `${formatTime(session.bookedOnAt)}${session.bookedOffAt ? ' – ' + formatTime(session.bookedOffAt) : ''}` : '—',
+            shiftStartDate: session?.bookedOnAt || null,
+            shiftEndDate: session?.bookedOffAt || null,
             checkCallTime: formatTime(timeVal),
+            rawTime: timeVal,
             checkCallResult: cc.response === 'yes' ? '✓ Yes (Safe)' : cc.response === 'missed' ? '✗ Missed SLA' : cc.response === 'no' ? '⚠ Issue Reported' : '— Pending',
             note: cc.note || (cc.category ? `Category: ${cc.category}` : ''),
             date: formatDate(timeVal),
@@ -283,7 +292,9 @@ export function ManagerReportsScreen() {
         const day = mon.getDay() || 7;
         mon.setDate(mon.getDate() - (day - 1));
         startD = mon;
-        endD = new Date();
+        const sun = new Date(mon);
+        sun.setDate(sun.getDate() + 6);
+        endD = sun;
       } else if (dateRange === 'this_month') {
         startD = new Date(startD.getFullYear(), startD.getMonth(), 1);
         endD = new Date();
@@ -311,7 +322,7 @@ export function ManagerReportsScreen() {
       const cleanCompany = orgName.replace(/[^a-zA-Z0-9]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '') || 'Observant_Security';
       const pdfFileName = `${cleanCompany}${sitePart}_${typePart}_Report_${datePart}.pdf`;
 
-      // ── Group check-call rows by officer + site + shift-date ──────────────
+      // ── Group check-call rows by shift session ──────────────
       const checkCallRows = rows.filter(r => r.type === 'check_call');
       const patrolRows    = rows.filter(r => r.type === 'patrol');
 
@@ -321,20 +332,46 @@ export function ManagerReportsScreen() {
 
       const ccGroupMap = new Map();
       checkCallRows.forEach(r => {
-        const key = `${r.site}||${r.guardName}||${r.badgeNumber}||${r.date}`;
-        if (!ccGroupMap.has(key)) {
-          const startH = parseInt((r.shiftTime || '').split(':')[0], 10);
-          const isNight = !isNaN(startH) && (startH >= 19 || startH < 7);
-          ccGroupMap.set(key, {
+        let shiftDateKey = '';
+        let isNight = false;
+
+        const rawStartH = parseInt((r.shiftTime || '').split(':')[0], 10);
+        if (!isNaN(rawStartH)) {
+          isNight = rawStartH >= 18 || rawStartH < 6;
+        } else if (r.shiftStartDate) {
+          const startD = new Date(r.shiftStartDate);
+          const startH = startD.getUTCHours();
+          isNight = (startH >= 18 || startH < 6);
+        } else {
+          const timeParts = (r.checkCallTime || '').split(':');
+          const h = parseInt(timeParts[0], 10);
+          isNight = (h >= 18 || h < 6);
+        }
+
+        if (r.shiftStartDate) {
+          const startD = new Date(r.shiftStartDate);
+          shiftDateKey = startD.toISOString().slice(0, 10);
+        } else {
+          const callD = new Date(r.rawTime || r.date);
+          if (isNight && callD.getUTCHours() < 6) {
+            callD.setUTCDate(callD.getUTCDate() - 1);
+          }
+          shiftDateKey = callD.toISOString().slice(0, 10);
+        }
+
+        const shiftKey = r.sessionId ? String(r.sessionId) : `${r.site}||${r.guardName}||${shiftDateKey}||${isNight ? 'Night' : 'Day'}`;
+
+        if (!ccGroupMap.has(shiftKey)) {
+          ccGroupMap.set(shiftKey, {
             site: r.site,
             guardName: r.guardName,
-            badgeNumber: r.badgeNumber,
-            date: r.date,
-            shiftTime: r.shiftTime,
+            shiftDateKey,
             isNight,
+            shiftType: isNight ? 'Night' : 'Day',
             checks: {},
           });
         }
+
         const timeStr = r.checkCallTime;
         const parts = (timeStr || '').split(':');
         const h = parseInt(parts[0], 10);
@@ -342,37 +379,60 @@ export function ManagerReportsScreen() {
         if (!isNaN(h)) {
           const nearestHour = Math.round((h * 60 + m) / 60) % 24;
           const slotKey = String(nearestHour).padStart(2, '0') + '00';
-          const timeVal = timeStr ? timeStr.replace(':', '').substring(0, 4) : '-';
+          const timeVal = String(h).padStart(2, '0') + String(m).padStart(2, '0');
           const isMissed = r.checkCallResult?.startsWith('✗');
           const isIssue  = r.checkCallResult?.startsWith('⚠');
-          if (!ccGroupMap.get(key).checks[slotKey]) {
-            ccGroupMap.get(key).checks[slotKey] = { time: timeVal, missed: isMissed, issue: isIssue };
+          if (!ccGroupMap.get(shiftKey).checks[slotKey]) {
+            ccGroupMap.get(shiftKey).checks[slotKey] = { time: timeVal, missed: isMissed, issue: isIssue };
           }
         }
       });
 
-      const ccGroups = [...ccGroupMap.values()];
+      // Sort all shifts chronologically by date, Day shifts before Night shifts, then guard name
+      const allShifts = [...ccGroupMap.values()].sort((a, b) => {
+        if (a.shiftDateKey !== b.shiftDateKey) return a.shiftDateKey.localeCompare(b.shiftDateKey);
+        if (a.isNight !== b.isNight) return a.isNight ? 1 : -1;
+        return a.guardName.localeCompare(b.guardName);
+      });
 
-      // Render one Check Call row per guard per shift
-      const renderCCRow = (g) => {
-        const hours = g.isNight ? NIGHT_HOURS : DAY_HOURS;
-        const cells = hours.map(h => {
-          const c = g.checks[h];
-          if (!c) return `<td style="border:1px solid #000;padding:3px 2px;text-align:center;font-size:8px;">-</td>`;
-          const isProblem = c.missed || c.issue;
-          const color = isProblem ? 'color:red;font-weight:bold;' : '';
-          return `<td style="border:1px solid #000;padding:3px 2px;text-align:center;font-size:8px;${color}">${c.time}</td>`;
+      // Group shifts by day block
+      const dayGroups = new Map();
+      allShifts.forEach(shift => {
+        if (!dayGroups.has(shift.shiftDateKey)) dayGroups.set(shift.shiftDateKey, []);
+        dayGroups.get(shift.shiftDateKey).push(shift);
+      });
+
+      const tableRowsHtml = [...dayGroups.entries()].map(([dateKey, shifts]) => {
+        return shifts.map((g, idx) => {
+          const hours = g.isNight ? NIGHT_HOURS : DAY_HOURS;
+          const cells = hours.map(h => {
+            const c = g.checks[h];
+            if (!c || !c.time || c.time === '-') {
+              return `<td style="border:1px solid #000;padding:5px 2px;text-align:center;font-size:8px;">-</td>`;
+            }
+            const isProblem = c.missed || c.issue;
+            const color = isProblem ? 'color:red;font-weight:bold;' : '';
+            return `<td style="border:1px solid #000;padding:5px 2px;text-align:center;font-size:8px;${color}">${c.time}</td>`;
+          }).join('');
+
+          const siteCell = idx === 0 ? `
+            <td rowspan="${shifts.length}" style="border:1.5px solid #000;border-bottom:2px solid #000;padding:8px 4px;font-size:8.5px;font-weight:bold;text-align:center;text-transform:uppercase;vertical-align:middle;line-height:1.3;">
+              ${(g.site || 'TOTMONSLOW SOLAR FARM').replace(/\s+/g, '<br/>')}
+            </td>` : '';
+
+          const isLastInDay = idx === shifts.length - 1;
+          const bottomBorder = isLastInDay ? 'border-bottom:2px solid #000;' : '';
+
+          return `<tr style="${bottomBorder}">
+            ${siteCell}
+            <td style="border:1px solid #000;${bottomBorder}padding:5px 6px;font-size:9px;text-align:center;vertical-align:middle;">${g.guardName}</td>
+            <td style="border:1px solid #000;${bottomBorder}padding:5px 4px;font-size:9px;text-align:center;vertical-align:middle;">${g.shiftType}</td>
+            ${cells}
+          </tr>`;
         }).join('');
-        return `<tr>
-          <td style="border:1px solid #000;padding:4px 5px;font-size:8.5px;font-weight:bold;text-align:center;text-transform:uppercase;vertical-align:middle;">${g.site}</td>
-          <td style="border:1px solid #000;padding:4px 5px;font-size:8.5px;text-align:center;vertical-align:middle;">${g.guardName}</td>
-          <td style="border:1px solid #000;padding:4px 3px;font-size:8.5px;text-align:center;vertical-align:middle;">${g.badgeNumber || '-'}</td>
-          <td style="border:1px solid #000;padding:4px 3px;font-size:8.5px;text-align:center;vertical-align:middle;">${g.isNight ? 'Night' : 'Day'}</td>
-          ${cells}
-        </tr>`;
-      };
+      }).join('');
 
-      // Patrol Verification Records rows
+      // Patrol Verification Records rows (only when patrols report explicitly requested)
       const buildPatrolRows = () => patrolRows.map(r => {
         const isIncomplete = r.patrolStatus !== 'complete';
         return `<tr>
@@ -405,8 +465,6 @@ export function ManagerReportsScreen() {
   th { border: 1px solid #000; background: #fff; color: #000; font-size: 8px; font-weight: bold; text-align: center; padding: 3px 2px; vertical-align: middle; }
   td { border: 1px solid #000; }
   .section-label { font-size: 11px; font-weight: bold; margin: 8px 0 4px 0; text-transform: uppercase; border-bottom: 1.5px solid #000; padding-bottom: 2px; }
-  .footer { margin-top: 10px; font-size: 7.5px; color: #555; text-align: center; border-top: 1px solid #ccc; padding-top: 4px; }
-  .doc-no { font-size: 7.5px; color: #555; text-align: left; margin-top: 6px; }
 </style>
 <title>${pdfFileName.replace('.pdf', '')}</title>
 </head>
@@ -427,31 +485,30 @@ export function ManagerReportsScreen() {
   Missed calls (Security Officer not responding to your call after 15 minutes) must be reported &amp; fully explained in the Incident Log Book
 </div>
 
-${(reportType === 'combined' || reportType === 'check_calls') && ccGroups.length > 0 ? `
+${allShifts.length > 0 ? `
 <table>
   <thead>
     <tr>
-      <th rowspan="2" style="width:13%; border:1.5px solid #000;">Site<br/>Name</th>
-      <th rowspan="2" style="width:15%; border:1.5px solid #000;">Name of<br/>Security Officer<br/>on Duty</th>
-      <th rowspan="2" style="width:6%; border:1.5px solid #000;">SIA<br/>Badge</th>
-      <th rowspan="2" style="width:9%; border:1.5px solid #000;">Shift Times<br/>(DAY/Night)</th>
-      <th colspan="13" style="border:1.5px solid #000; font-size:8.5px; padding:4px;">Times of check calls made by the security officers to control</th>
+      <th rowspan="2" style="width:14%; border:1.5px solid #000; font-size:9px; font-weight:bold;">Site<br/>Name</th>
+      <th rowspan="2" style="width:18%; border:1.5px solid #000; font-size:9px; font-weight:bold;">Name of<br/>Security Officer<br/>on Duty</th>
+      <th rowspan="2" style="width:10%; border:1.5px solid #000; font-size:9px; font-weight:bold;">Shift Times<br/>(DAY/Night)</th>
+      <th colspan="13" style="border:1.5px solid #000; font-size:9px; font-weight:bold; padding:4px;">Times of check calls made by the security officers to control</th>
     </tr>
     <tr>
       ${DAY_HOURS.map((h, i) => `
-      <th style="width:3.9%; border:1px solid #000; padding:1px 0; font-size:7px;">
+      <th style="width:4.4%; border:1px solid #000; padding:2px 0; font-size:7.5px;">
         <div style="font-weight:bold;">${h}</div>
-        <div style="color:#666; border-top:1px dotted #aaa; margin-top:1px; padding-top:1px; font-weight:normal;">${NIGHT_HOURS[i]}</div>
+        <div style="color:#000; border-top:1px dotted #888; margin-top:2px; padding-top:2px; font-weight:normal;">${NIGHT_HOURS[i]}</div>
       </th>`).join('')}
     </tr>
   </thead>
   <tbody>
-    ${ccGroups.map(renderCCRow).join('')}
+    ${tableRowsHtml}
   </tbody>
 </table>
 ` : ''}
 
-${(reportType === 'combined' || reportType === 'patrols') && patrolRows.length > 0 ? `
+${reportType === 'patrols' && patrolRows.length > 0 ? `
 <div class="section-label">Patrol Verification Records</div>
 <table>
   <thead>
@@ -467,9 +524,6 @@ ${(reportType === 'combined' || reportType === 'patrols') && patrolRows.length >
   <tbody>${buildPatrolRows()}</tbody>
 </table>
 ` : ''}
-
-<div class="footer">OBSERVANT SECURITY &nbsp;&middot;&nbsp; Confidential Operational Security Record &nbsp;&middot;&nbsp; Generated: ${new Date().toLocaleString('en-GB')} &nbsp;&middot;&nbsp; ${rows.length} Total Record(s)</div>
-<div class="doc-no">Doc No: QBC.3, Issue Date:${startDateStr}, Issue:1</div>
 
 </body>
 </html>`;

@@ -199,7 +199,10 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
     });
 
     const rows = [...rowsByKey.values()].sort((a, b) =>
-      a.siteName.localeCompare(b.siteName) || a.officerName.localeCompare(b.officerName) || a.shiftDate.localeCompare(b.shiftDate) || a.shiftType.localeCompare(b.shiftType)
+      a.siteName.localeCompare(b.siteName) ||
+      a.shiftDate.localeCompare(b.shiftDate) ||
+      (a.shiftType === b.shiftType ? 0 : a.shiftType === 'Day' ? -1 : 1) ||
+      a.officerName.localeCompare(b.officerName)
     );
     res.json({
       company: { name: organisation?.name || 'Observant Security', slug: organisation?.slug || null, logoUrl: organisation?.logoUrl || null },
