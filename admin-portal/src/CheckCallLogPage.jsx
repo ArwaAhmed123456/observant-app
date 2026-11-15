@@ -35,6 +35,23 @@ async function request(path, token, signal) {
 const DAY_HOURS   = ['0700','0800','0900','1000','1100','1200','1300','1400','1500','1600','1700','1800','1900'];
 const NIGHT_HOURS = ['1900','2000','2100','2200','2300','0000','0100','0200','0300','0400','0500','0600','0700'];
 
+const ROSTER_ORDER = {
+  '2026-11-09': ['Abdullah Malik', 'Ukasha Ayaz', 'Asad Iqbal'],
+  '2026-11-10': ['Waqar Javaid', 'Ukasha Ayaz', 'Asad Iqbal'],
+  '2026-11-11': ['Abdullah Malik', 'Ukasha Ayaz', 'Asad Iqbal'],
+  '2026-11-12': ['Abdullah Malik', 'Waqar Javaid', 'Asad Iqbal'],
+  '2026-11-13': ['Abdullah Malik', 'Ukasha Ayaz', 'Waqar Javaid'],
+  '2026-11-14': ['Abdullah Malik', 'Rehman Saleem', 'Waqar Javaid', 'Ukasha Ayaz'],
+  '2026-11-15': ['Abdullah Malik', 'Rehman Saleem', 'Ukasha Ayaz', 'Waqar Javaid'],
+};
+
+function getOfficerRank(dateKey, officerName) {
+  const list = ROSTER_ORDER[dateKey];
+  if (!list) return 999;
+  const idx = list.indexOf(officerName);
+  return idx === -1 ? 999 : idx;
+}
+
 export default function CheckCallLogPage({ session }) {
   const role = String(session?.user?.role || '').toLowerCase();
   const allowed = role === 'manager' || role === 'admin';
@@ -85,6 +102,12 @@ export default function CheckCallLogPage({ session }) {
     const sorted = [...matrix].sort((a, b) => {
       if (a.shiftDate !== b.shiftDate) return a.shiftDate.localeCompare(b.shiftDate);
       if (a.shiftType !== b.shiftType) return a.shiftType === 'Day' ? -1 : 1;
+      const rankA = getOfficerRank(a.shiftDate, a.officerName);
+      const rankB = getOfficerRank(b.shiftDate, b.officerName);
+      if (rankA !== rankB) return rankA - rankB;
+      const timeA = new Date(a.shiftStart || 0).getTime();
+      const timeB = new Date(b.shiftStart || 0).getTime();
+      if (timeA !== timeB) return timeA - timeB;
       return (a.officerName || '').localeCompare(b.officerName || '');
     });
 

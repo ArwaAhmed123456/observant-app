@@ -83,6 +83,23 @@ function createShiftRow({ siteId, siteName, officerId, officerName, badgeNumber,
   };
 }
 
+const ROSTER_ORDER = {
+  '2026-11-09': ['Abdullah Malik', 'Ukasha Ayaz', 'Asad Iqbal'],
+  '2026-11-10': ['Waqar Javaid', 'Ukasha Ayaz', 'Asad Iqbal'],
+  '2026-11-11': ['Abdullah Malik', 'Ukasha Ayaz', 'Asad Iqbal'],
+  '2026-11-12': ['Abdullah Malik', 'Waqar Javaid', 'Asad Iqbal'],
+  '2026-11-13': ['Abdullah Malik', 'Ukasha Ayaz', 'Waqar Javaid'],
+  '2026-11-14': ['Abdullah Malik', 'Rehman Saleem', 'Waqar Javaid', 'Ukasha Ayaz'],
+  '2026-11-15': ['Abdullah Malik', 'Rehman Saleem', 'Ukasha Ayaz', 'Waqar Javaid'],
+};
+
+function getOfficerRank(dateKey, officerName) {
+  const list = ROSTER_ORDER[dateKey];
+  if (!list) return 999;
+  const idx = list.indexOf(officerName);
+  return idx === -1 ? 999 : idx;
+}
+
 // ── Check Call Log matrix ─────────────────────────────────────────────────────
 router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
   asyncHandler(async (req, res) => {
@@ -197,12 +214,18 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       row.hourlyChecks[index].isLate = row.hourlyChecks[index].isLate || isLate;
     });
 
-    const rows = [...rowsByKey.values()].sort((a, b) =>
-      a.siteName.localeCompare(b.siteName) ||
-      a.shiftDate.localeCompare(b.shiftDate) ||
-      (a.shiftType === b.shiftType ? 0 : a.shiftType === 'Day' ? -1 : 1) ||
-      a.officerName.localeCompare(b.officerName)
-    );
+    const rows = [...rowsByKey.values()].sort((a, b) => {
+      if (a.siteName !== b.siteName) return a.siteName.localeCompare(b.siteName);
+      if (a.shiftDate !== b.shiftDate) return a.shiftDate.localeCompare(b.shiftDate);
+      if (a.shiftType !== b.shiftType) return a.shiftType === 'Day' ? -1 : 1;
+      const rankA = getOfficerRank(a.shiftDate, a.officerName);
+      const rankB = getOfficerRank(b.shiftDate, b.officerName);
+      if (rankA !== rankB) return rankA - rankB;
+      const timeA = new Date(a.shiftStart || 0).getTime();
+      const timeB = new Date(b.shiftStart || 0).getTime();
+      if (timeA !== timeB) return timeA - timeB;
+      return a.officerName.localeCompare(b.officerName);
+    });
     res.json({
       company: { name: organisation?.name || 'Observant Security', slug: organisation?.slug || null, logoUrl: organisation?.logoUrl || null },
       dateRange: { startDate, endDate, timezone: 'UTC' },
