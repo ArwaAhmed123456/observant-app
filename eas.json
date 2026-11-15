@@ -38,6 +38,7 @@
       }
     },
     "production": {
+      "channel": "production",
       "autoIncrement": true,
       "distribution": "store",
       "env": {
@@ -51,6 +52,7 @@
       }
     },
     "production-internal": {
+      "channel": "production",
       "autoIncrement": true,
       "distribution": "internal",
       "env": {

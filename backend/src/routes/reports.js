@@ -179,11 +179,10 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       }
       if (!row) return;
       const checkedAt = call.respondedAt ? new Date(call.respondedAt) : null;
-      const slotReference = call.scheduledFor || checkedAt || call.firedAt;
-      const target = new Date(slotReference);
-      target.setUTCMinutes(0, 0, 0);
+      const slotReference = checkedAt || call.firedAt || call.scheduledFor;
       const firstSlot = new Date(`${row.shiftDate}T${row.shiftType === 'Day' ? '07' : '19'}:00:00.000Z`);
-      const index = Math.floor((target.getTime() - firstSlot.getTime()) / HOUR_MS);
+      const refTime = new Date(slotReference).getTime();
+      const index = Math.round((refTime - firstSlot.getTime()) / HOUR_MS);
       if (index < 0 || index > 12) return;
       const scheduledAt = new Date(firstSlot.getTime() + index * HOUR_MS);
       const dueAt = call.scheduledFor ? new Date(call.scheduledFor) : scheduledAt;
