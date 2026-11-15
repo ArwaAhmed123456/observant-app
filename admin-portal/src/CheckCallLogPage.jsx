@@ -108,7 +108,7 @@ export default function CheckCallLogPage({ session }) {
 
   if (!allowed) return <section className="unauthorized-card"><div className="empty-mark">!</div><h1>Manager access required</h1><p>This Check Call Log contains sensitive operational records. Sign in with a Manager or Admin account to continue.</p></section>;
 
-  return <div className="checklog-page">
+  return <div className="checklog-page" style={{ maxWidth: 1250, margin: '0 auto', padding: '16px' }}>
     <section className="checklog-heading screen-only">
       <div><p className="eyebrow">OPERATIONS / REPORTING</p><h1>Check Call Log</h1><p>Build a shift-by-shift attendance log and print a landscape record.</p></div>
       <div className="checklog-actions"><button className="secondary-button" onClick={() => generate({ ...filters, range: draftRange })} disabled={loading}>{loading ? 'Generating…' : 'Generate Report'}</button><button className="primary-button" onClick={() => window.print()} disabled={!matrix.length}><span aria-hidden="true">⎙</span> Print / Export PDF</button></div>
@@ -125,44 +125,71 @@ export default function CheckCallLogPage({ session }) {
       {error && <p className="error-banner mt-4" role="alert">{error}</p>}
     </section>
 
-    <section id="printable-report" className="checklog-document" style={{ background: '#fff', color: '#000' }}>
-      <header className="checklog-print-header" style={{ marginBottom: 8, textAlign: 'center' }}>
-        <img src={logo} alt="Observant Security logo" style={{ width: 80, height: 80, objectFit: 'contain', margin: '0 auto' }} />
-      </header>
-      <div className="checklog-date-banner" style={{ border: 'none', padding: '4px 0', fontSize: 13, fontWeight: 'bold' }}>
-        <span style={{ textDecoration: 'underline' }}>Start Date:{dateLabel(filters.range.from)} Finish Date:{dateLabel(filters.range.to)}</span>
+    <section id="printable-report" className="checklog-sheet">
+      {/* ── Logo ── */}
+      <div style={{ textAlign: 'center', marginBottom: 10 }}>
+        <img src={logo} alt="Observant Security" style={{ width: 85, height: 85, objectFit: 'contain', display: 'inline-block' }} />
       </div>
-      <h2 style={{ textAlign: 'center', fontSize: 22, fontWeight: 'bold', margin: '6px 0 10px 0' }}>Check Call Log</h2>
-      <div className="checklog-rules" style={{ textAlign: 'center', border: 'none', background: 'transparent', padding: '0 0 12px 0', fontSize: 11, color: '#000', lineHeight: 1.5 }}>
+
+      {/* ── Header Line: Start/Finish on Left, Title Centered ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 8, padding: '0 4px' }}>
+        <div style={{ fontSize: 13, fontWeight: 'bold', textDecoration: 'underline', minWidth: 260 }}>
+          Start Date:{dateLabel(filters.range.from)} Finish Date:{dateLabel(filters.range.to)}
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 'bold', textAlign: 'center', flex: 1, fontFamily: 'Arial, sans-serif' }}>
+          Check Call Log
+        </div>
+        <div style={{ minWidth: 260 }}></div>
+      </div>
+
+      {/* ── Instructions Notice ── */}
+      <div style={{ textAlign: 'center', fontSize: 11, color: '#111', lineHeight: 1.5, marginBottom: 14 }}>
         The precise time must be recorded. Late CALLS must be recorded in <span style={{ color: 'red', fontWeight: 'bold' }}>RED</span> ink and a brief explanation in the Logbook.<br/>
         Missed calls (Security Officer not responding to your call after 15 minutes) must be reported &amp; fully explained in the Incident Log Book
       </div>
 
+      {/* ── Main Matrix Table matching reference sample exactly ── */}
       {loading ? (
         <div className="checklog-empty screen-only">Generating the report…</div>
       ) : matrix.length ? (
-        <div className="checklog-table-wrap">
-          <table className="checklog-table" style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #000' }}>
+        <div className="checklog-table-container">
+          <table className="checklog-formal-table">
+            <colgroup>
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '8%' }} />
+              {DAY_HOURS.map(h => (
+                <col key={h} style={{ width: '5.23%' }} />
+              ))}
+            </colgroup>
             <thead>
               <tr>
-                <th rowSpan={2} style={{ width: '14%', border: '1.5px solid #000', padding: '6px 4px', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>
+                <th rowSpan={3} className="formal-th">
                   Site<br/>Name
                 </th>
-                <th rowSpan={2} style={{ width: '18%', border: '1.5px solid #000', padding: '6px 4px', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>
+                <th rowSpan={3} className="formal-th">
                   Name of<br/>Security Officer<br/>on Duty
                 </th>
-                <th rowSpan={2} style={{ width: '10%', border: '1.5px solid #000', padding: '6px 4px', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>
+                <th rowSpan={3} className="formal-th">
                   Shift Times<br/>(DAY/Night)
                 </th>
-                <th colSpan={13} style={{ border: '1.5px solid #000', padding: '6px', fontSize: 11, fontWeight: 'bold', textAlign: 'center' }}>
+                <th colSpan={13} className="formal-th" style={{ padding: '5px 4px', fontSize: 11 }}>
                   Times of check calls made by the security officers to control
                 </th>
               </tr>
+              {/* Row 2: 13 Day hour columns */}
               <tr>
-                {DAY_HOURS.map((h, i) => (
-                  <th key={h} style={{ width: '4.4%', border: '1px solid #000', padding: '3px 0', fontSize: 9, textAlign: 'center', lineHeight: 1.2 }}>
-                    <div style={{ fontWeight: 'bold' }}>{h}</div>
-                    <div style={{ color: '#000', borderTop: '1px dotted #888', marginTop: 2, paddingTop: 2, fontWeight: 'normal' }}>{NIGHT_HOURS[i]}</div>
+                {DAY_HOURS.map(h => (
+                  <th key={h} className="formal-th formal-hour-th">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+              {/* Row 3: 13 Night hour columns */}
+              <tr>
+                {NIGHT_HOURS.map(h => (
+                  <th key={h} className="formal-th formal-hour-th">
+                    {h}
                   </th>
                 ))}
               </tr>
@@ -170,9 +197,8 @@ export default function CheckCallLogPage({ session }) {
             <tbody>
               {dayGroups.map(({ dateKey, shifts }) => {
                 return shifts.map((row, idx) => {
-                  const isDay = row.shiftType === 'Day';
                   const isLastInDay = idx === shifts.length - 1;
-                  const borderBottom = isLastInDay ? '2.5px solid #000' : '1px solid #000';
+                  const dayClass = isLastInDay ? 'day-end-row' : '';
 
                   const cells = Array.from({ length: 13 }, (_, slotIdx) => {
                     const slotData = row.hourlyChecks?.[slotIdx];
@@ -184,38 +210,37 @@ export default function CheckCallLogPage({ session }) {
                       isLate = activeCheck.isLate || activeCheck.response === 'missed';
                     }
                     return (
-                      <td key={slotIdx} style={{ border: '1px solid #000', borderBottom, padding: '6px 2px', textAlign: 'center', fontSize: 10, color: isLate ? 'red' : '#000', fontWeight: isLate ? 'bold' : 'normal' }}>
+                      <td
+                        key={slotIdx}
+                        className={`formal-td formal-time-td ${isLate ? 'late-call' : ''}`}
+                      >
                         {text}
                       </td>
                     );
                   });
 
                   return (
-                    <tr key={`${dateKey}-${row.officerId}-${idx}`}>
+                    <tr key={`${dateKey}-${row.officerId}-${idx}`} className={dayClass}>
                       {idx === 0 && (
                         <td
                           rowSpan={shifts.length}
-                          style={{
-                            border: '1.5px solid #000',
-                            borderBottom: '2.5px solid #000',
-                            padding: '8px 4px',
-                            fontSize: 10,
-                            fontWeight: 'bold',
-                            textAlign: 'center',
-                            textTransform: 'uppercase',
-                            verticalAlign: 'middle',
-                            lineHeight: 1.3,
-                          }}
+                          className="formal-td formal-site-td"
                         >
-                          {(row.siteName || 'TOTMONSLOW SOLAR FARM').split(' ').map((w, wi) => (
-                            <React.Fragment key={wi}>{w}<br/></React.Fragment>
-                          ))}
+                          {(row.siteName || 'TOTMONSLOW SOLAR FARM')
+                            .toUpperCase()
+                            .split(' ')
+                            .map((word, wi) => (
+                              <React.Fragment key={wi}>
+                                {word}
+                                <br />
+                              </React.Fragment>
+                            ))}
                         </td>
                       )}
-                      <td style={{ border: '1px solid #000', borderBottom, padding: '6px 4px', fontSize: 11, textAlign: 'center', verticalAlign: 'middle' }}>
+                      <td className="formal-td formal-officer-td">
                         {row.officerName}
                       </td>
-                      <td style={{ border: '1px solid #000', borderBottom, padding: '6px 4px', fontSize: 11, textAlign: 'center', verticalAlign: 'middle' }}>
+                      <td className="formal-td formal-shift-td">
                         {row.shiftType}
                       </td>
                       {cells}

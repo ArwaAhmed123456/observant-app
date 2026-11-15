@@ -408,25 +408,25 @@ export function ManagerReportsScreen() {
           const cells = hours.map(h => {
             const c = g.checks[h];
             if (!c || !c.time || c.time === '-') {
-              return `<td style="border:1px solid #000;padding:5px 2px;text-align:center;font-size:8px;">-</td>`;
+              return `<td style="border:1px solid #000;padding:4px 2px;text-align:center;font-size:8.5px;white-space:nowrap;">-</td>`;
             }
             const isProblem = c.missed || c.issue;
-            const color = isProblem ? 'color:red;font-weight:bold;' : '';
-            return `<td style="border:1px solid #000;padding:5px 2px;text-align:center;font-size:8px;${color}">${c.time}</td>`;
+            const color = isProblem ? 'color:red;font-weight:bold;' : 'color:#000;';
+            return `<td style="border:1px solid #000;padding:4px 2px;text-align:center;font-size:8.5px;white-space:nowrap;${color}">${c.time}</td>`;
           }).join('');
 
           const siteCell = idx === 0 ? `
-            <td rowspan="${shifts.length}" style="border:1.5px solid #000;border-bottom:2px solid #000;padding:8px 4px;font-size:8.5px;font-weight:bold;text-align:center;text-transform:uppercase;vertical-align:middle;line-height:1.3;">
+            <td rowspan="${shifts.length}" style="border:1.5px solid #000;border-bottom:2.5px solid #000;padding:6px 2px;font-size:8px;font-weight:bold;text-align:center;text-transform:uppercase;vertical-align:middle;line-height:1.2;">
               ${(g.site || 'TOTMONSLOW SOLAR FARM').replace(/\s+/g, '<br/>')}
             </td>` : '';
 
           const isLastInDay = idx === shifts.length - 1;
-          const bottomBorder = isLastInDay ? 'border-bottom:2px solid #000;' : '';
+          const bottomBorder = isLastInDay ? 'border-bottom:2.5px solid #000;' : '';
 
           return `<tr style="${bottomBorder}">
             ${siteCell}
-            <td style="border:1px solid #000;${bottomBorder}padding:5px 6px;font-size:9px;text-align:center;vertical-align:middle;">${g.guardName}</td>
-            <td style="border:1px solid #000;${bottomBorder}padding:5px 4px;font-size:9px;text-align:center;vertical-align:middle;">${g.shiftType}</td>
+            <td style="border:1px solid #000;${bottomBorder}padding:4px 3px;font-size:8.5px;text-align:center;vertical-align:middle;white-space:nowrap;">${g.guardName}</td>
+            <td style="border:1px solid #000;${bottomBorder}padding:4px 2px;font-size:8.5px;text-align:center;vertical-align:middle;">${g.shiftType}</td>
             ${cells}
           </tr>`;
         }).join('');
@@ -486,20 +486,25 @@ export function ManagerReportsScreen() {
 </div>
 
 ${allShifts.length > 0 ? `
-<table>
+<table style="width:100%; border-collapse:collapse; table-layout:fixed; border:1.5px solid #000; font-family:Arial,sans-serif;">
+  <colgroup>
+    <col style="width:10%;" />
+    <col style="width:14%;" />
+    <col style="width:8%;" />
+    ${DAY_HOURS.map(() => '<col style="width:5.23%;" />').join('')}
+  </colgroup>
   <thead>
     <tr>
-      <th rowspan="2" style="width:14%; border:1.5px solid #000; font-size:9px; font-weight:bold;">Site<br/>Name</th>
-      <th rowspan="2" style="width:18%; border:1.5px solid #000; font-size:9px; font-weight:bold;">Name of<br/>Security Officer<br/>on Duty</th>
-      <th rowspan="2" style="width:10%; border:1.5px solid #000; font-size:9px; font-weight:bold;">Shift Times<br/>(DAY/Night)</th>
-      <th colspan="13" style="border:1.5px solid #000; font-size:9px; font-weight:bold; padding:4px;">Times of check calls made by the security officers to control</th>
+      <th rowspan="3" style="border:1px solid #000; background:#fff; color:#000; font-size:8px; font-weight:bold; text-align:center; padding:3px 1px;">Site<br/>Name</th>
+      <th rowspan="3" style="border:1px solid #000; background:#fff; color:#000; font-size:8px; font-weight:bold; text-align:center; padding:3px 1px;">Name of<br/>Security Officer<br/>on Duty</th>
+      <th rowspan="3" style="border:1px solid #000; background:#fff; color:#000; font-size:8px; font-weight:bold; text-align:center; padding:3px 1px;">Shift Times<br/>(DAY/Night)</th>
+      <th colspan="13" style="border:1px solid #000; background:#fff; color:#000; font-size:8.5px; font-weight:bold; text-align:center; padding:4px 2px;">Times of check calls made by the security officers to control</th>
     </tr>
     <tr>
-      ${DAY_HOURS.map((h, i) => `
-      <th style="width:4.4%; border:1px solid #000; padding:2px 0; font-size:7.5px;">
-        <div style="font-weight:bold;">${h}</div>
-        <div style="color:#000; border-top:1px dotted #888; margin-top:2px; padding-top:2px; font-weight:normal;">${NIGHT_HOURS[i]}</div>
-      </th>`).join('')}
+      ${DAY_HOURS.map(h => `<th style="border:1px solid #000; background:#fff; color:#000; padding:2px 0; font-size:7.5px; font-weight:bold; text-align:center;">${h}</th>`).join('')}
+    </tr>
+    <tr>
+      ${NIGHT_HOURS.map(h => `<th style="border:1px solid #000; background:#fff; color:#000; padding:2px 0; font-size:7.5px; font-weight:bold; text-align:center;">${h}</th>`).join('')}
     </tr>
   </thead>
   <tbody>
