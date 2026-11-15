@@ -152,8 +152,19 @@ export default function CheckCallLogPage({ session }) {
       {loading ? (
         <div className="checklog-empty screen-only">Generating the report…</div>
       ) : matrix.length ? (
-        <div className="checklog-table-container">
-          <table className="checklog-formal-table">
+        <div className="checklog-table-container" style={{ width: '100%', overflowX: 'auto', marginTop: 12 }}>
+          <table
+            className="checklog-formal-table"
+            style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              tableLayout: 'fixed',
+              border: '1.5px solid #000',
+              background: '#fff',
+              color: '#000',
+              fontFamily: 'Arial, Helvetica, sans-serif'
+            }}
+          >
             <colgroup>
               <col style={{ width: '10%' }} />
               <col style={{ width: '14%' }} />
@@ -164,23 +175,91 @@ export default function CheckCallLogPage({ session }) {
             </colgroup>
             <thead>
               <tr>
-                <th rowSpan={3} className="formal-th">
+                <th
+                  rowSpan={3}
+                  style={{
+                    width: '10%',
+                    border: '1px solid #000',
+                    background: '#fff',
+                    color: '#000',
+                    fontSize: 10.5,
+                    fontWeight: 'bold',
+                    textAlign: 'center',
+                    verticalAlign: 'middle',
+                    padding: '4px 2px',
+                    lineHeight: 1.2
+                  }}
+                >
                   Site<br/>Name
                 </th>
-                <th rowSpan={3} className="formal-th">
+                <th
+                  rowSpan={3}
+                  style={{
+                    width: '14%',
+                    border: '1px solid #000',
+                    background: '#fff',
+                    color: '#000',
+                    fontSize: 10.5,
+                    fontWeight: 'bold',
+                    textAlign: 'center',
+                    verticalAlign: 'middle',
+                    padding: '4px 2px',
+                    lineHeight: 1.2
+                  }}
+                >
                   Name of<br/>Security Officer<br/>on Duty
                 </th>
-                <th rowSpan={3} className="formal-th">
+                <th
+                  rowSpan={3}
+                  style={{
+                    width: '8%',
+                    border: '1px solid #000',
+                    background: '#fff',
+                    color: '#000',
+                    fontSize: 10.5,
+                    fontWeight: 'bold',
+                    textAlign: 'center',
+                    verticalAlign: 'middle',
+                    padding: '4px 2px',
+                    lineHeight: 1.2
+                  }}
+                >
                   Shift Times<br/>(DAY/Night)
                 </th>
-                <th colSpan={13} className="formal-th" style={{ padding: '5px 4px', fontSize: 11 }}>
+                <th
+                  colSpan={13}
+                  style={{
+                    border: '1px solid #000',
+                    background: '#fff',
+                    color: '#000',
+                    fontSize: 11,
+                    fontWeight: 'bold',
+                    textAlign: 'center',
+                    verticalAlign: 'middle',
+                    padding: '5px 4px'
+                  }}
+                >
                   Times of check calls made by the security officers to control
                 </th>
               </tr>
               {/* Row 2: 13 Day hour columns */}
               <tr>
                 {DAY_HOURS.map(h => (
-                  <th key={h} className="formal-th formal-hour-th">
+                  <th
+                    key={h}
+                    style={{
+                      width: '5.23%',
+                      border: '1px solid #000',
+                      background: '#fff',
+                      color: '#000',
+                      fontSize: 9.5,
+                      fontWeight: 'bold',
+                      textAlign: 'center',
+                      verticalAlign: 'middle',
+                      padding: '3px 0',
+                      lineHeight: 1.2
+                    }}
+                  >
                     {h}
                   </th>
                 ))}
@@ -188,7 +267,21 @@ export default function CheckCallLogPage({ session }) {
               {/* Row 3: 13 Night hour columns */}
               <tr>
                 {NIGHT_HOURS.map(h => (
-                  <th key={h} className="formal-th formal-hour-th">
+                  <th
+                    key={h}
+                    style={{
+                      width: '5.23%',
+                      border: '1px solid #000',
+                      background: '#fff',
+                      color: '#000',
+                      fontSize: 9.5,
+                      fontWeight: 'bold',
+                      textAlign: 'center',
+                      verticalAlign: 'middle',
+                      padding: '3px 0',
+                      lineHeight: 1.2
+                    }}
+                  >
                     {h}
                   </th>
                 ))}
@@ -198,7 +291,7 @@ export default function CheckCallLogPage({ session }) {
               {dayGroups.map(({ dateKey, shifts }) => {
                 return shifts.map((row, idx) => {
                   const isLastInDay = idx === shifts.length - 1;
-                  const dayClass = isLastInDay ? 'day-end-row' : '';
+                  const borderBottom = isLastInDay ? '2.5px solid #000' : '1px solid #000';
 
                   const cells = Array.from({ length: 13 }, (_, slotIdx) => {
                     const slotData = row.hourlyChecks?.[slotIdx];
@@ -212,7 +305,17 @@ export default function CheckCallLogPage({ session }) {
                     return (
                       <td
                         key={slotIdx}
-                        className={`formal-td formal-time-td ${isLate ? 'late-call' : ''}`}
+                        style={{
+                          border: '1px solid #000',
+                          borderBottom,
+                          padding: '5px 2px',
+                          textAlign: 'center',
+                          verticalAlign: 'middle',
+                          fontSize: 10.5,
+                          color: isLate ? 'red' : '#000',
+                          fontWeight: isLate ? 'bold' : 'normal',
+                          whiteSpace: 'nowrap'
+                        }}
                       >
                         {text}
                       </td>
@@ -220,11 +323,22 @@ export default function CheckCallLogPage({ session }) {
                   });
 
                   return (
-                    <tr key={`${dateKey}-${row.officerId}-${idx}`} className={dayClass}>
+                    <tr key={`${dateKey}-${row.officerId}-${idx}`}>
                       {idx === 0 && (
                         <td
                           rowSpan={shifts.length}
-                          className="formal-td formal-site-td"
+                          style={{
+                            border: '1px solid #000',
+                            borderBottom: '2.5px solid #000',
+                            padding: '6px 4px',
+                            fontSize: 9.5,
+                            fontWeight: 'bold',
+                            textAlign: 'center',
+                            textTransform: 'uppercase',
+                            verticalAlign: 'middle',
+                            lineHeight: 1.3,
+                            background: '#fff'
+                          }}
                         >
                           {(row.siteName || 'TOTMONSLOW SOLAR FARM')
                             .toUpperCase()
@@ -237,10 +351,30 @@ export default function CheckCallLogPage({ session }) {
                             ))}
                         </td>
                       )}
-                      <td className="formal-td formal-officer-td">
+                      <td
+                        style={{
+                          border: '1px solid #000',
+                          borderBottom,
+                          padding: '5px 4px',
+                          fontSize: 10.5,
+                          textAlign: 'center',
+                          verticalAlign: 'middle',
+                          background: '#fff'
+                        }}
+                      >
                         {row.officerName}
                       </td>
-                      <td className="formal-td formal-shift-td">
+                      <td
+                        style={{
+                          border: '1px solid #000',
+                          borderBottom,
+                          padding: '5px 4px',
+                          fontSize: 10.5,
+                          textAlign: 'center',
+                          verticalAlign: 'middle',
+                          background: '#fff'
+                        }}
+                      >
                         {row.shiftType}
                       </td>
                       {cells}
