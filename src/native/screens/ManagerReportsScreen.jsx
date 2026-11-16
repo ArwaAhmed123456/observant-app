@@ -531,6 +531,9 @@ ${allShifts.length > 0 ? `
     ${tableRowsHtml}
   </tbody>
 </table>
+<div style="margin-top:10px; font-size:9px; color:#000; text-align:left; font-family:Arial,sans-serif;">
+  Doc No: QBC.3, Issue Date:01/09/2024, Issue:1
+</div>
 ` : ''}
 
 ${reportType === 'patrols' && patrolRows.length > 0 ? `

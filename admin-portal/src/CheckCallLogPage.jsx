@@ -407,6 +407,9 @@ export default function CheckCallLogPage({ session }) {
               })}
             </tbody>
           </table>
+          <div style={{ marginTop: 14, fontSize: 11, color: '#000', textAlign: 'left', fontFamily: 'Arial, sans-serif' }}>
+            Doc No: QBC.3, Issue Date:01/09/2024, Issue:1
+          </div>
         </div>
       ) : (
         <div className="checklog-empty">
