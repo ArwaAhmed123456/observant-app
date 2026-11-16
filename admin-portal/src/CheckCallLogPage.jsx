@@ -323,7 +323,7 @@ export default function CheckCallLogPage({ session }) {
                     let isLate = false;
                     if (activeCheck && activeCheck.time) {
                       text = activeCheck.time;
-                      isLate = activeCheck.isLate || activeCheck.response === 'missed';
+                      isLate = Boolean(activeCheck.isLate);
                     }
                     return (
                       <td
