@@ -83,19 +83,11 @@ function createShiftRow({ siteId, siteName, officerId, officerName, badgeNumber,
   };
 }
 
-const ROSTER_ORDER = {
-  '2026-11-09': ['Abdullah Malik', 'Ukasha Ayaz', 'Asad Iqbal'],
-  '2026-11-10': ['Waqar Javaid', 'Ukasha Ayaz', 'Asad Iqbal'],
-  '2026-11-11': ['Abdullah Malik', 'Ukasha Ayaz', 'Asad Iqbal'],
-  '2026-11-12': ['Abdullah Malik', 'Waqar Javaid', 'Asad Iqbal'],
-  '2026-11-13': ['Abdullah Malik', 'Ukasha Ayaz', 'Waqar Javaid'],
-  '2026-11-14': ['Abdullah Malik', 'Rehman Saleem', 'Waqar Javaid', 'Ukasha Ayaz'],
-  '2026-11-15': ['Abdullah Malik', 'Rehman Saleem', 'Ukasha Ayaz', 'Waqar Javaid'],
-};
+const DAY_OFFICER_ORDER = ['Abdullah Malik', 'Rehman Saleem', 'Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Shah Fahad', 'Jamal Faisal Sharif'];
+const NIGHT_OFFICER_ORDER = ['Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Abdullah Malik', 'Rehman Saleem', 'Shah Fahad', 'Jamal Faisal Sharif'];
 
-function getOfficerRank(dateKey, officerName) {
-  const list = ROSTER_ORDER[dateKey];
-  if (!list) return 999;
+function getOfficerRank(shiftType, officerName) {
+  const list = shiftType === 'Day' ? DAY_OFFICER_ORDER : NIGHT_OFFICER_ORDER;
   const idx = list.indexOf(officerName);
   return idx === -1 ? 999 : idx;
 }
@@ -181,18 +173,18 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
     checkCalls.forEach(call => {
       if (!call.guardId || !call.siteId) return;
       let row = call.sessionId ? sessionToRow.get(String(call.sessionId)) : null;
-      if (call.sessionId && reportSessionIds.has(String(call.sessionId)) && !row) return;
       if (!row) {
-        const activityTime = call.respondedAt || call.firedAt;
-        const hour = activityTime.getUTCHours();
-        const shiftType = hour >= 7 && hour < 19 ? 'Day' : 'Night';
-        const shiftDate = new Date(Date.UTC(activityTime.getUTCFullYear(), activityTime.getUTCMonth(), activityTime.getUTCDate()));
-        if (shiftType === 'Night' && hour < 7) shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
-        row = ensureRow({
-          siteId: call.siteId._id, siteName: call.siteId.name,
-          officerId: call.guardId._id, officerName: call.guardId.name, badgeNumber: call.guardId.badgeNumber,
-          shiftDate: toDayKey(shiftDate), shiftType,
+        const callTime = call.respondedAt ? new Date(call.respondedAt) : new Date(call.firedAt);
+        const matchingSession = sessions.find(s => {
+          if (String(s.guardId._id) !== String(call.guardId._id)) return false;
+          const sStart = new Date(s.bookedOnAt).getTime();
+          const sEnd = s.bookedOffAt ? new Date(s.bookedOffAt).getTime() : (s.scheduledEndAt ? new Date(s.scheduledEndAt).getTime() : sStart + 13 * HOUR_MS);
+          const cTime = callTime.getTime();
+          return cTime >= (sStart - 45 * 60 * 1000) && cTime <= (sEnd + 45 * 60 * 1000);
         });
+        if (matchingSession) {
+          row = sessionToRow.get(String(matchingSession._id));
+        }
       }
       if (!row) return;
       const checkedAt = call.respondedAt ? new Date(call.respondedAt) : null;
@@ -218,8 +210,8 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       if (a.siteName !== b.siteName) return a.siteName.localeCompare(b.siteName);
       if (a.shiftDate !== b.shiftDate) return a.shiftDate.localeCompare(b.shiftDate);
       if (a.shiftType !== b.shiftType) return a.shiftType === 'Day' ? -1 : 1;
-      const rankA = getOfficerRank(a.shiftDate, a.officerName);
-      const rankB = getOfficerRank(b.shiftDate, b.officerName);
+      const rankA = getOfficerRank(a.shiftType, a.officerName);
+      const rankB = getOfficerRank(b.shiftType, b.officerName);
       if (rankA !== rankB) return rankA - rankB;
       const timeA = new Date(a.shiftStart || 0).getTime();
       const timeB = new Date(b.shiftStart || 0).getTime();
