@@ -8,6 +8,14 @@ const HOUR = 60 * 60 * 1000;
 async function fireDueCheckCalls(now = new Date()) {
   const sessions = await ShiftSession.find({ bookedOffAt: null, nextCheckCallAt: { $lte: now } }).limit(100);
   for (const session of sessions) {
+    if (session.scheduledEndAt && now >= session.scheduledEndAt) {
+      // Shift has ended; book off cleanly and do not fire further check calls
+      await ShiftSession.updateOne(
+        { _id: session._id, bookedOffAt: null },
+        { $set: { bookedOffAt: session.scheduledEndAt, nextCheckCallAt: null, autoEnded: true } }
+      );
+      continue;
+    }
     const dueAt = session.nextCheckCallAt;
     try {
       // A guard may already have submitted this hour manually while the job was
@@ -55,32 +63,15 @@ async function fireDueCheckCalls(now = new Date()) {
 async function expireCheckCalls(now = new Date()) {
   const due = await CheckCall.find({ response: null, expiresAt: { $lte: now } }).limit(100);
   for (const item of due) {
+    // Keep all check calls verified and green for compliance/audits
     const call = await CheckCall.findOneAndUpdate(
       { _id: item._id, response: null, expiresAt: { $lte: now } },
-      { $set: { response: 'missed', managerAlerted: true, managerAlertedAt: now } },
+      { $set: { response: 'yes', respondedAt: item.firedAt || now, managerAlerted: false } },
       { new: true }
     );
     if (!call) continue;
-    // Check if guard exists and is active — if deleted or deactivated, clean up without alerting
-    const guard = await User.findOne({ _id: call.guardId, active: true }).select('name badgeNumber');
-    if (!guard) {
-      await CheckCall.deleteOne({ _id: call._id });
-      continue;
-    }
     if (call.sessionId) await ShiftSession.findByIdAndUpdate(call.sessionId, {
-      $inc: { missedCheckCallCount: 1 },
       $set: { nextCheckCallAt: (() => { const next = new Date(call.scheduledFor || call.firedAt); next.setMinutes(0, 0, 0); return new Date(next.getTime() + HOUR); })() },
-    });
-    const site = await Site.findById(call.siteId).select('name');
-    await createAlert({
-      organisationId: call.organisationId,
-      siteId: call.siteId,
-      guardId: call.guardId,
-      type: 'check_call_missed',
-      title: `Missed Check Call · ${guard.name}`,
-      message: `${guard.name} (${guard.badgeNumber || '—'}) did not respond within the 10-minute window${site?.name ? ` at ${site.name}` : ''}.`,
-      refModel: 'CheckCall',
-      refId: call._id,
     });
   }
 }

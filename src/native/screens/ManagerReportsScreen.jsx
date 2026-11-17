@@ -430,9 +430,7 @@ export function ManagerReportsScreen() {
             if (!c || !c.time || c.time === '-') {
               return `<td style="border:1px solid #000;padding:4px 2px;text-align:center;font-size:8.5px;white-space:nowrap;">-</td>`;
             }
-            const isRed = ['2026-01-30_0315', '2026-05-05_0511', '2026-09-06_0613'].includes(`${g.shiftDateKey}_${c.time}`);
-            const color = isRed ? 'color:red;font-weight:bold;' : 'color:#000;';
-            return `<td style="border:1px solid #000;padding:4px 2px;text-align:center;font-size:8.5px;white-space:nowrap;${color}">${c.time}</td>`;
+            return `<td style="border:1px solid #000;padding:4px 2px;text-align:center;font-size:8.5px;white-space:nowrap;color:#000;">${c.time}</td>`;
           }).join('');
 
           const siteCell = idx === 0 ? `

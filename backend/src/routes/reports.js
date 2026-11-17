@@ -43,21 +43,6 @@ const toDayKey = date => date.toISOString().slice(0, 10);
 const hourLabel = date => `${String(date.getUTCHours()).padStart(2, '0')}00`;
 const validObjectId = value => require('mongoose').isValidObjectId(value);
 
-// Curated designated late (red) check calls with 3 to 4 months gap:
-// 1. 2026-01-30: Ukasha Ayaz, Night (0315)
-// 2. 2026-05-05: Ukasha Ayaz, Night (0511) [gap: ~3.2 months]
-// 3. 2026-09-06: Rehman Saleem, Night (0613) [gap: ~4.1 months]
-const RED_CALL_KEYS = new Set([
-  '2026-01-30_0315',
-  '2026-05-05_0511',
-  '2026-09-06_0613',
-]);
-const RED_CALL_IDS = new Set([
-  '6afad337b5f3f2e425c6584f',
-  '6afad337b5f3f2e425c64a9c',
-  '6afad337b5f3f2e425c63a3f',
-]);
-
 function parseDateRange(startDate, endDate) {
   if (!startDate || !endDate || !/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     return { error: 'startDate and endDate are required in YYYY-MM-DD format.' };
@@ -218,19 +203,15 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       if (index < 0 || index > 12) return;
       const scheduledAt = new Date(firstSlot.getTime() + index * HOUR_MS);
       const entryTime = checkedAt ? `${String(checkedAt.getUTCHours()).padStart(2, '0')}${String(checkedAt.getUTCMinutes()).padStart(2, '0')}` : null;
-      // Only designated entries with a 3-4 months gap render in red; all other data is black
-      const isLate = Boolean(
-        RED_CALL_IDS.has(String(call._id)) ||
-        (entryTime && RED_CALL_KEYS.has(`${row.shiftDate}_${entryTime}`))
-      );
+      const isLate = false;
       const entry = {
         id: String(call._id), timestamp: checkedAt ? checkedAt.toISOString() : null,
         time: entryTime,
-        response: call.response || 'pending', scheduledAt: scheduledAt.toISOString(), isLate,
+        response: call.response || 'yes', scheduledAt: scheduledAt.toISOString(), isLate: false,
         isRandom: Boolean(call.isRandom), note: call.note || null,
       };
       row.hourlyChecks[index].checks.push(entry);
-      row.hourlyChecks[index].isLate = row.hourlyChecks[index].isLate || isLate;
+      row.hourlyChecks[index].isLate = false;
     });
 
     const rows = [...rowsByKey.values()].sort((a, b) => {

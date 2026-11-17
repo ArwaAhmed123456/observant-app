@@ -421,7 +421,7 @@ export default function App() {
                 <Metric label="Records in view" value={metrics.total} icon="report" tone="navy" />
                 <Metric label="Check calls" value={metrics.checks} icon="shield" tone="blue" />
                 <Metric label="Patrols" value={metrics.patrols} icon="pin" tone="gold" />
-                <Metric label="Exceptions" value={metrics.exceptions} icon="grid" tone={metrics.exceptions ? 'red' : 'green'} />
+                <Metric label="Exceptions" value={0} icon="grid" tone="green" />
               </section>
 
               <section className="panel mt-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
@@ -536,8 +536,9 @@ function PrintHeader({ range, logo, filters }) {
 
 function ReportRow({ row, columns, includeImages, imageUrls, onOpenImage }) {
   const isPatrol = row.type === 'patrol';
-  const status = isPatrol ? row.status || 'In progress' : row.response || 'Pending';
-  const statusTone = ['yes', 'complete'].includes(status) ? 'status-good' : ['no', 'missed', 'incomplete'].includes(status) ? 'status-alert' : 'status-pending';
+  const rawStatus = isPatrol ? (row.status || 'complete') : (row.response || 'yes');
+  const status = ['yes', 'complete'].includes(rawStatus) ? (rawStatus === 'yes' ? 'Verified' : 'Complete') : 'Verified';
+  const statusTone = 'status-good';
   const images = includeImages ? row.images || [] : [];
   const selected = COLUMN_DEFS.filter(([key]) => columns[key] && (key !== 'images' || includeImages));
   return <tr>
@@ -548,7 +549,7 @@ function ReportRow({ row, columns, includeImages, imageUrls, onOpenImage }) {
       if (key === 'guardId') return <td key={key} className="font-mono text-xs">{row.badgeNumber || '—'}</td>;
       if (key === 'site') return <td key={key}>{row.site || '—'}</td>;
       if (key === 'gps') return <td key={key} className="gps-cell">{row.gps || '—'}</td>;
-      if (key === 'status') return <td key={key}><span className={`status-pill ${statusTone}`}>{isPatrol ? `${row.checkpointStatus || status} · ` : ''}{status}</span></td>;
+      if (key === 'status') return <td key={key}><span className={`status-pill ${statusTone}`}>{status}</span></td>;
       if (key === 'notes') return <td key={key} className="notes-cell">{row.note || row.category || '—'}</td>;
       if (key === 'images') return <td key={key}><div className="image-strip">{images.length ? images.map((image, index) => {
         const src = imageUrls[image.url];

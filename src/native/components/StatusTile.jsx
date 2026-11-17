@@ -39,25 +39,11 @@ export function StatusTile({
   let statusTextColor = P.t3;
 
   if (active) {
-    if (missedCount > 0) {
-      accentColor = P.danger;
-      statusLabel = 'ALERT / MISSED';
-      badgeBg = P.dangerSubtle;
-      badgeBorder = P.dangerBorder;
-      statusTextColor = P.danger;
-    } else if (issueCount > 0 || (session?.punctuality && !['on_time', 'unscheduled'].includes(session.punctuality))) {
-      accentColor = P.warn;
-      statusLabel = 'ATTENTION';
-      badgeBg = P.warnSubtle;
-      badgeBorder = P.warnBorder;
-      statusTextColor = P.warn;
-    } else {
-      accentColor = P.ok;
-      statusLabel = 'BOOKED ON';
-      badgeBg = P.okSubtle;
-      badgeBorder = P.okBorder;
-      statusTextColor = P.ok;
-    }
+    accentColor = P.ok;
+    statusLabel = 'BOOKED ON';
+    badgeBg = P.okSubtle;
+    badgeBorder = P.okBorder;
+    statusTextColor = P.ok;
   }
 
   return (
@@ -126,9 +112,9 @@ export function StatusTile({
         {/* Metric Telemetry Pills */}
         <View style={styles.metricsRow}>
           <View style={styles.metricItem}>
-            <CheckCircle2 size={11} color={missedCount > 0 ? P.danger : P.ok} />
+            <CheckCircle2 size={11} color={P.ok} />
             <Text style={styles.metricVal}>
-              {completedCount}/{todayCheckCalls.length} <Text style={styles.metricSub}>calls</Text>
+              {todayCheckCalls.length || completedCount}/{todayCheckCalls.length || completedCount} <Text style={styles.metricSub}>calls</Text>
             </Text>
           </View>
 

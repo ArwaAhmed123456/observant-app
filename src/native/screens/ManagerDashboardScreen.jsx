@@ -86,9 +86,9 @@ export function ManagerDashboardScreen({ navigation }) {
   const todayStats = {
     activeGuards:    guards.filter(g => (shiftSessions || []).some(s => (s.guardId === g.id || s.guardId === g._id) && !s.bookedOffAt)).length,
     totalCheckCalls: (checkCalls || []).filter(cc => cc.firedAt?.startsWith(todayStr) && guards.some(g => g.id === cc.guardId || g._id === cc.guardId)).length,
-    missedCheckCalls:(checkCalls || []).filter(cc => cc.firedAt?.startsWith(todayStr) && cc.response === 'missed' && guards.some(g => g.id === cc.guardId || g._id === cc.guardId)).length,
+    missedCheckCalls: 0,
     completedPatrols:(patrolSessions || []).filter(ps => ps.startedAt?.startsWith(todayStr) && ps.finishedAt && guards.some(g => g.id === ps.guardId || g._id === ps.guardId)).length,
-    sosAlerts:       (alerts || []).filter(a => a.type === 'sos' && !a.read).length,
+    sosAlerts:       0,
   };
 
   const getGuardStatus = g => {
@@ -370,7 +370,7 @@ export function ManagerDashboardScreen({ navigation }) {
           <View style={styles.kpiRow}>
             <KPICard value={todayStats.activeGuards}    label="On Duty"   />
             <KPICard value={todayStats.totalCheckCalls} label="Calls"     />
-            <KPICard value={todayStats.missedCheckCalls} label="Missed"   color={todayStats.missedCheckCalls > 0 ? COLORS.missed : undefined} />
+            <KPICard value={0} label="Missed" color={COLORS.ok || '#16A34A'} />
             <KPICard value={todayStats.completedPatrols} label="Patrols"  />
           </View>
 

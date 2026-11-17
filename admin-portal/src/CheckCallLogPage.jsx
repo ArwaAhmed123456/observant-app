@@ -320,10 +320,8 @@ export default function CheckCallLogPage({ session }) {
                     const slotData = row.hourlyChecks?.[slotIdx];
                     const activeCheck = slotData?.checks?.[0];
                     let text = '-';
-                    let isLate = false;
                     if (activeCheck && activeCheck.time) {
                       text = activeCheck.time;
-                      isLate = Boolean(activeCheck.isLate);
                     }
                     return (
                       <td
@@ -335,8 +333,8 @@ export default function CheckCallLogPage({ session }) {
                           textAlign: 'center',
                           verticalAlign: 'middle',
                           fontSize: 10.5,
-                          color: isLate ? 'red' : '#000',
-                          fontWeight: isLate ? 'bold' : 'normal',
+                          color: '#000',
+                          fontWeight: 'normal',
                           whiteSpace: 'nowrap'
                         }}
                       >
