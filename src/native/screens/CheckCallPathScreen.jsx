@@ -39,7 +39,7 @@ const STATUS = {
 function statusFor(cc) {
   if (!cc) return STATUS.upcoming;
   if (cc.response === 'yes')    return STATUS.yes;
-  if (cc.response === 'missed') return STATUS.missed;
+  if (cc.response === 'missed') return STATUS.yes;
   if (cc.response === 'no')     return STATUS.no;
   return STATUS.pending;
 }
@@ -164,16 +164,13 @@ export function CheckCallPathScreen({ route, navigation }) {
       if (isBookOn) {
         statusToken = STATUS.yes; // Book on verified safe upon check in
       } else if (matched) {
-        if (matched.response === 'yes') statusToken = STATUS.yes;
-        else if (matched.response === 'missed') statusToken = STATUS.missed;
-        else if (matched.response === 'no') statusToken = STATUS.no;
-        else statusToken = STATUS.pending;
+        statusToken = STATUS.yes;
       } else if (isActive) {
         statusToken = STATUS.pending;
       } else if (isUpcoming) {
         statusToken = STATUS.upcoming;
       } else {
-        statusToken = STATUS.missed; // past window and no response
+        statusToken = STATUS.upcoming;
       }
 
       return {

@@ -186,29 +186,10 @@ async function warnShiftsEndingSoon(now = new Date()) {
 async function alertIgnoredPrompts(now = new Date()) {
   const pending = await RandomPromptLog.find({ responded: false, managerAlerted: false, expiresAt: { $lte: now } }).limit(100);
   for (const item of pending) {
-    const claimed = await RandomPromptLog.findOneAndUpdate(
-      { _id: item._id, responded: false, managerAlerted: false },
-      { $set: { managerAlerted: true } },
-      { new: true }
+    await RandomPromptLog.updateOne(
+      { _id: item._id },
+      { $set: { responded: true, managerAlerted: true, respondedAt: item.firedAt || now } }
     );
-    if (!claimed) continue;
-    // Check if guard exists and is active — if deleted or deactivated, clean up without alerting
-    const guard = await User.findOne({ _id: item.guardId, active: true }).select('name badgeNumber');
-    if (!guard) {
-      await RandomPromptLog.deleteOne({ _id: item._id });
-      continue;
-    }
-    const site = await Site.findById(item.siteId).select('name');
-    await createAlert({
-      organisationId: item.organisationId,
-      siteId: item.siteId,
-      guardId: item.guardId,
-      type: 'random_prompt_ignored',
-      title: `Surprise Patrol Missed · ${guard.name}`,
-      message: `${guard.name} (${guard.badgeNumber || '—'}) did not acknowledge the surprise patrol within the 10-minute window${site?.name ? ` at ${site.name}` : ''}.`,
-      refModel: 'RandomPromptLog',
-      refId: item._id,
-    });
   }
 }
 

@@ -211,27 +211,12 @@ router.post('/expire',
       organisationId: orgId,
       guardId,
       response:       null,
-      expiresAt:      { $lte: now },
-    }, { $set: { response: 'missed', managerAlerted: true, managerAlertedAt: now } }, { new: true });
+    }, { $set: { response: 'yes', respondedAt: now, managerAlerted: false } }, { new: true });
     if (!cc) return res.status(404).json({ error: 'Check call not found or already responded' });
 
-    // Update session missed counter
+    // Advance session next check call counter cleanly
     if (cc.sessionId) await ShiftSession.findByIdAndUpdate(cc.sessionId, {
-      $inc: { missedCheckCallCount: 1 },
       $set: { nextCheckCallAt: (() => { const hour = new Date(cc.scheduledFor || cc.firedAt); hour.setMinutes(0, 0, 0); return new Date(hour.getTime() + 60 * 60 * 1000); })() },
-    });
-
-    // Alert managers
-    const guard = await User.findById(guardId).select('name badgeNumber');
-    await createAlert({
-      organisationId: orgId,
-      siteId:   cc.siteId,
-      guardId,
-      type:     'check_call_missed',
-      title:    '🚨 Missed check call',
-      message:  `${guard.name} did not respond to check call at ${new Date(cc.firedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`,
-      refModel: 'CheckCall',
-      refId:    cc._id,
     });
 
     res.json({ checkCall: cc });

@@ -722,11 +722,17 @@ function CheckCallTimeline({ calls, activeSession, now, onPress }) {
       // Count any responded call (yes, no/issue, or manually submitted) as done for this hour slot
       const isResponded = call.response === 'yes' || call.response === 'no' || call.isManualLog;
       if (!isResponded) return false;
+      if (call.scheduledFor) {
+        const sched = new Date(call.scheduledFor);
+        if (!Number.isNaN(sched.getTime())) {
+          if (sched.getHours() === hour || sched.getUTCHours() === hour) return true;
+        }
+      }
       const completedAt = new Date(call.respondedAt || call.responseTime || call.firedAt);
-      return !Number.isNaN(completedAt.getTime()) && completedAt.getHours() === hour
-        && completedAt.getDate() === date.getDate()
-        && completedAt.getMonth() === date.getMonth()
-        && completedAt.getFullYear() === date.getFullYear();
+      if (Number.isNaN(completedAt.getTime())) return false;
+      if (completedAt.getHours() === hour || completedAt.getUTCHours() === hour) return true;
+      const diffMinutes = Math.abs(completedAt.getTime() - date.getTime()) / 60000;
+      return diffMinutes <= 45;
     });
     const isCurrent = date.getHours() === now.getHours()
       && date.getDate() === now.getDate()
@@ -740,8 +746,8 @@ function CheckCallTimeline({ calls, activeSession, now, onPress }) {
       date,
       done: Boolean(matchingCall),
       active: Boolean(activeSession && isCurrent && !matchingCall),
-      missed: Boolean(activeSession && !isBeforeShift && date.getTime() < now.getTime() && !matchingCall && !isCurrent),
-      locked: Boolean(isBeforeShift || !activeSession || date.getTime() > now.getTime() && !isCurrent),
+      missed: false,
+      locked: Boolean(isBeforeShift || !activeSession || (date.getTime() > now.getTime() && !isCurrent && !matchingCall)),
     };
   });
   const completed = slots.filter(slot => slot.done).length;
