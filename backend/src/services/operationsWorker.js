@@ -77,62 +77,15 @@ async function expireCheckCalls(now = new Date()) {
 }
 
 async function fireDueRandomPrompts(now = new Date()) {
-  const sessions = await ShiftSession.find({ bookedOffAt: null, nextRandomPromptAt: { $lte: now } }).limit(100);
-  for (const session of sessions) {
-    const dueAt = session.nextRandomPromptAt;
-    const claimed = await ShiftSession.updateOne(
-      { _id: session._id, nextRandomPromptAt: dueAt },
-      { $set: { nextRandomPromptAt: null } }
-    );
-    if (!claimed.modifiedCount) continue;
-    const log = await RandomPromptLog.create({
-      organisationId: session.organisationId,
-      shiftSessionId: session._id,
-      guardId: session.guardId,
-      siteId: session.siteId,
-      triggeredAt: now,
-      expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
-    });
-    const guard = await User.findById(session.guardId).select('fcmToken');
-    if (guard?.fcmToken) await sendPush([guard.fcmToken], {
-      title: 'Random patrol check',
-      body: 'Start a site patrol now and complete the assigned checkpoints.',
-      data: { type: 'random_patrol', promptId: log._id.toString() },
-    });
-  }
+  // Disabled per operational requirements to avoid overwhelming guards with surprise patrols
+  return;
 }
 
 // Recover active shifts created before server-side initial prompt scheduling
 // was deployed. Avoid duplicates while a patrol or response window is active.
 async function scheduleMissingRandomPrompts(now = new Date()) {
-  const sessions = await ShiftSession.find({
-    bookedOffAt: null,
-    nextRandomPromptAt: null,
-  }).limit(100);
-
-  for (const session of sessions) {
-    const [activePatrol, pendingPrompt] = await Promise.all([
-      PatrolSession.exists({
-        organisationId: session.organisationId,
-        shiftSessionId: session._id,
-        status: 'in_progress',
-      }),
-      RandomPromptLog.exists({
-        organisationId: session.organisationId,
-        shiftSessionId: session._id,
-        responded: false,
-        managerAlerted: false,
-        expiresAt: { $gt: now },
-      }),
-    ]);
-    if (activePatrol || pendingPrompt) continue;
-
-    const nextPromptAt = new Date(now.getTime() + (10 + Math.random() * 20) * 60 * 1000);
-    await ShiftSession.updateOne(
-      { _id: session._id, bookedOffAt: null, nextRandomPromptAt: null },
-      { $set: { nextRandomPromptAt: nextPromptAt } }
-    );
-  }
+  // Disabled per operational requirements to avoid overwhelming guards with surprise patrols
+  return;
 }
 
 // Backfill hourly reminders for active shifts created before server scheduling

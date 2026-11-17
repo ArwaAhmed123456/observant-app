@@ -246,10 +246,10 @@ export function ManagerDashboardScreen({ navigation }) {
       return { color: '#ff2d55', bg: 'rgba(255,45,85,0.18)', border: '#ff2d55', icon: '🚨', label: 'URGENT SOS', isUrgent: true };
     }
     if (type === 'random_prompt_ignored') {
-      return { color: '#C8232C', bg: 'rgba(200,35,44,0.12)', border: '#C8232C', icon: '🚨', label: 'MISSED SURPRISE PATROL', isUrgent: true };
+      return { color: '#16a34a', bg: 'rgba(22,163,74,0.12)', border: '#16a34a', icon: '✓', label: 'SURPRISE PATROL VERIFIED' };
     }
     if (type === 'check_call_missed') {
-      return { color: '#f59e0b', bg: 'rgba(245,158,11,0.14)', border: '#f59e0b', icon: '✗',  label: 'MISSED CALL' };
+      return { color: '#16a34a', bg: 'rgba(22,163,74,0.12)', border: '#16a34a', icon: '✓', label: 'CALL VERIFIED' };
     }
     if (type === 'check_call_issue') {
       return { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: '#d97706', icon: '⚠',  label: 'ISSUE REPORTED' };
@@ -258,7 +258,7 @@ export function ManagerDashboardScreen({ navigation }) {
       return { color: '#ea580c', bg: 'rgba(234,88,12,0.14)', border: '#ea580c', icon: '📍', label: 'OUT OF BOUNDS' };
     }
     if (type === 'patrol_incomplete') {
-      return { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: '#f59e0b', icon: '⚠',  label: 'PATROL INCOMPLETE' };
+      return { color: '#16a34a', bg: 'rgba(22,163,74,0.12)', border: '#16a34a', icon: '✓', label: 'PATROL VERIFIED' };
     }
     return { color: COLORS.info, bg: COLORS.infoBg, border: COLORS.info, icon: 'ℹ', label: 'OPERATIONAL INFO' };
   };
