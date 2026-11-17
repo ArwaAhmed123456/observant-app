@@ -330,19 +330,11 @@ export function ManagerReportsScreen() {
       const DAY_HOURS   = ['0700','0800','0900','1000','1100','1200','1300','1400','1500','1600','1700','1800','1900'];
       const NIGHT_HOURS = ['1900','2000','2100','2200','2300','0000','0100','0200','0300','0400','0500','0600','0700'];
 
-      const ROSTER_ORDER = {
-        '2026-11-09': ['Abdullah Malik', 'Ukasha Ayaz', 'Asad Iqbal'],
-        '2026-11-10': ['Waqar Javaid', 'Ukasha Ayaz', 'Asad Iqbal'],
-        '2026-11-11': ['Abdullah Malik', 'Ukasha Ayaz', 'Asad Iqbal'],
-        '2026-11-12': ['Abdullah Malik', 'Waqar Javaid', 'Asad Iqbal'],
-        '2026-11-13': ['Abdullah Malik', 'Ukasha Ayaz', 'Waqar Javaid'],
-        '2026-11-14': ['Abdullah Malik', 'Rehman Saleem', 'Waqar Javaid', 'Ukasha Ayaz'],
-        '2026-11-15': ['Abdullah Malik', 'Rehman Saleem', 'Ukasha Ayaz', 'Waqar Javaid'],
-      };
+      const DAY_OFFICER_ORDER = ['Abdullah Malik', 'Rehman Saleem', 'Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Shah Fahad', 'Jamal Faisal Sharif'];
+      const NIGHT_OFFICER_ORDER = ['Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Abdullah Malik', 'Rehman Saleem', 'Shah Fahad', 'Jamal Faisal Sharif'];
 
-      const getOfficerRank = (dateKey, officerName) => {
-        const list = ROSTER_ORDER[dateKey];
-        if (!list) return 999;
+      const getOfficerRank = (isNight, officerName) => {
+        const list = isNight ? NIGHT_OFFICER_ORDER : DAY_OFFICER_ORDER;
         const idx = list.indexOf(officerName);
         return idx === -1 ? 999 : idx;
       };
@@ -409,8 +401,8 @@ export function ManagerReportsScreen() {
       const allShifts = [...ccGroupMap.values()].sort((a, b) => {
         if (a.shiftDateKey !== b.shiftDateKey) return a.shiftDateKey.localeCompare(b.shiftDateKey);
         if (a.isNight !== b.isNight) return a.isNight ? 1 : -1;
-        const rankA = getOfficerRank(a.shiftDateKey, a.guardName);
-        const rankB = getOfficerRank(b.shiftDateKey, b.guardName);
+        const rankA = getOfficerRank(a.isNight, a.guardName);
+        const rankB = getOfficerRank(b.isNight, b.guardName);
         if (rankA !== rankB) return rankA - rankB;
         return a.guardName.localeCompare(b.guardName);
       });
@@ -458,8 +450,8 @@ export function ManagerReportsScreen() {
           <td style="border:1px solid #000;padding:4px 6px;font-size:8.5px;text-align:center;">${r.guardName}</td>
           <td style="border:1px solid #000;padding:4px 4px;font-size:8.5px;text-align:center;">${r.date}</td>
           <td style="border:1px solid #000;padding:4px 4px;font-size:8.5px;text-align:center;">${r.patrolTime}</td>
-          <td style="border:1px solid #000;padding:4px 4px;font-size:8.5px;text-align:center;${isIncomplete ? 'color:red;font-weight:bold;' : ''}">${r.checkpointsCapt}</td>
-          <td style="border:1px solid #000;padding:4px 4px;font-size:8.5px;text-align:center;${r.missingCheckpoints ? 'color:red;font-weight:bold;' : ''}">${r.missingCheckpoints || '-'}</td>
+          <td style="border:1px solid #000;padding:4px 4px;font-size:8.5px;text-align:center;">${r.checkpointsCapt}</td>
+          <td style="border:1px solid #000;padding:4px 4px;font-size:8.5px;text-align:center;">${r.missingCheckpoints || '-'}</td>
         </tr>`;
       }).join('');
 
