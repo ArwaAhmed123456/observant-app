@@ -167,7 +167,7 @@ export default function CheckCallLogPage({ session }) {
 
       {/* ── Instructions Notice ── */}
       <div style={{ textAlign: 'center', fontSize: 11, color: '#111', lineHeight: 1.5, marginBottom: 14 }}>
-        The precise time must be recorded. Late CALLS must be recorded in <span style={{ color: 'red', fontWeight: 'bold' }}>RED</span> ink and a brief explanation in the Logbook.<br/>
+        The precise time must be recorded. Late CALLS must be recorded in <span style={{ fontWeight: 'bold' }}>RED</span> ink and a brief explanation in the Logbook.<br/>
         Missed calls (Security Officer not responding to your call after 15 minutes) must be reported &amp; fully explained in the Incident Log Book
       </div>
 

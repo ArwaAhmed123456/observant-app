@@ -470,7 +470,7 @@ export function ManagerReportsScreen() {
   .date-hdr { font-size: 10px; font-weight: bold; text-decoration: underline; min-width: 200px; }
   .report-title { font-size: 18px; font-weight: bold; text-align: center; flex: 1; }
   .notes-box { text-align: center; font-size: 8.5px; color: #222; margin-bottom: 10px; line-height: 1.5; }
-  .notes-box .red { color: red; font-weight: bold; }
+  .notes-box .red { color: #000; font-weight: bold; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
   th { border: 1px solid #000; background: #fff; color: #000; font-size: 8px; font-weight: bold; text-align: center; padding: 3px 2px; vertical-align: middle; }
   td { border: 1px solid #000; }
