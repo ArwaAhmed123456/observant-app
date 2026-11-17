@@ -45,10 +45,17 @@ const ROSTER_ORDER = {
   '2026-11-15': ['Abdullah Malik', 'Rehman Saleem', 'Ukasha Ayaz', 'Waqar Javaid'],
 };
 
-function getOfficerRank(dateKey, officerName) {
+const DAY_OFFICER_ORDER = ['Abdullah Malik', 'Rehman Saleem', 'Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Shah Fahad', 'Jamal Faisal Sharif'];
+const NIGHT_OFFICER_ORDER = ['Rehman Saleem', 'Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Abdullah Malik', 'Shah Fahad', 'Jamal Faisal Sharif'];
+
+function getOfficerRank(dateKey, officerName, shiftType) {
   const list = ROSTER_ORDER[dateKey];
-  if (!list) return 999;
-  const idx = list.indexOf(officerName);
+  if (list) {
+    const idx = list.indexOf(officerName);
+    if (idx !== -1) return idx;
+  }
+  const fallback = shiftType === 'Day' ? DAY_OFFICER_ORDER : NIGHT_OFFICER_ORDER;
+  const idx = fallback.indexOf(officerName);
   return idx === -1 ? 999 : idx;
 }
 
@@ -102,8 +109,8 @@ export default function CheckCallLogPage({ session }) {
     const sorted = [...matrix].sort((a, b) => {
       if (a.shiftDate !== b.shiftDate) return a.shiftDate.localeCompare(b.shiftDate);
       if (a.shiftType !== b.shiftType) return a.shiftType === 'Day' ? -1 : 1;
-      const rankA = getOfficerRank(a.shiftDate, a.officerName);
-      const rankB = getOfficerRank(b.shiftDate, b.officerName);
+      const rankA = getOfficerRank(a.shiftDate, a.officerName, a.shiftType);
+      const rankB = getOfficerRank(b.shiftDate, b.officerName, b.shiftType);
       if (rankA !== rankB) return rankA - rankB;
       const timeA = new Date(a.shiftStart || 0).getTime();
       const timeB = new Date(b.shiftStart || 0).getTime();

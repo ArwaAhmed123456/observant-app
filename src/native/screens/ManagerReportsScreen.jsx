@@ -331,7 +331,7 @@ export function ManagerReportsScreen() {
       const NIGHT_HOURS = ['1900','2000','2100','2200','2300','0000','0100','0200','0300','0400','0500','0600','0700'];
 
       const DAY_OFFICER_ORDER = ['Abdullah Malik', 'Rehman Saleem', 'Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Shah Fahad', 'Jamal Faisal Sharif'];
-      const NIGHT_OFFICER_ORDER = ['Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Abdullah Malik', 'Rehman Saleem', 'Shah Fahad', 'Jamal Faisal Sharif'];
+      const NIGHT_OFFICER_ORDER = ['Rehman Saleem', 'Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Abdullah Malik', 'Shah Fahad', 'Jamal Faisal Sharif'];
 
       const getOfficerRank = (isNight, officerName) => {
         const list = isNight ? NIGHT_OFFICER_ORDER : DAY_OFFICER_ORDER;

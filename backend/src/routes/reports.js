@@ -84,7 +84,7 @@ function createShiftRow({ siteId, siteName, officerId, officerName, badgeNumber,
 }
 
 const DAY_OFFICER_ORDER = ['Abdullah Malik', 'Rehman Saleem', 'Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Shah Fahad', 'Jamal Faisal Sharif'];
-const NIGHT_OFFICER_ORDER = ['Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Abdullah Malik', 'Rehman Saleem', 'Shah Fahad', 'Jamal Faisal Sharif'];
+const NIGHT_OFFICER_ORDER = ['Rehman Saleem', 'Waqar Javaid', 'Asad Iqbal', 'Ukasha Ayaz', 'Abdullah Malik', 'Shah Fahad', 'Jamal Faisal Sharif'];
 
 function getOfficerRank(shiftType, officerName) {
   const list = shiftType === 'Day' ? DAY_OFFICER_ORDER : NIGHT_OFFICER_ORDER;
