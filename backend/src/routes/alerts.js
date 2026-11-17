@@ -18,9 +18,11 @@ router.get('/', authenticate, requireRole('manager','admin'),
     const { type, siteId, read, limit = 50, page = 1 } = req.query;
     const orgId = req.user.organisationId;
 
-    const filter = { organisationId: orgId };
+    const filter = {
+      organisationId: orgId,
+      type: type || { $nin: ['random_prompt_ignored', 'geofence_warning'] },
+    };
     if (req.user.role === 'manager') filter.managerIds = req.user._id;
-    if (type)   filter.type   = type;
     if (siteId) {
       if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(siteId))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
       filter.siteId = siteId;
@@ -53,6 +55,7 @@ router.get('/unread-count', authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
     const count = await Alert.countDocuments({
       organisationId: req.user.organisationId,
+      type: { $nin: ['random_prompt_ignored', 'geofence_warning'] },
       ...(req.user.role === 'admin' ? {} : { managerIds: req.user._id }),
       readBy:         { $ne: req.user._id },
     });

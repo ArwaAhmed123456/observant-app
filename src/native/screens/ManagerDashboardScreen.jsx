@@ -265,6 +265,7 @@ export function ManagerDashboardScreen({ navigation }) {
 
   const mgrAlerts = [...(alerts || [])]
     .filter(a => {
+      if (['random_prompt_ignored', 'geofence_warning'].includes(a.type)) return false;
       const role = currentUser?.role;
       if (role === 'admin' || role === 'superadmin') return true;
       const userSiteIds = new Set([
