@@ -220,7 +220,7 @@ export function ProfileScreen() {
             <Text style={styles.modalSubTxt}>
               You'll need to sign back in to access your shift.
             </Text>
-            <TouchableOpacity style={[btnDanger, { width: '100%', marginBottom: 10 }]} onPress={logout}>
+            <TouchableOpacity style={[btnDanger, { width: '100%', marginBottom: 10 }]} onPress={async () => { setLogoutModal(false); await logout(); }}>
               <Text style={styles.saveBtnTxt}>Yes, Sign Out</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[styles.cancelBtn, { width: '100%' }]} onPress={() => setLogoutModal(false)}>

@@ -122,9 +122,10 @@ router.post('/book-on',
       scheduledEnd,
       scheduledEndAt,
       nextCheckCallAt: new Date(now.getTime() + 60 * 60 * 1000),
-      // Schedule the first patrol prompt on the server so it still fires when
-      // the guard's app is backgrounded or closed.
-      nextRandomPromptAt: new Date(now.getTime() + (10 + Math.random() * 20) * 60 * 1000),
+      // Schedule exactly 2 random surprise patrols per shift:
+      // First prompt: randomly between 1.5h and 4.5h from book-on
+      nextRandomPromptAt: new Date(now.getTime() + (1.5 + Math.random() * 3.0) * 60 * 60 * 1000),
+      randomPromptCount: 0,
       punctuality,
       punctualityMinutes: diffMins,
     });
@@ -196,34 +197,20 @@ router.post('/book-off',
     const isEarly = endAt && now.getTime() < endAt.getTime();
 
     if (isEarly) {
-      const isManagerOrAdmin = ['manager', 'admin', 'superadmin'].includes(req.user.role);
-      const hasOverride = req.body.override === true || req.body.isOverride === true;
-
-      if (isManagerOrAdmin || (hasOverride && req.body.overrideApprovedBy)) {
-        // Log authorized override
-        await audit({
-          req,
-          action: 'early_book_off_override',
-          targetModel: 'ShiftSession',
-          targetId: session._id,
-          targetName: `Shift for guard ${session.guardId}`,
-          details: {
-            scheduledEnd: session.scheduledEnd,
-            scheduledEndAt: endAt,
-            actualBookOff: now,
-            overrideReason: req.body.overrideReason || 'Authorized supervisor override',
-            approvedBy: req.body.overrideApprovedBy || req.user.name,
-          }
-        });
-      } else {
-        return res.status(400).json({
-          error: 'You cannot book off before your time.',
-          code: 'EARLY_BOOK_OFF_BLOCKED',
+      await audit({
+        req,
+        action: 'early_book_off',
+        targetModel: 'ShiftSession',
+        targetId: session._id,
+        targetName: `Shift for guard ${session.guardId}`,
+        details: {
           scheduledEnd: session.scheduledEnd,
           scheduledEndAt: endAt,
-          currentTime: now
-        });
-      }
+          actualBookOff: now,
+          overrideReason: req.body.overrideReason || 'Guard book off / sign out',
+          approvedBy: req.body.overrideApprovedBy || req.user.name,
+        }
+      });
     }
 
     session.bookedOffAt = now;

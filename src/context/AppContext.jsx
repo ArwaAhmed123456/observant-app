@@ -378,11 +378,25 @@ export function AppProvider({ children }) {
     setActivePatrol(null);
     setAntiIdlePrompt(false);
     setShiftEndWarning(false);
-    await save(KEYS.CURRENT_USER_ID, null);
+    try {
+      await save(KEYS.CURRENT_USER_ID, null);
+      if (API_ENABLED) {
+        await setTokens(null);
+      }
+    } catch (e) {
+      console.warn('[Observant] Error clearing local auth keys:', e);
+    }
     if (API_ENABLED) {
-      try { await apiPatch('/api/auth/me/fcm-token', { fcmToken: null }); } catch {}
-      try { await apiPost('/api/auth/logout', {}); } catch {}
-      await setTokens(null);
+      try {
+        Promise.race([
+          apiPatch('/api/auth/me/fcm-token', { fcmToken: null }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
+        ]).catch(() => {});
+        Promise.race([
+          apiPost('/api/auth/logout', {}),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
+        ]).catch(() => {});
+      } catch {}
     }
   }, []);
 
@@ -912,8 +926,10 @@ export function AppProvider({ children }) {
     if (API_ENABLED) {
       try {
         const { session: remoteSession } = await apiPost('/api/shifts/book-off', {
-          isEarlyOverride: options.isEarlyOverride,
-          overrideReason: options.overrideReason
+          sessionId,
+          override: true,
+          isEarlyOverride: options.isEarlyOverride ?? true,
+          overrideReason: options.overrideReason || 'Guard shift book-off'
         });
         clearAllTimers();
         setActiveCheckCall(null);
@@ -926,16 +942,10 @@ export function AppProvider({ children }) {
         }
         return { success: true };
       } catch (err) {
-        return { success: false, error: err.message || 'You cannot book off before your time.' };
+        return { success: false, error: err.message || 'Could not complete book off.' };
       }
     }
     const allSessions = await load(KEYS.SHIFT_SESSIONS) || [];
-    const targetSession = allSessions.find(s => s.id === sessionId);
-    if (targetSession && targetSession.scheduledEndAt && !options.isEarlyOverride) {
-      if (new Date() < new Date(targetSession.scheduledEndAt)) {
-        return { success: false, error: 'You cannot book off before your time.' };
-      }
-    }
     clearAllTimers();
     setActiveCheckCall(null);
     setActivePatrol(null);

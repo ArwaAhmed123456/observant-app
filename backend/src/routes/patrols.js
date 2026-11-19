@@ -327,8 +327,6 @@ router.post('/:id/finish',
 
     // Update session patrol counter
     await ShiftSession.findByIdAndUpdate(patrol.shiftSessionId, { $inc: { patrolCount: 1 } });
-    const nextRandomPromptAt = new Date(now.getTime() + (10 + Math.random() * 20) * 60 * 1000);
-    await ShiftSession.findByIdAndUpdate(patrol.shiftSessionId, { nextRandomPromptAt });
 
     // Persist both routine patrol records and exceptions; preferences decide whether routine records send push.
     {

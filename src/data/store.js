@@ -47,9 +47,10 @@ export const SEED_SITES = [
     name: 'Totmonslow Solar Farm',
     address: 'Totmonslow, Staffordshire',
     managerId: 'abid_mgr',
-    latitude: 52.9642,
-    longitude: -2.0012,
-    geofenceRadiusMeters: 500,
+    latitude: 52.948242,
+    longitude: -2.006144,
+    altitude: 182.89,
+    geofenceRadiusMeters: 1000,
   },
 ];
 

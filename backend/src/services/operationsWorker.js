@@ -77,15 +77,119 @@ async function expireCheckCalls(now = new Date()) {
 }
 
 async function fireDueRandomPrompts(now = new Date()) {
-  // Disabled per operational requirements to avoid overwhelming guards with surprise patrols
-  return;
+  const sessions = await ShiftSession.find({
+    bookedOffAt: null,
+    nextRandomPromptAt: { $lte: now, $ne: null },
+    $or: [{ randomPromptCount: { $lt: 2 } }, { randomPromptCount: { $exists: false } }]
+  }).limit(100);
+
+  for (const session of sessions) {
+    if (session.scheduledEndAt && now >= session.scheduledEndAt) {
+      await ShiftSession.updateOne({ _id: session._id }, { $set: { nextRandomPromptAt: null } });
+      continue;
+    }
+    const currentCount = session.randomPromptCount || 0;
+    if (currentCount >= 2) {
+      await ShiftSession.updateOne({ _id: session._id }, { $set: { nextRandomPromptAt: null } });
+      continue;
+    }
+
+    const dueAt = session.nextRandomPromptAt;
+    const claimed = await ShiftSession.updateOne(
+      { _id: session._id, nextRandomPromptAt: dueAt },
+      { $set: { nextRandomPromptAt: null } }
+    );
+    if (!claimed.modifiedCount) continue;
+
+    const log = await RandomPromptLog.create({
+      organisationId: session.organisationId,
+      shiftSessionId: session._id,
+      guardId: session.guardId,
+      siteId: session.siteId,
+      triggeredAt: now,
+      expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+      responded: false,
+      managerAlerted: false,
+    });
+
+    // Exactly 2 surprise patrols per shift: schedule prompt 2 if this was prompt 1
+    let nextPrompt = null;
+    if (currentCount === 0) {
+      const shiftStart = new Date(session.bookedOnAt || now);
+      // Window 2: randomly between 6.5h and 10h from bookedOnAt
+      nextPrompt = new Date(shiftStart.getTime() + (6.5 + Math.random() * 3.5) * HOUR);
+      if (session.scheduledEndAt && nextPrompt >= session.scheduledEndAt) {
+        nextPrompt = new Date(session.scheduledEndAt.getTime() - (1 + Math.random() * 1.5) * HOUR);
+      }
+      if (nextPrompt <= now) {
+        nextPrompt = new Date(now.getTime() + (2 + Math.random() * 2.5) * HOUR);
+      }
+    }
+
+    await ShiftSession.updateOne(
+      { _id: session._id },
+      {
+        $inc: { randomPromptCount: 1 },
+        $set: { nextRandomPromptAt: currentCount === 0 ? nextPrompt : null }
+      }
+    );
+
+    const guard = await User.findById(session.guardId).select('fcmToken');
+    if (guard?.fcmToken) await sendPush([guard.fcmToken], {
+      title: 'Surprise patrol check',
+      body: 'Start a site patrol now and complete the assigned checkpoints.',
+      data: { type: 'random_patrol', promptId: log._id.toString() },
+    });
+  }
 }
 
-// Recover active shifts created before server-side initial prompt scheduling
-// was deployed. Avoid duplicates while a patrol or response window is active.
+// Exactly 2 surprise patrols per shift session: schedule missing if count < 2
 async function scheduleMissingRandomPrompts(now = new Date()) {
-  // Disabled per operational requirements to avoid overwhelming guards with surprise patrols
-  return;
+  const sessions = await ShiftSession.find({
+    bookedOffAt: null,
+    nextRandomPromptAt: null,
+    $or: [{ randomPromptCount: { $lt: 2 } }, { randomPromptCount: { $exists: false } }]
+  }).limit(100);
+
+  for (const session of sessions) {
+    if (session.scheduledEndAt && now >= session.scheduledEndAt) continue;
+    const currentCount = session.randomPromptCount || 0;
+    if (currentCount >= 2) continue;
+
+    const activePrompt = await RandomPromptLog.exists({
+      shiftSessionId: session._id,
+      responded: false,
+      expiresAt: { $gt: now },
+    });
+    if (activePrompt) continue;
+
+    const shiftStart = new Date(session.bookedOnAt || now);
+    let nextPrompt;
+    if (currentCount === 0) {
+      // First prompt: between 1.5h and 4.5h from bookedOnAt
+      nextPrompt = new Date(shiftStart.getTime() + (1.5 + Math.random() * 3.0) * HOUR);
+      if (nextPrompt <= now) {
+        nextPrompt = new Date(now.getTime() + (20 + Math.random() * 40) * 60 * 1000);
+      }
+    } else {
+      // Second prompt: between 6.5h and 10h from bookedOnAt
+      nextPrompt = new Date(shiftStart.getTime() + (6.5 + Math.random() * 3.5) * HOUR);
+      if (nextPrompt <= now) {
+        nextPrompt = new Date(now.getTime() + (45 + Math.random() * 60) * 60 * 1000);
+      }
+    }
+
+    if (session.scheduledEndAt && nextPrompt >= session.scheduledEndAt) {
+      nextPrompt = new Date(session.scheduledEndAt.getTime() - 30 * 60 * 1000);
+    }
+
+    if (nextPrompt > now) {
+      await ShiftSession.updateOne(
+        { _id: session._id, bookedOffAt: null, nextRandomPromptAt: null },
+        { $set: { nextRandomPromptAt: nextPrompt } }
+      );
+    }
+  }
 }
 
 // Backfill hourly reminders for active shifts created before server scheduling

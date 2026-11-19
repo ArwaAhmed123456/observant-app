@@ -5,6 +5,10 @@ export const INITIAL_SITES = [
     id: '6aef099c741e8672af1fa0b3',
     name: 'Totmonslow Solar Farm',
     address: 'Totmonslow, Staffordshire',
+    latitude: 52.948242,
+    longitude: -2.006144,
+    altitude: 182.89,
+    geofenceRadiusMeters: 1000,
     zone: 'Zone Alpha',
     requiredCheckpoints: [
       { id: 'cp-1-1', name: 'Main Security Gate & Barrier', description: 'Inspect gate access and lock seal', requiredPhoto: true },

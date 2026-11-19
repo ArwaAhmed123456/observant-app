@@ -13,6 +13,7 @@ const shiftSessionSchema = new mongoose.Schema({
   bookedOffAt: { type: Date, default: null },
   nextCheckCallAt: { type: Date, default: null, index: true },
   nextRandomPromptAt: { type: Date, default: null },
+  randomPromptCount: { type: Number, default: 0 },
 
   // Scheduled times from the roster (snapshot at book-on time)
   scheduledStart: { type: String, default: null }, // HH:MM

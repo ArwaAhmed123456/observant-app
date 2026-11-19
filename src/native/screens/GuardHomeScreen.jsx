@@ -177,17 +177,12 @@ export function GuardHomeScreen({ navigation }) {
 
   const handleBookOff = async () => {
     if (!activeSession) return;
-    if (activeSession.scheduledEndAt && new Date() < new Date(activeSession.scheduledEndAt)) {
-      setShowBookOff(false);
-      Alert.alert('Shift Incomplete', 'You cannot book off before your time.');
-      return;
-    }
     setShowBookOff(false);
     setBookingLoading(true);
-    const res = await bookOff(activeSession.id || activeSession._id);
+    const res = await bookOff(activeSession.id || activeSession._id, { isEarlyOverride: true, override: true });
     setBookingLoading(false);
     if (res && !res.success) {
-      Alert.alert('Cannot Book Off', res.error || 'You cannot book off before your time.');
+      Alert.alert('Cannot Book Off', res.error || 'Could not complete book off.');
     }
   };
 
