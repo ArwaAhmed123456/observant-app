@@ -34,16 +34,18 @@ async function fireDueCheckCalls(now = new Date()) {
       if (!claimed.modifiedCount) continue;
       const checkCall = await CheckCall.findOneAndUpdate(
         { sessionId: session._id, scheduledFor: dueAt },
-        { $setOnInsert: {
-          organisationId: session.organisationId,
-          sessionId: session._id,
-          guardId: session.guardId,
-          siteId: session.siteId,
-          firedAt: now,
-          scheduledFor: dueAt,
-          expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
-          isRandom: false,
-        } },
+        {
+          $setOnInsert: {
+            organisationId: session.organisationId,
+            sessionId: session._id,
+            guardId: session.guardId,
+            siteId: session.siteId,
+            firedAt: now,
+            scheduledFor: dueAt,
+            expiresAt: new Date(now.getTime() + 10 * 60 * 1000),
+            isRandom: false,
+          }
+        },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
       const guard = await User.findById(session.guardId).select('fcmToken');

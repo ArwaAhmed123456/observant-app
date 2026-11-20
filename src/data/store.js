@@ -30,11 +30,11 @@ export async function load(key) {
 export async function save(key, value) {
   try {
     await AsyncStorage.setItem(key, JSON.stringify(value));
-  } catch {}
+  } catch { }
 }
 
 export async function remove(key) {
-  try { await AsyncStorage.removeItem(key); } catch {}
+  try { await AsyncStorage.removeItem(key); } catch { }
 }
 
 export { KEYS };

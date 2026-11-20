@@ -12,7 +12,7 @@ const router = require('express').Router();
 const { body } = require('express-validator');
 const { ShiftSession, ShiftRoster, PatrolSession, User, Site } = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
-const validate     = require('../middleware/validate');
+const validate = require('../middleware/validate');
 const asyncHandler = require('../utils/asyncHandler');
 const {
   dayKey,
@@ -40,9 +40,9 @@ router.post('/book-on',
   asyncHandler(async (req, res) => {
     const { siteId } = req.body;
     const guardId = req.user._id;
-    const orgId   = req.user.organisationId;
-    const now     = new Date();
-    
+    const orgId = req.user.organisationId;
+    const now = new Date();
+
     // Determine target site (allow assigned site or specified scheduled site)
     const targetSiteId = siteId || req.user.siteId;
     if (!targetSiteId) {
@@ -75,7 +75,7 @@ router.post('/book-on',
 
     const todayShift = roster?.days?.[dayKey(now)];
     const scheduledStart = todayShift?.start || null;
-    const scheduledEnd   = todayShift?.end   || null;
+    const scheduledEnd = todayShift?.end || null;
 
     if (!roster || !scheduledStart || !scheduledEnd) {
       return res.status(409).json({ error: 'No duty is scheduled for you at this site today.', code: 'NO_DUTY_SCHEDULED' });
@@ -113,11 +113,11 @@ router.post('/book-on',
     const scheduledEndAt = shiftEndAt;
 
     const session = await ShiftSession.create({
-      organisationId:     orgId,
+      organisationId: orgId,
       guardId,
-      siteId:             targetSiteId,
-      rosterId:           roster?._id || null,
-      bookedOnAt:         now,
+      siteId: targetSiteId,
+      rosterId: roster?._id || null,
+      bookedOnAt: now,
       scheduledStart,
       scheduledEnd,
       scheduledEndAt,
@@ -135,13 +135,13 @@ router.post('/book-on',
       const guard = await User.findById(guardId).select('name badgeNumber');
       await createAlert({
         organisationId: orgId,
-        siteId:  session.siteId,
+        siteId: session.siteId,
         guardId,
-        type:    'guard_booked_late',
-        title:   'Guard booked on late',
+        type: 'guard_booked_late',
+        title: 'Guard booked on late',
         message: `${guard?.name || 'Guard'} (${guard?.badgeNumber || 'N/A'}) booked on ${diffMins} minutes late.`,
-        refModel:'ShiftSession',
-        refId:   session._id,
+        refModel: 'ShiftSession',
+        refId: session._id,
       });
     }
 
@@ -164,7 +164,7 @@ router.post('/book-off',
   asyncHandler(async (req, res) => {
     const isGuard = req.user.role === 'guard';
     const filter = { organisationId: req.user.organisationId, bookedOffAt: null };
-    
+
     if (isGuard) {
       filter.guardId = req.user._id;
     }
@@ -276,7 +276,7 @@ router.get('/',
     if (from || to) {
       filter.bookedOnAt = {};
       if (from) filter.bookedOnAt.$gte = new Date(from);
-      if (to)   filter.bookedOnAt.$lte = new Date(to);
+      if (to) filter.bookedOnAt.$lte = new Date(to);
     }
 
     const [sessions, total] = await Promise.all([
@@ -285,7 +285,7 @@ router.get('/',
         .skip((page - 1) * limit)
         .limit(Number(limit))
         .populate('guardId', 'name badgeNumber')
-        .populate('siteId',  'name what3words latitude longitude'),
+        .populate('siteId', 'name what3words latitude longitude'),
       ShiftSession.countDocuments(filter),
     ]);
 
@@ -303,7 +303,7 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
     ...(allowedManagerSites ? { siteId: { $in: allowedManagerSites } } : {}),
   })
     .populate('guardId', 'name badgeNumber avatarUrl')
-    .populate('siteId',  'name address what3words latitude longitude');
+    .populate('siteId', 'name address what3words latitude longitude');
 
   if (!session) return res.status(404).json({ error: 'Session not found' });
   res.json({ session });
@@ -348,7 +348,7 @@ router.patch('/:id',
 
     const updated = await ShiftSession.findById(session._id)
       .populate('guardId', 'name badgeNumber avatarUrl')
-      .populate('siteId',  'name address what3words latitude longitude');
+      .populate('siteId', 'name address what3words latitude longitude');
 
     res.json({ session: updated });
   })

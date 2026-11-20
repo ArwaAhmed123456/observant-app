@@ -11,3 +11,4 @@ mongoose.connect(process.env.MONGODB_URI).then(async () => {
   });
   mongoose.disconnect();
 }).catch(e => console.error(e.message));
+
