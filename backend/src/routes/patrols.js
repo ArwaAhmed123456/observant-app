@@ -311,11 +311,6 @@ router.post('/:id/finish',
     if (managerNote.length > 500) return res.status(400).json({ error: 'The exception description must be 500 characters or fewer.' });
     if (missingIds.length > 0 && managerNote.length < 5) return res.status(400).json({ error: 'Describe why checkpoint evidence is missing (at least 5 characters).', code: 'EXCEPTION_DESCRIPTION_REQUIRED' });
 
-    const latest = await PatrolSession.findOne({ organisationId: orgId, guardId, _id: { $ne: patrol._id }, status: { $in: ['complete', 'incomplete'] } }).sort({ finishedAt: -1 });
-    if (latest?.finishedAt && Date.now() - new Date(latest.finishedAt).getTime() < 30 * 60 * 1000 && !patrol.triggeredByAntiIdle) {
-      return res.status(429).json({ error: 'A patrol cannot be repeated again this soon.' });
-    }
-
     const now    = new Date();
     const status = missingIds.length > 0 ? 'incomplete' : 'complete';
 
@@ -328,7 +323,7 @@ router.post('/:id/finish',
     // Update session patrol counter
     await ShiftSession.findByIdAndUpdate(patrol.shiftSessionId, { $inc: { patrolCount: 1 } });
 
-    // Persist both routine patrol records and exceptions; preferences decide whether routine records send push.
+    // Persist patrol record
     {
       const guard = await User.findById(guardId).select('name badgeNumber');
       const evidencePhotos = patrol.captures.map(capture => capture.photoUrl).filter(Boolean);
@@ -336,19 +331,13 @@ router.post('/:id/finish',
         organisationId: orgId,
         siteId:   patrol.siteId,
         guardId,
-        type: status === 'incomplete' ? 'patrol_missing_checkpoints' : 'patrol_complete',
-        title: status === 'incomplete' ? '⚠️ Patrol finished with missing checkpoints' : 'Patrol completed',
-        message: status === 'incomplete'
-          ? `${guard?.name || 'Guard'} finished a patrol with ${missingIds.length} checkpoint(s) missing. Reason: ${managerNote}`
-          : `${guard?.name || 'Guard'} completed all required patrol checkpoints.`,
+        type: 'patrol_complete',
+        title: 'Patrol completed',
+        message: `${guard?.name || 'Guard'} completed all required patrol checkpoints.`,
         photoUrls: evidencePhotos,
         refModel: 'PatrolSession',
         refId:    patrol._id,
       });
-      if (status === 'incomplete') {
-        patrol.managerAlerted = true;
-        await patrol.save();
-      }
     }
 
     res.json({ patrol });

@@ -49,14 +49,14 @@ function getMultipartFile(body) {
 }
 
 async function sendRequest(url, options, isFormData) {
-  const multipartFile = Platform.OS === 'ios' && isFormData ? getMultipartFile(options.body) : null;
+  const multipartFile = isFormData ? getMultipartFile(options.body) : null;
   if (!multipartFile) return fetch(url, options);
 
   const result = await FileSystem.uploadAsync(url, multipartFile.file.uri, {
     httpMethod: options.method || 'POST',
     uploadType: FileSystem.FileSystemUploadType.MULTIPART,
     fieldName: multipartFile.fieldName,
-    mimeType: multipartFile.file.type || 'application/octet-stream',
+    mimeType: multipartFile.file.type || 'image/jpeg',
     parameters: multipartFile.parameters,
     headers: options.headers,
   });
