@@ -22,9 +22,15 @@ router.get('/', authenticate, requireRole('manager','admin'),
       organisationId: orgId,
       type: type || { $nin: ['random_prompt_ignored', 'geofence_warning'] },
     };
-    if (req.user.role === 'manager') filter.managerIds = req.user._id;
-    if (siteId) {
-      if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(siteId))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
+    if (req.user.role === 'manager') {
+      filter.managerIds = req.user._id;
+      if (siteId) {
+        if (!req.user.managedSiteIds.some(id => String(id) === String(siteId))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
+        filter.siteId = siteId;
+      } else {
+        filter.siteId = { $in: req.user.managedSiteIds };
+      }
+    } else if (siteId) {
       filter.siteId = siteId;
     }
     if (read === 'true')  filter.readBy = req.user._id;
