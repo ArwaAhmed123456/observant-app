@@ -15,7 +15,7 @@ const asyncHandler      = require('../utils/asyncHandler');
 const { audit }         = require('../utils/auditLogger');
 
 router.post('/forgot-password',
-  [body('email').isEmail().normalizeEmail()],
+  [body('email').isEmail().normalizeEmail({ gmail_remove_dots: false })],
   validate,
   asyncHandler(async (req, res) => {
     // Never claim a reset message was sent or expose reset codes in server logs.
@@ -72,7 +72,7 @@ router.post('/forgot-password',
 
 router.post('/verify-reset-code',
   [
-    body('email').isEmail().normalizeEmail(),
+    body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }),
     body('code').isLength({ min: 6, max: 6 }),
   ],
   validate,
@@ -91,7 +91,7 @@ router.post('/verify-reset-code',
 
 router.post('/reset-password',
   [
-    body('email').isEmail().normalizeEmail(),
+    body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }),
     body('code').isLength({ min: 6, max: 6 }),
     body('newPassword').isLength({ min: 12 }),
   ],

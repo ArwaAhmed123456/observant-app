@@ -95,7 +95,7 @@ router.post('/users',
   authenticate, requireRole('manager','admin','superadmin'),
   [
     body('name').trim().notEmpty(),
-    body('email').isEmail().normalizeEmail(),
+    body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }),
     body('password').isLength({ min: 6 }),
     body('role').isIn(['guard','manager','admin','superadmin']),
     body('badgeNumber').optional().trim(),
@@ -177,7 +177,7 @@ router.patch('/users/:id',
   [
     body('role').optional().isIn(['guard','manager','admin','superadmin']),
     body('password').optional().isLength({ min: 6 }),
-    body('email').optional().isEmail().normalizeEmail(),
+    body('email').optional().isEmail().normalizeEmail({ gmail_remove_dots: false }),
   ],
   validate,
   asyncHandler(async (req, res) => {

@@ -21,10 +21,10 @@ router.post('/register-org',
   [
     body('orgName').trim().notEmpty().withMessage('Organisation name required'),
     body('orgSlug').trim().notEmpty().matches(/^[a-z0-9-]+$/).withMessage('Slug must be lowercase alphanumeric with hyphens'),
-    body('email').isEmail().normalizeEmail(),
+    body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }),
     body('password').isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
     body('name').trim().notEmpty(),
-    body('contactEmail').isEmail().normalizeEmail(),
+    body('contactEmail').isEmail().normalizeEmail({ gmail_remove_dots: false }),
   ],
   validate,
   asyncHandler(async (req, res) => {
@@ -68,14 +68,25 @@ router.post('/register-org',
 // ── Login ─────────────────────────────────────────────────────────────────────
 router.post('/login',
   [
-    body('email').isEmail().normalizeEmail(),
+    body('email').isEmail().normalizeEmail({ gmail_remove_dots: false }),
     body('password').notEmpty(),
   ],
   validate,
   asyncHandler(async (req, res) => {
     const { email, password } = req.body;
+    const normalizedInput = String(email || '').trim().toLowerCase();
+    const orConditions = [{ email: normalizedInput }];
 
-    const user = await User.findOne({ email }).select('+password +refreshTokenHash');
+    if (normalizedInput.endsWith('@gmail.com')) {
+      const username = normalizedInput.replace(/@gmail\.com$/, '').replace(/\./g, '');
+      const flexRegex = new RegExp('^' + username.split('').map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.?').join('') + '@gmail\\.com$', 'i');
+      orConditions.push({ email: flexRegex });
+    } else {
+      const escaped = normalizedInput.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      orConditions.push({ email: { $regex: new RegExp(`^${escaped}$`, 'i') } });
+    }
+
+    const user = await User.findOne({ $or: orConditions }).select('+password +refreshTokenHash');
     if (!user || !user.active)
       return res.status(401).json({ error: 'Invalid credentials' });
 
