@@ -28,24 +28,34 @@ function normalizeRosterTemplate(template) {
 
 async function loadRemoteSnapshot(user) {
   const isManager = user.role === 'manager' || user.role === 'admin' || user.role === 'superadmin';
+  const safeGet = (path, fallback) => apiGet(path).catch(err => {
+    console.warn(`[Snapshot] ${path} fetch non-fatal error:`, err.message);
+    return fallback;
+  });
+
   const [sitesResult, shiftsResult, callsResult, patrolsResult, rostersResult, usersResult, alertsResult, templatesResult, auditResult] = await Promise.all([
-    apiGet('/api/sites'),
-    apiGet('/api/shifts?limit=500'),
-    apiGet('/api/check-calls?limit=500'),
-    apiGet('/api/patrols?limit=100'),
-    apiGet('/api/rosters'),
-    isManager ? apiGet('/api/users') : Promise.resolve({ users: [] }),
-    isManager ? apiGet('/api/alerts?limit=100') : Promise.resolve({ alerts: [] }),
-    isManager ? apiGet('/api/rosters/templates') : Promise.resolve({ templates: [] }),
-    isManager ? apiGet('/api/audit-logs?limit=100') : Promise.resolve({ logs: [] }),
+    safeGet('/api/sites', { sites: [] }),
+    safeGet('/api/shifts?limit=500', { sessions: [] }),
+    safeGet('/api/check-calls?limit=500', { checkCalls: [] }),
+    safeGet('/api/patrols?limit=100', { patrols: [] }),
+    safeGet('/api/rosters', { rosters: [] }),
+    isManager ? safeGet('/api/users', { users: [] }) : Promise.resolve({ users: [] }),
+    isManager ? safeGet('/api/alerts?limit=100', { alerts: [] }) : Promise.resolve({ alerts: [] }),
+    isManager ? safeGet('/api/rosters/templates', { templates: [] }) : Promise.resolve({ templates: [] }),
+    isManager ? safeGet('/api/audit-logs?limit=100', { logs: [] }) : Promise.resolve({ logs: [] }),
   ]);
   const sites = (sitesResult.sites || []).map(normalizeSite);
-  const checkpointsBySite = await Promise.all(sites.map(site => apiGet(`/api/patrols/checkpoints?siteId=${encodeURIComponent(site.id)}`)));
+  const cpResults = await Promise.allSettled(
+    sites.map(site => apiGet(`/api/patrols/checkpoints?siteId=${encodeURIComponent(site.id || site._id)}`))
+  );
+  const checkpoints = cpResults
+    .filter(r => r.status === 'fulfilled' && Array.isArray(r.value?.checkpoints))
+    .flatMap(r => r.value.checkpoints.map(normalizeCheckpoint));
   const patrols = (patrolsResult.patrols || []).map(normalizePatrol);
   return {
     users: isManager ? (usersResult.users || []).map(normalizeUser) : [user],
     sites,
-    checkpoints: checkpointsBySite.flatMap(result => (result.checkpoints || []).map(normalizeCheckpoint)),
+    checkpoints,
     shiftSessions: (shiftsResult.sessions || []).map(normalizeSession),
     checkCalls: (callsResult.checkCalls || []).map(normalizeCheckCall),
     patrolSessions: patrols,
@@ -327,25 +337,31 @@ export function AppProvider({ children }) {
         const response = await apiPost('/api/auth/login', { email: email.trim().toLowerCase(), password });
         await setTokens({ accessToken: response.accessToken, refreshToken: response.refreshToken });
         const user = normalizeUser(response.user);
-        const snapshot = await loadRemoteSnapshot(user);
-        setUsers(snapshot.users); setSites(snapshot.sites); setCheckpoints(snapshot.checkpoints);
-        setShiftSessions(snapshot.shiftSessions); setCheckCalls(snapshot.checkCalls);
-        setPatrolSessions(snapshot.patrolSessions); setPatrolCaptures(snapshot.patrolCaptures);
-        setRosters(snapshot.rosters); setAlerts(snapshot.alerts); setRosterTemplates(snapshot.rosterTemplates);
-        setAuditLogs(snapshot.auditLogs);
         setCurrentUser(user);
-        const activeSession = snapshot.shiftSessions.find(item => item.guardId === user.id && !item.bookedOffAt);
-        if (user.role === 'guard') {
-          setActiveCheckCall(snapshot.checkCalls.find(item => item.guardId === user.id && !item.response) || null);
-        } else {
-          setActiveCheckCall(null);
-        }
-        const activePatrolRecord = snapshot.patrolSessions.find(item => item.guardId === user.id && item.status === 'in_progress');
-        if (activePatrolRecord) {
-          const detail = await apiGet(`/api/patrols/${activePatrolRecord.id}`);
-          setActivePatrol(normalizePatrol(detail.patrol));
-        }
         await save(KEYS.CURRENT_USER_ID, user.id);
+
+        try {
+          const snapshot = await loadRemoteSnapshot(user);
+          setUsers(snapshot.users); setSites(snapshot.sites); setCheckpoints(snapshot.checkpoints);
+          setShiftSessions(snapshot.shiftSessions); setCheckCalls(snapshot.checkCalls);
+          setPatrolSessions(snapshot.patrolSessions); setPatrolCaptures(snapshot.patrolCaptures);
+          setRosters(snapshot.rosters); setAlerts(snapshot.alerts); setRosterTemplates(snapshot.rosterTemplates);
+          setAuditLogs(snapshot.auditLogs);
+          const activeSession = snapshot.shiftSessions.find(item => item.guardId === user.id && !item.bookedOffAt);
+          if (user.role === 'guard') {
+            setActiveCheckCall(snapshot.checkCalls.find(item => item.guardId === user.id && !item.response) || null);
+          } else {
+            setActiveCheckCall(null);
+          }
+          const activePatrolRecord = snapshot.patrolSessions.find(item => item.guardId === user.id && item.status === 'in_progress');
+          if (activePatrolRecord) {
+            const detail = await apiGet(`/api/patrols/${activePatrolRecord.id}`).catch(() => null);
+            if (detail?.patrol) setActivePatrol(normalizePatrol(detail.patrol));
+          }
+        } catch (snapshotErr) {
+          console.warn('[Login] Snapshot hydration fallback:', snapshotErr.message);
+        }
+
         return { success: true, user };
       } catch (error) {
         await setTokens(null);
@@ -384,25 +400,26 @@ export function AppProvider({ children }) {
     setActivePatrol(null);
     setAntiIdlePrompt(false);
     setShiftEndWarning(false);
-    try {
-      await save(KEYS.CURRENT_USER_ID, null);
-      if (API_ENABLED) {
-        await setTokens(null);
-      }
-    } catch (e) {
-      console.warn('[Observant] Error clearing local auth keys:', e);
-    }
     if (API_ENABLED) {
       try {
-        Promise.race([
-          apiPatch('/api/auth/me/fcm-token', { fcmToken: null }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
-        ]).catch(() => {});
-        Promise.race([
-          apiPost('/api/auth/logout', {}),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1500))
-        ]).catch(() => {});
+        await Promise.race([
+          Promise.allSettled([
+            apiPatch('/api/auth/me/fcm-token', { fcmToken: null }),
+            apiPost('/api/auth/logout', {}),
+          ]),
+          new Promise(resolve => setTimeout(resolve, 1500))
+        ]);
       } catch {}
+      try {
+        await setTokens(null);
+      } catch (e) {
+        console.warn('[Observant] Error clearing local tokens:', e);
+      }
+    }
+    try {
+      await save(KEYS.CURRENT_USER_ID, null);
+    } catch (e) {
+      console.warn('[Observant] Error clearing local auth keys:', e);
     }
   }, []);
 
