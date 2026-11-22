@@ -50,11 +50,16 @@ async function fireDueCheckCalls(now = new Date()) {
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
       const guard = await User.findOne({ _id: session.guardId, role: 'guard' }).select('fcmToken role');
-      if (guard?.fcmToken && guard.role === 'guard') await sendPush([guard.fcmToken], {
-        title: 'Hourly check call required',
-        body: 'Confirm everything is okay at your site within 10 minutes.',
-        data: { type: 'check_call_due', checkCallId: checkCall._id.toString() },
-      });
+      if (guard?.fcmToken && guard.role === 'guard') {
+        const isManagerToken = await User.exists({ fcmToken: guard.fcmToken, role: { $in: ['manager', 'admin', 'superadmin'] } });
+        if (!isManagerToken) {
+          await sendPush([guard.fcmToken], {
+            title: 'Hourly check call required',
+            body: 'Confirm everything is okay at your site within 10 minutes.',
+            data: { type: 'check_call_due', checkCallId: checkCall._id.toString() },
+          });
+        }
+      }
     } catch (error) {
       // A unique scheduledFor index makes simultaneous workers safe.
       if (error.code !== 11000) console.error('[OpsWorker] Check-call scheduling failed:', error.message);
@@ -156,12 +161,17 @@ async function fireDueRandomPrompts(now = new Date()) {
       }
     );
 
-    const guard = await User.findById(session.guardId).select('fcmToken');
-    if (guard?.fcmToken) await sendPush([guard.fcmToken], {
-      title: 'Surprise patrol check',
-      body: 'Start a site patrol now and complete the assigned checkpoints.',
-      data: { type: 'random_patrol', promptId: log._id.toString() },
-    });
+    const guard = await User.findOne({ _id: session.guardId, role: 'guard' }).select('fcmToken role');
+    if (guard?.fcmToken && guard.role === 'guard') {
+      const isManagerToken = await User.exists({ fcmToken: guard.fcmToken, role: { $in: ['manager', 'admin', 'superadmin'] } });
+      if (!isManagerToken) {
+        await sendPush([guard.fcmToken], {
+          title: 'Surprise patrol check',
+          body: 'Start a site patrol now and complete the assigned checkpoints.',
+          data: { type: 'random_patrol', promptId: log._id.toString() },
+        });
+      }
+    }
   }
 }
 
@@ -253,12 +263,17 @@ async function warnShiftsEndingSoon(now = new Date()) {
       { new: true }
     );
     if (!claimed) continue;
-    const guard = await User.findById(item.guardId).select('fcmToken');
-    if (guard?.fcmToken) await sendPush([guard.fcmToken], {
-      title: 'Your shift ends in 10 minutes',
-      body: 'Please book off when you have completed your handover.',
-      data: { type: 'shift_end_reminder', shiftSessionId: item._id.toString() },
-    });
+    const guard = await User.findOne({ _id: item.guardId, role: 'guard' }).select('fcmToken role');
+    if (guard?.fcmToken && guard.role === 'guard') {
+      const isManagerToken = await User.exists({ fcmToken: guard.fcmToken, role: { $in: ['manager', 'admin', 'superadmin'] } });
+      if (!isManagerToken) {
+        await sendPush([guard.fcmToken], {
+          title: 'Your shift ends in 10 minutes',
+          body: 'Please book off when you have completed your handover.',
+          data: { type: 'shift_end_reminder', shiftSessionId: item._id.toString() },
+        });
+      }
+    }
   }
 }
 
