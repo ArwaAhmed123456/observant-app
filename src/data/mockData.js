@@ -8,7 +8,7 @@ export const INITIAL_SITES = [
     latitude: 52.948242,
     longitude: -2.006144,
     altitude: 182.89,
-    geofenceRadiusMeters: 1000,
+    geofenceRadiusMeters: 2500,
     zone: 'Zone Alpha',
     requiredCheckpoints: [
       { id: 'cp-1-1', name: 'Main Security Gate & Barrier', description: 'Inspect gate access and lock seal', requiredPhoto: true },

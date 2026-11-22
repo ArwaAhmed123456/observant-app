@@ -45,7 +45,10 @@ export function authorizedImageSource(uri) {
     finalUri = finalUri.replace(/^http:\/\//i, 'https://');
   }
 
-  return { uri: finalUri };
+  const token = tokens?.accessToken;
+  return token
+    ? { uri: finalUri, headers: { Authorization: `Bearer ${token}` } }
+    : { uri: finalUri };
 }
 
 function getMultipartFile(body) {
