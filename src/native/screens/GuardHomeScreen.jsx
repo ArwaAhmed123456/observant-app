@@ -170,9 +170,18 @@ export function GuardHomeScreen({ navigation }) {
       Alert.alert('No Site Assigned', 'Contact your manager to be assigned to a site.');
       return;
     }
+    if (!canBookOn) {
+      Alert.alert('No Duty Scheduled', bookingHint || 'You have no duty scheduled for this week. Contact your manager to be placed on the roster.');
+      return;
+    }
     setBookingLoading(true);
-    await bookOn(gId, effectiveSiteId);
-    setBookingLoading(false);
+    try {
+      await bookOn(gId, effectiveSiteId);
+    } catch (error) {
+      Alert.alert('Cannot Book On', error?.message || 'No duty scheduled for this time.');
+    } finally {
+      setBookingLoading(false);
+    }
   };
 
   const handleBookOff = async () => {
@@ -403,23 +412,30 @@ export function GuardHomeScreen({ navigation }) {
 
         {/* ── Book On / Book Off CTA ── */}
         <TouchableOpacity
-          style={[s.bookBtn, activeSession ? s.bookOffBtn : s.bookOnBtn, (bookingLoading || (!activeSession && !canBookOn)) && s.btnDisabled]}
+          style={[
+            s.bookBtn,
+            activeSession ? s.bookOffBtn : canBookOn ? s.bookOnBtn : s.btnDisabled,
+          ]}
           onPress={activeSession ? () => {
             if (activeSession.scheduledEndAt && new Date() < new Date(activeSession.scheduledEndAt)) {
               Alert.alert('Shift Incomplete', 'You cannot book off before your time.');
               return;
             }
             setShowBookOff(true);
-          } : handleBookOn}
-          disabled={bookingLoading || (!activeSession && !canBookOn)}
+          } : canBookOn ? handleBookOn : () => {
+            Alert.alert('No Duty Scheduled', bookingHint || 'You have no duty scheduled for this week. Contact your manager to be placed on the roster.');
+          }}
+          disabled={bookingLoading}
           activeOpacity={0.85}
         >
           <LinearGradient
-            colors={activeSession ? [P.red, P.redDark] : [P.ok, P.okDark]}
+            colors={activeSession ? [P.red, P.redDark] : canBookOn ? [P.ok, P.okDark] : ['#475569', '#334155']}
             start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
             style={s.bookBtnGrad}
           >
-            <Text style={s.bookBtnTxt}>{activeSession ? 'BOOK OFF DUTY' : 'BOOK ON DUTY'}</Text>
+            <Text style={s.bookBtnTxt}>
+              {activeSession ? 'BOOK OFF DUTY' : canBookOn ? 'BOOK ON DUTY' : 'NO DUTY SCHEDULED'}
+            </Text>
           </LinearGradient>
         </TouchableOpacity>
         {!activeSession && bookingHint ? <Text style={{ color: P.sub, textAlign: 'center', marginTop: -SP.px8, marginBottom: SP.px12, fontSize: 12, fontWeight: '700' }}>{bookingHint}</Text> : null}

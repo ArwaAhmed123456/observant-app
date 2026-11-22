@@ -11,7 +11,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Modal, Dimensions, Platform, Animated
+  Modal, Dimensions, Platform, Animated, Image
 } from 'react-native';
 import Svg, { Path, Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
@@ -643,6 +643,16 @@ export function CheckCallPathScreen({ route, navigation }) {
                     <Text style={styles.modalDetail}>
                       Recorded: {formatTime(detailNode.cc.respondedAt)} · Verified on-site
                     </Text>
+                  )}
+
+                  {Boolean(detailNode.cc?.photoUrl || detailNode.cc?.photoUri) && (
+                    <View style={{ width: '100%', borderRadius: 10, overflow: 'hidden', marginVertical: 10, borderWidth: 1, borderColor: '#334155' }}>
+                      <Image
+                        source={{ uri: detailNode.cc?.photoUrl || detailNode.cc?.photoUri }}
+                        style={{ width: '100%', height: 180 }}
+                        resizeMode="cover"
+                      />
+                    </View>
                   )}
 
                   {detailNode.note && (
