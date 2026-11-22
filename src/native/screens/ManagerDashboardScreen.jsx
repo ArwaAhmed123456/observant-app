@@ -13,6 +13,7 @@ import { P, SP, BR, FONT, SH_TOKENS } from '../../ds';
 import { COLORS, S, R, TYPE, shadows, cardStyle } from '../../theme';
 import * as Location from 'expo-location';
 import { isValidWhat3Words, normalizeWhat3Words, getCoordinatesFromWhat3Words, getWhat3WordsSync } from '../../utils/what3words';
+import { authorizedImageSource } from '../../services/api';
 
 const TABS = ['overview', 'alerts'];
 
@@ -568,7 +569,7 @@ export function ManagerDashboardScreen({ navigation }) {
                         style={styles.alertPhotoWrap}
                       >
                         <Image
-                          source={{ uri: selectedAlert.photoUrl || selectedAlert.photoUri }}
+                          source={authorizedImageSource(selectedAlert.photoUrl || selectedAlert.photoUri)}
                           style={styles.alertPhotoImg}
                           resizeMode="cover"
                         />
@@ -1004,7 +1005,7 @@ export function ManagerDashboardScreen({ navigation }) {
                   <X size={20} color="#FFFFFF" />
                 </TouchableOpacity>
               </View>
-              <Image source={{ uri: fullEvidencePhoto }} style={styles.fullEvidenceImg} resizeMode="contain" />
+              <Image source={authorizedImageSource(fullEvidencePhoto)} style={styles.fullEvidenceImg} resizeMode="contain" />
             </View>
           </View>
         </Modal>
