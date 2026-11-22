@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Shield,
   Users,
@@ -35,7 +35,14 @@ export const ManagerDashboard = () => {
     currentUser
   } = useSecurity();
 
-  const guards = users.filter(u => u.role === 'guard');
+  const guards = useMemo(() => {
+    return users.filter(u => u.role === 'guard').sort((a, b) => {
+      const aOnDuty = shiftSessions.some(s => s.isActive && (s.guardId === a.id || s.guardId === a._id));
+      const bOnDuty = shiftSessions.some(s => s.isActive && (s.guardId === b.id || s.guardId === b._id));
+      if (bOnDuty !== aOnDuty) return bOnDuty ? 1 : -1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [users, shiftSessions]);
   const activeSessions = shiftSessions.filter(s => s.isActive);
   const activeGuardsCount = activeSessions.length;
 
@@ -311,7 +318,14 @@ export const ManagerDashboard = () => {
 };
 
 
-  const guards = users.filter(u => u.role === 'guard');
+  const guards = useMemo(() => {
+    return users.filter(u => u.role === 'guard').sort((a, b) => {
+      const aOnDuty = shiftSessions.some(s => s.isActive && (s.guardId === a.id || s.guardId === a._id));
+      const bOnDuty = shiftSessions.some(s => s.isActive && (s.guardId === b.id || s.guardId === b._id));
+      if (bOnDuty !== aOnDuty) return bOnDuty ? 1 : -1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [users, shiftSessions]);
   const activeSessions = shiftSessions.filter(s => s.isActive);
   const activeGuardsCount = activeSessions.length;
 

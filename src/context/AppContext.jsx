@@ -1678,7 +1678,7 @@ export function AppProvider({ children }) {
   }, []);
 
   // ─── Patrol: Finish ───────────────────────────────────────────────────────
-  const finishPatrol = useCallback(async (patrolId, forceFinish = false, exceptionDescription = '') => {
+  const finishPatrol = useCallback(async (patrolId, forceFinish = false, exceptionDescription = '', stepCount = 0) => {
     if (API_ENABLED) {
       try {
         const localCaptures = await load(KEYS.PATROL_CAPTURES) || [];
@@ -1707,7 +1707,11 @@ export function AppProvider({ children }) {
             setActivePatrol(latestSaved);
           }
         }
-        const { patrol } = await apiPost(`/api/patrols/${patrolId}/finish`, { forceFinish, managerNote: String(exceptionDescription || '').trim() });
+        const { patrol } = await apiPost(`/api/patrols/${patrolId}/finish`, {
+          forceFinish,
+          managerNote: String(exceptionDescription || '').trim(),
+          stepCount: Math.max(0, parseInt(stepCount, 10) || 0),
+        });
         const saved = normalizePatrol(patrol);
         setPatrolSessions(previous => previous.map(item => item.id === saved.id ? saved : item));
         setActivePatrol(null);
@@ -1762,7 +1766,7 @@ export function AppProvider({ children }) {
     const now = new Date().toISOString();
     const updatedPatrols = allPatrols.map(p =>
       p.id === patrolId
-          ? { ...p, finishedAt: now, managerNote: missing.length > 0 ? String(exceptionDescription || '').trim() : p.managerNote || null, missingCheckpoints: missing, status: missing.length > 0 ? 'incomplete' : 'complete' }
+          ? { ...p, finishedAt: now, managerNote: missing.length > 0 ? String(exceptionDescription || '').trim() : p.managerNote || null, missingCheckpoints: missing, status: missing.length > 0 ? 'incomplete' : 'complete', stepCount: Math.max(0, parseInt(stepCount, 10) || 0) }
         : p
     );
     await save(KEYS.PATROL_SESSIONS, updatedPatrols);

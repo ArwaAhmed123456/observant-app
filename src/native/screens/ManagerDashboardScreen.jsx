@@ -96,6 +96,15 @@ export function ManagerDashboardScreen({ navigation }) {
     return { active: !!session, session };
   };
 
+  const sortedGuards = useMemo(() => {
+    return [...guards].sort((a, b) => {
+      const aActive = (shiftSessions || []).some(s => (s.guardId === a.id || s.guardId === a._id) && !s.bookedOffAt);
+      const bActive = (shiftSessions || []).some(s => (s.guardId === b.id || s.guardId === b._id) && !s.bookedOffAt);
+      if (bActive !== aActive) return bActive ? 1 : -1; // On-duty (available) guards shown above
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [guards, shiftSessions]);
+
   const handleCreateGuard = async () => {
     const { name, email, password, badgeNumber, phone, assignedSiteIds } = guardDraft;
     if (!name.trim() || !email.trim() || !assignedSiteIds.length) {
@@ -396,7 +405,7 @@ export function ManagerDashboardScreen({ navigation }) {
               </TouchableOpacity>
             </View>
           </View>
-          {guards.length === 0 ? (
+          {sortedGuards.length === 0 ? (
             <EmptyState
               icon="shield"
               title="No Officers Deployed"
@@ -404,7 +413,7 @@ export function ManagerDashboardScreen({ navigation }) {
               style={{ marginVertical: SP.px24 }}
             />
           ) : (
-            guards.map(guard => {
+            sortedGuards.map(guard => {
               const { active, session } = getGuardStatus(guard);
               const site         = sites.find(s => s.id === guard.siteId || s._id === guard.siteId);
               const todayCC      = (checkCalls || []).filter(cc => (cc.guardId === guard.id || cc.guardId === guard._id) && cc.firedAt?.startsWith(todayStr));

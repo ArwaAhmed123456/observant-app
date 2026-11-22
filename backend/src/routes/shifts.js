@@ -130,16 +130,17 @@ router.post('/book-on',
       punctualityMinutes: diffMins,
     });
 
-    // Alert manager if late > 15 min
-    if (punctuality === 'late') {
+    // Alert manager immediately if guard arrived late
+    if (punctuality === 'late' || punctuality === 'slightly_late' || diffMins > 0) {
       const guard = await User.findById(guardId).select('name badgeNumber');
+      const site = await Site.findById(session.siteId).select('name');
       await createAlert({
         organisationId: orgId,
         siteId: session.siteId,
         guardId,
         type: 'guard_booked_late',
-        title: 'Guard booked on late',
-        message: `${guard?.name || 'Guard'} (${guard?.badgeNumber || 'N/A'}) booked on ${diffMins} minutes late.`,
+        title: '🚨 Guard arrived on site late',
+        message: `${guard?.name || 'Guard'} (${guard?.badgeNumber || 'N/A'}) arrived and booked on ${diffMins} minute(s) late for scheduled ${scheduledStart} shift at ${site?.name || 'Site'}.`,
         refModel: 'ShiftSession',
         refId: session._id,
       });

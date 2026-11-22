@@ -317,6 +317,9 @@ router.post('/:id/finish',
     patrol.finishedAt           = now;
     patrol.status               = status;
     patrol.missingCheckpointIds = missingIds;
+    if (req.body.stepCount != null) {
+      patrol.stepCount = Math.max(0, parseInt(req.body.stepCount, 10) || 0);
+    }
     if (missingIds.length > 0) patrol.managerNote = managerNote;
     await patrol.save();
 

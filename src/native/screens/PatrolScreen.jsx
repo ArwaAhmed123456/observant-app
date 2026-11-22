@@ -7,7 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { authorizedImageSource } from '../../services/api';
 import { useApp, formatTime } from '../../context/AppContext';
-import { Camera, CheckCircle2, AlertTriangle, Play, Square, Navigation, ScanLine, Radio, Clock3, ShieldCheck } from 'lucide-react-native';
+import { Camera, CheckCircle2, AlertTriangle, Play, Square, Navigation, ScanLine, Radio, Clock3, ShieldCheck, Footprints } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { GuardLogoutButton } from '../components/GuardLogoutButton';
 import { EmptyState } from '../components/EmptyState';
@@ -36,11 +36,51 @@ export function PatrolScreen() {
   const [exceptionDescription, setExceptionDescription] = useState('');
   const [workingCheckpoint, setWorkingCheckpoint] = useState(null);
   const [now, setNow] = useState(Date.now());
+  const [patrolSteps, setPatrolSteps] = useState(0);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+
+  // Android Footsteps mechanism for site patrolling
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !activePatrol || activePatrol.finishedAt) {
+      setPatrolSteps(0);
+      return;
+    }
+    let sub = null;
+    let isMounted = true;
+
+    (async () => {
+      try {
+        const Sensors = require('expo-sensors');
+        const Pedometer = Sensors?.Pedometer;
+        if (!Pedometer) return;
+
+        const isAvailable = await Pedometer.isAvailableAsync();
+        if (!isAvailable) return;
+
+        const perm = await Pedometer.requestPermissionsAsync();
+        if (perm.status !== 'granted') return;
+
+        sub = Pedometer.watchStepCount(result => {
+          if (isMounted && result?.steps != null) {
+            setPatrolSteps(result.steps);
+          }
+        });
+      } catch (err) {
+        console.log('[PatrolScreen] Pedometer error:', err?.message);
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+      if (sub && typeof sub.remove === 'function') {
+        sub.remove();
+      }
+    };
+  }, [activePatrol?.id]);
 
   const activeSession = getGuardActiveSession(currentUser.id);
   // A patrol is pinned to the site it started at. The active shift or profile
@@ -154,7 +194,7 @@ export function PatrolScreen() {
   const handleFinishPatrol = async () => {
     setFinishing(true);
     try {
-      const result = await finishPatrol(activePatrol.id, false);
+      const result = await finishPatrol(activePatrol.id, false, '', patrolSteps);
       if (result?.incomplete) {
         // Double-check if the guard actually completed all captures on this device
         const proofCaptures = result.serverAuthoritative ? (result.patrol?.captures || []) : captures;
@@ -174,7 +214,7 @@ export function PatrolScreen() {
         setExceptionDescription('');
         setIncompleteModal({ patrolId: activePatrol.id, missing: reallyMissing.length ? reallyMissing : result.missing || [], missingNames });
       } else {
-        Alert.alert('Patrol complete', 'All manager-required checkpoint evidence has been recorded. Your next surprise check may arrive at any time.');
+        Alert.alert('Patrol complete', `All manager-required checkpoint evidence has been recorded.${Platform.OS === 'android' && patrolSteps > 0 ? ` Total footsteps recorded: ${patrolSteps}.` : ''} Your next surprise check may arrive at any time.`);
       }
     } catch (error) {
       Alert.alert('Could not finish patrol', error.message || 'Check your connection and try again.');
@@ -190,7 +230,7 @@ export function PatrolScreen() {
     setIncompleteModal(null);
     setFinishing(true);
     try {
-      await finishPatrol(incompleteModal.patrolId, true, description);
+      await finishPatrol(incompleteModal.patrolId, true, description, patrolSteps);
       setExceptionDescription('');
       Alert.alert('Patrol submitted with exceptions', 'Your manager has been notified that required evidence is missing.');
     } catch (error) {
@@ -254,6 +294,24 @@ export function PatrolScreen() {
               </View>
               <View style={styles.timerIcon}><Clock3 color={P.blue} size={22} /></View>
             </View>
+
+            {Platform.OS === 'android' && (
+              <View style={styles.stepsCard}>
+                <View style={styles.stepsCardLeft}>
+                  <View style={styles.stepsIconBadge}>
+                    <Footprints size={20} color={P.ok} />
+                  </View>
+                  <View>
+                    <Text style={styles.stepsLabel}>PATROL FOOTSTEPS</Text>
+                    <Text style={styles.stepsValue}>{patrolSteps.toLocaleString()} <Text style={styles.stepsUnit}>steps</Text></Text>
+                  </View>
+                </View>
+                <View style={styles.stepsStatusBadge}>
+                  <View style={styles.stepsLiveDot} />
+                  <Text style={styles.stepsStatusText}>LIVE TRACKING</Text>
+                </View>
+              </View>
+            )}
             <View style={styles.progressHeader}>
               <View><Text style={styles.progressTitle}>Route progress</Text><Text style={styles.progressSub}>{completedCount} of {checkpoints.length} required checkpoints</Text></View>
               <Text style={styles.progressPct}>{Math.round(progress * 100)}%</Text>
@@ -442,6 +500,15 @@ const styles = StyleSheet.create({
   timerCaption: { color: P.t3, fontSize: 10, fontWeight: '800', letterSpacing: 0.9 },
   timerValue: { color: P.t1, fontSize: 31, fontWeight: '800', fontVariant: ['tabular-nums'], letterSpacing: 0.5, marginTop: 3 },
   timerIcon: { width: 44, height: 44, borderRadius: 15, backgroundColor: P.white, borderWidth: 1, borderColor: P.b1, alignItems: 'center', justifyContent: 'center' },
+  stepsCard: { padding: SP.px14, borderRadius: BR.md, borderWidth: 1, borderColor: '#A7F3D0', backgroundColor: '#ECFDF5', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SP.px20 },
+  stepsCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  stepsIconBadge: { width: 42, height: 42, borderRadius: 13, backgroundColor: P.white, borderWidth: 1, borderColor: '#A7F3D0', alignItems: 'center', justifyContent: 'center' },
+  stepsLabel: { color: '#065F46', fontSize: 10, fontWeight: '800', letterSpacing: 0.9 },
+  stepsValue: { color: '#064E3B', fontSize: 24, fontWeight: '800', fontVariant: ['tabular-nums'], marginTop: 2 },
+  stepsUnit: { fontSize: 13, fontWeight: '700', color: '#047857' },
+  stepsStatusBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.white, paddingHorizontal: 9, paddingVertical: 5, borderRadius: BR.sm, borderWidth: 1, borderColor: '#A7F3D0' },
+  stepsLiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: P.ok },
+  stepsStatusText: { color: '#065F46', fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
   progressHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   progressTitle: { color: P.t1, fontSize: 15, fontWeight: '800' },
   progressSub: { color: P.t3, fontSize: 11, marginTop: 3 },

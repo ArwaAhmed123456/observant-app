@@ -42,6 +42,7 @@ const patrolSessionSchema = new mongoose.Schema({
   // Was manager alerted about missing checkpoints?
   managerAlerted:   { type: Boolean, default: false },
   triggeredByAntiIdle: { type: Boolean, default: false },
+  stepCount: { type: Number, default: 0 },
   isManualLog: { type: Boolean, default: false },
   manuallyLoggedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   managerNote: { type: String, default: null, maxlength: 500 },

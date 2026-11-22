@@ -234,6 +234,11 @@ export default function UsersPage({ session, onNavigate }) {
       const matchesRole = roleFilter === 'all' || u.role === roleFilter;
       const matchesStatus = statusFilter === 'all' || (statusFilter === 'active' ? u.active !== false : u.active === false);
       return matchesSearch && matchesRole && matchesStatus;
+    }).sort((a, b) => {
+      const aActive = a.active !== false ? 1 : 0;
+      const bActive = b.active !== false ? 1 : 0;
+      if (bActive !== aActive) return bActive - aActive;
+      return (a.name || '').localeCompare(b.name || '');
     });
   }, [users, search, roleFilter, statusFilter]);
 

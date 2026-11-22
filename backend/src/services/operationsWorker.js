@@ -1,7 +1,8 @@
-const { ShiftSession, CheckCall, RandomPromptLog, PatrolSession, User, Site } = require('../models');
+const { ShiftSession, ShiftRoster, CheckCall, RandomPromptLog, PatrolSession, User, Site, Alert } = require('../models');
 const { createAlert } = require('./alertService');
 const { sendPush } = require('./fcm');
 const { sendRoutinePatrolDigests } = require('./routineDigest');
+const { dayKey, getMondayOfWeek, parseTimeOnDate, calculateShiftEndDateTime } = require('../utils/dateHelpers');
 
 const HOUR = 60 * 60 * 1000;
 
@@ -65,16 +66,35 @@ async function fireDueCheckCalls(now = new Date()) {
 async function expireCheckCalls(now = new Date()) {
   const due = await CheckCall.find({ response: null, expiresAt: { $lte: now } }).limit(100);
   for (const item of due) {
-    // Keep all check calls verified and green for compliance/audits
     const call = await CheckCall.findOneAndUpdate(
       { _id: item._id, response: null, expiresAt: { $lte: now } },
-      { $set: { response: 'yes', respondedAt: item.firedAt || now, managerAlerted: false } },
+      { $set: { response: 'missed', respondedAt: now, managerAlerted: true, managerAlertedAt: now } },
       { new: true }
     );
     if (!call) continue;
     if (call.sessionId) await ShiftSession.findByIdAndUpdate(call.sessionId, {
+      $inc: { missedCheckCallCount: 1 },
       $set: { nextCheckCallAt: (() => { const next = new Date(call.scheduledFor || call.firedAt); next.setMinutes(0, 0, 0); return new Date(next.getTime() + HOUR); })() },
     });
+
+    try {
+      const [guard, site] = await Promise.all([
+        User.findById(item.guardId).select('name badgeNumber'),
+        Site.findById(item.siteId).select('name'),
+      ]);
+      await createAlert({
+        organisationId: item.organisationId,
+        siteId: item.siteId,
+        guardId: item.guardId,
+        type: 'check_call_missed',
+        title: '🚨 Missed / Late Check Call',
+        message: `${guard?.name || 'Guard'}${guard?.badgeNumber ? ` (${guard.badgeNumber})` : ''} missed the scheduled hourly check call at ${site?.name || 'Site'}. No confirmation was received within the 10-minute window.`,
+        refModel: 'CheckCall',
+        refId: item._id,
+      });
+    } catch (err) {
+      console.error('[OpsWorker] Failed to create missed check call alert:', err.message);
+    }
   }
 }
 
@@ -252,6 +272,80 @@ async function alertIgnoredPrompts(now = new Date()) {
   }
 }
 
+async function checkLateArrivals(now = new Date()) {
+  const weekStart = getMondayOfWeek(now);
+  const currentDay = dayKey(now);
+
+  const rosters = await ShiftRoster.find({
+    acceptanceStatus: 'accepted',
+    $or: [
+      { weekStartDate: weekStart },
+      { recurringWeekly: true }
+    ]
+  }).limit(200);
+
+  const startOfDay = new Date(now);
+  startOfDay.setHours(0, 0, 0, 0);
+
+  for (const roster of rosters) {
+    const todayShift = roster.days?.[currentDay];
+    if (!todayShift?.start || !todayShift?.end) continue;
+
+    const shiftStartAt = parseTimeOnDate(todayShift.start, now);
+    const shiftEndAt = calculateShiftEndDateTime(todayShift.start, todayShift.end, now);
+
+    // If shift has not started yet or has already ended, skip
+    if (now < shiftStartAt || now > shiftEndAt) continue;
+
+    // Check if guard has an active session or booked on for this shift
+    const activeSession = await ShiftSession.findOne({
+      organisationId: roster.organisationId,
+      guardId: roster.guardId,
+      siteId: roster.siteId,
+      bookedOffAt: null,
+    });
+    if (activeSession) continue;
+
+    const sessionToday = await ShiftSession.findOne({
+      organisationId: roster.organisationId,
+      guardId: roster.guardId,
+      siteId: roster.siteId,
+      bookedOnAt: { $gte: new Date(shiftStartAt.getTime() - 30 * 60 * 1000) }
+    });
+    if (sessionToday) continue;
+
+    // Check if we already alerted the manager for this guard today
+    const alreadyAlerted = await Alert.exists({
+      organisationId: roster.organisationId,
+      guardId: roster.guardId,
+      siteId: roster.siteId,
+      type: 'guard_booked_late',
+      createdAt: { $gte: startOfDay }
+    });
+    if (alreadyAlerted) continue;
+
+    const diffMins = Math.max(1, Math.round((now.getTime() - shiftStartAt.getTime()) / 60000));
+    try {
+      const [guard, site] = await Promise.all([
+        User.findById(roster.guardId).select('name badgeNumber'),
+        Site.findById(roster.siteId).select('name'),
+      ]);
+      await createAlert({
+        organisationId: roster.organisationId,
+        siteId: roster.siteId,
+        guardId: roster.guardId,
+        type: 'guard_booked_late',
+        title: '🚨 Guard Not Arrived On Site',
+        message: `${guard?.name || 'Guard'}${guard?.badgeNumber ? ` (${guard.badgeNumber})` : ''} has not arrived on site for scheduled shift starting at ${todayShift.start} at ${site?.name || 'Site'}. Currently ${diffMins} min overdue.`,
+        refModel: 'ShiftRoster',
+        refId: roster._id,
+      });
+    } catch (err) {
+      console.error('[OpsWorker] Failed to create late arrival alert:', err.message);
+    }
+  }
+}
+
 function startOperationsWorker() {
   let running = false;
   const tick = async () => {
@@ -261,6 +355,7 @@ function startOperationsWorker() {
       const now = new Date();
       await fireDueCheckCalls(now);
       await expireCheckCalls(now);
+      await checkLateArrivals(now);
       await scheduleMissingCheckCalls(now);
       await scheduleMissingRandomPrompts(now);
       await fireDueRandomPrompts(now);
@@ -276,4 +371,4 @@ function startOperationsWorker() {
   tick();
 }
 
-module.exports = { startOperationsWorker, fireDueCheckCalls, expireCheckCalls, fireDueRandomPrompts, scheduleMissingCheckCalls, scheduleMissingRandomPrompts, warnShiftsEndingSoon, alertIgnoredPrompts };
+module.exports = { startOperationsWorker, fireDueCheckCalls, expireCheckCalls, checkLateArrivals, fireDueRandomPrompts, scheduleMissingCheckCalls, scheduleMissingRandomPrompts, warnShiftsEndingSoon, alertIgnoredPrompts };

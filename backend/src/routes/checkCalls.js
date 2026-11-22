@@ -213,13 +213,31 @@ router.post('/expire',
       organisationId: orgId,
       guardId,
       response: null,
-    }, { $set: { response: 'yes', respondedAt: now, managerAlerted: false } }, { new: true });
+    }, { $set: { response: 'missed', respondedAt: now, managerAlerted: true, managerAlertedAt: now } }, { new: true });
     if (!cc) return res.status(404).json({ error: 'Check call not found or already responded' });
 
     // Advance session next check call counter cleanly
     if (cc.sessionId) await ShiftSession.findByIdAndUpdate(cc.sessionId, {
+      $inc: { missedCheckCallCount: 1 },
       $set: { nextCheckCallAt: (() => { const hour = new Date(cc.scheduledFor || cc.firedAt); hour.setMinutes(0, 0, 0); return new Date(hour.getTime() + 60 * 60 * 1000); })() },
     });
+
+    try {
+      const guard = await User.findById(guardId).select('name badgeNumber');
+      const site = await Site.findById(cc.siteId).select('name');
+      await createAlert({
+        organisationId: orgId,
+        siteId: cc.siteId,
+        guardId,
+        type: 'check_call_missed',
+        title: '🚨 Missed Check Call',
+        message: `${guard?.name || 'Guard'} missed the scheduled hourly check call at ${site?.name || 'Site'}. No confirmation was received within the 10-minute window.`,
+        refModel: 'CheckCall',
+        refId: cc._id,
+      });
+    } catch (err) {
+      console.error('[CheckCalls] Failed to create missed alert:', err.message);
+    }
 
     res.json({ checkCall: cc });
   })
