@@ -49,8 +49,8 @@ async function fireDueCheckCalls(now = new Date()) {
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
       );
-      const guard = await User.findById(session.guardId).select('fcmToken');
-      if (guard?.fcmToken) await sendPush([guard.fcmToken], {
+      const guard = await User.findOne({ _id: session.guardId, role: 'guard' }).select('fcmToken role');
+      if (guard?.fcmToken && guard.role === 'guard') await sendPush([guard.fcmToken], {
         title: 'Hourly check call required',
         body: 'Confirm everything is okay at your site within 10 minutes.',
         data: { type: 'check_call_due', checkCallId: checkCall._id.toString() },

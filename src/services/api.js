@@ -29,8 +29,23 @@ export async function getAccessToken() {
 }
 
 export function authorizedImageSource(uri) {
-  const accessToken = tokens?.accessToken;
-  return { uri, ...(accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : {}) };
+  if (!uri) return null;
+  let finalUri = typeof uri === 'string' ? uri : (uri.uri || '');
+  if (!finalUri) return null;
+
+  if (finalUri.startsWith('file://') || finalUri.startsWith('data:')) {
+    return { uri: finalUri };
+  }
+
+  if (finalUri.startsWith('/')) {
+    finalUri = `${API_BASE_URL}${finalUri}`;
+  }
+
+  if (finalUri.startsWith('http://') && !finalUri.includes('localhost') && !finalUri.includes('127.0.0.1')) {
+    finalUri = finalUri.replace(/^http:\/\//i, 'https://');
+  }
+
+  return { uri: finalUri };
 }
 
 function getMultipartFile(body) {

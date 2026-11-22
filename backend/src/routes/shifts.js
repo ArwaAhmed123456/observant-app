@@ -10,7 +10,7 @@
  */
 const router = require('express').Router();
 const { body } = require('express-validator');
-const { ShiftSession, ShiftRoster, PatrolSession, User, Site } = require('../models');
+const { ShiftSession, ShiftRoster, PatrolSession, User, Site, Alert } = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
 const validate = require('../middleware/validate');
 const asyncHandler = require('../utils/asyncHandler');
@@ -38,7 +38,7 @@ async function managerSites(user) {
 router.post('/book-on',
   authenticate, requireRole('guard'),
   asyncHandler(async (req, res) => {
-    const { siteId } = req.body;
+    const { siteId, latitude, longitude } = req.body;
     const guardId = req.user._id;
     const orgId = req.user.organisationId;
     const now = new Date();
@@ -49,6 +49,38 @@ router.post('/book-on',
       return res.status(400).json({ error: 'No site specified for book on.' });
     }
     if (![req.user.siteId, ...(req.user.assignedSiteIds || [])].some(id => String(id) === String(targetSiteId))) return res.status(403).json({ error: 'You are not assigned to this site.' });
+
+    const site = await Site.findById(targetSiteId);
+    if (!site) return res.status(404).json({ error: 'Site not found.' });
+
+    // Validate geofence boundary if site has coordinates defined
+    const siteLat = site.latitude != null ? Number(site.latitude) : (site.location?.coordinates?.[1] ? Number(site.location.coordinates[1]) : null);
+    const siteLng = site.longitude != null ? Number(site.longitude) : (site.location?.coordinates?.[0] ? Number(site.location.coordinates[0]) : null);
+    const allowedRadius = site.geofenceRadiusMetres || 250;
+
+    let distanceMetres = null;
+    if (siteLat != null && siteLng != null) {
+      if (latitude == null || longitude == null) {
+        return res.status(400).json({
+          error: 'GPS location is required to verify your presence on site before booking on. Please ensure location services are enabled.',
+          code: 'LOCATION_REQUIRED',
+        });
+      }
+      const rad = deg => deg * Math.PI / 180;
+      const lat1 = Number(latitude), lon1 = Number(longitude);
+      const dLat = rad(siteLat - lat1), dLon = rad(siteLng - lon1);
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(siteLat)) * Math.sin(dLon / 2) ** 2;
+      distanceMetres = Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+
+      if (distanceMetres > allowedRadius) {
+        return res.status(403).json({
+          error: `You are approximately ${distanceMetres}m away from ${site.name}. You must be physically within the defined site boundary (${allowedRadius}m) to book on.`,
+          code: 'OUTSIDE_GEOFENCE',
+          distance: distanceMetres,
+          allowedRadius,
+        });
+      }
+    }
 
     const activeAtAnotherSite = await ShiftSession.findOne({
       organisationId: orgId, guardId, bookedOffAt: null, siteId: { $ne: targetSiteId },
@@ -352,6 +384,75 @@ router.patch('/:id',
       .populate('siteId', 'name address what3words latitude longitude');
 
     res.json({ session: updated });
+  })
+);
+
+// ── Geofence breach monitor ──────────────────────────────────────────────────
+router.post('/geofence-breach',
+  authenticate, requireRole('guard'),
+  asyncHandler(async (req, res) => {
+    const { latitude, longitude, siteId } = req.body;
+    const guardId = req.user._id;
+    const orgId = req.user.organisationId;
+
+    if (latitude == null || longitude == null) {
+      return res.status(400).json({ error: 'GPS coordinates are required.' });
+    }
+
+    const session = await ShiftSession.findOne({
+      organisationId: orgId,
+      guardId,
+      bookedOffAt: null,
+      ...(siteId ? { siteId } : {}),
+    }).populate('siteId');
+
+    if (!session || !session.siteId) {
+      return res.status(200).json({ status: 'no_active_session' });
+    }
+
+    const site = session.siteId;
+    const siteLat = site.latitude != null ? Number(site.latitude) : (site.location?.coordinates?.[1] ? Number(site.location.coordinates[1]) : null);
+    const siteLng = site.longitude != null ? Number(site.longitude) : (site.location?.coordinates?.[0] ? Number(site.location.coordinates[0]) : null);
+    const allowedRadius = site.geofenceRadiusMetres || 250;
+
+    if (siteLat == null || siteLng == null) {
+      return res.status(200).json({ status: 'no_site_coords' });
+    }
+
+    const rad = deg => deg * Math.PI / 180;
+    const lat1 = Number(latitude), lon1 = Number(longitude);
+    const dLat = rad(siteLat - lat1), dLon = rad(siteLng - lon1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(siteLat)) * Math.sin(dLon / 2) ** 2;
+    const distance = Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+
+    if (distance > allowedRadius) {
+      // Throttle: notify managers at most once every 15 minutes per guard/shift to avoid flooding
+      const recent = await Alert.findOne({
+        organisationId: orgId,
+        guardId,
+        type: 'geofence_warning',
+        createdAt: { $gte: new Date(Date.now() - 15 * 60 * 1000) },
+      });
+
+      if (!recent) {
+        const guard = await User.findById(guardId).select('name badgeNumber');
+        await createAlert({
+          organisationId: orgId,
+          siteId: site._id,
+          guardId,
+          type: 'geofence_warning',
+          title: '🚨 Guard Left Site Boundary',
+          message: `${guard?.name || 'Guard'} (${guard?.badgeNumber || 'N/A'}) has moved outside the designated parameter of ${site.name} (currently ${distance}m away; boundary is ${allowedRadius}m).`,
+          location: { latitude: lat1, longitude: lon1 },
+          refModel: 'ShiftSession',
+          refId: session._id,
+        });
+        return res.status(200).json({ breached: true, alertCreated: true, distance, allowedRadius });
+      }
+      return res.status(200).json({ breached: true, alertCreated: false, distance, allowedRadius, throttled: true });
+    }
+
+    return res.status(200).json({ breached: false, distance, allowedRadius });
   })
 );
 

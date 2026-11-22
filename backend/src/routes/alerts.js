@@ -20,7 +20,7 @@ router.get('/', authenticate, requireRole('manager','admin'),
 
     const filter = {
       organisationId: orgId,
-      type: type || { $nin: ['random_prompt_ignored', 'geofence_warning'] },
+      type: type || { $nin: ['random_prompt_ignored'] },
     };
     if (req.user.role === 'manager') {
       filter.managerIds = req.user._id;
@@ -61,7 +61,7 @@ router.get('/unread-count', authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
     const count = await Alert.countDocuments({
       organisationId: req.user.organisationId,
-      type: { $nin: ['random_prompt_ignored', 'geofence_warning'] },
+      type: { $nin: ['random_prompt_ignored'] },
       ...(req.user.role === 'admin' ? {} : { managerIds: req.user._id }),
       readBy:         { $ne: req.user._id },
     });

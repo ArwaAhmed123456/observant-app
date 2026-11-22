@@ -130,7 +130,8 @@ export function AppProvider({ children }) {
           const activePatrolRecord = snapshot.patrolSessions.find(patrol => patrol.guardId === user.id && patrol.status === 'in_progress');
           if (activeShift) {
             if (activeShift.scheduledEndAt && new Date(activeShift.scheduledEndAt).getTime() - Date.now() <= SHIFT_END_WARN_MS) setShiftEndWarning(true);
-            setActiveCheckCall(pendingCall || null);
+            if (user?.role === 'guard') setActiveCheckCall(pendingCall || null);
+            else setActiveCheckCall(null);
             if (activePatrolRecord) {
               const detail = await apiGet(`/api/patrols/${activePatrolRecord.id}`);
               const active = { ...normalizePatrol(detail.patrol), resumedFromServer: true };
@@ -252,7 +253,8 @@ export function AppProvider({ children }) {
         const callsList = (calls.checkCalls || []).map(normalizeCheckCall);
         setCheckCalls(callsList);
         const pending = callsList.find(call => call.guardId === currentUser.id && !call.response);
-        setActiveCheckCall(pending || null);
+        if (currentUser?.role === 'guard') setActiveCheckCall(pending || null);
+        else setActiveCheckCall(null);
         const patrolList = (patrols.patrols || []).map(normalizePatrol);
         setPatrolSessions(patrolList);
         setRosters((rostersResult.rosters || []).map(normalizeRoster));
@@ -333,7 +335,11 @@ export function AppProvider({ children }) {
         setAuditLogs(snapshot.auditLogs);
         setCurrentUser(user);
         const activeSession = snapshot.shiftSessions.find(item => item.guardId === user.id && !item.bookedOffAt);
-        setActiveCheckCall(snapshot.checkCalls.find(item => item.guardId === user.id && !item.response) || null);
+        if (user.role === 'guard') {
+          setActiveCheckCall(snapshot.checkCalls.find(item => item.guardId === user.id && !item.response) || null);
+        } else {
+          setActiveCheckCall(null);
+        }
         const activePatrolRecord = snapshot.patrolSessions.find(item => item.guardId === user.id && item.status === 'in_progress');
         if (activePatrolRecord) {
           const detail = await apiGet(`/api/patrols/${activePatrolRecord.id}`);
@@ -856,7 +862,7 @@ export function AppProvider({ children }) {
   }, []);
 
   // ─── Shift: Book On ───────────────────────────────────────────────────────
-  const bookOn = useCallback(async (guardId, siteId) => {
+  const bookOn = useCallback(async (guardId, siteId, coords = null) => {
     if (API_ENABLED) {
       const scheduledEnd = getTodayRoster(guardId, siteId)?.days?.[todayKey()]?.end;
       let scheduledEndAt = null;
@@ -867,7 +873,12 @@ export function AppProvider({ children }) {
         if (end <= new Date()) end.setDate(end.getDate() + 1);
         scheduledEndAt = end.toISOString();
       }
-      const { session: remoteSession } = await apiPost('/api/shifts/book-on', { siteId, scheduledEndAt });
+      const payload = { siteId, scheduledEndAt };
+      if (coords?.latitude != null && coords?.longitude != null) {
+        payload.latitude = coords.latitude;
+        payload.longitude = coords.longitude;
+      }
+      const { session: remoteSession } = await apiPost('/api/shifts/book-on', payload);
       const session = normalizeSession(remoteSession);
       setShiftSessions(previous => [session, ...previous.filter(item => item.id !== session.id)]);
       setActiveCheckCall(null);

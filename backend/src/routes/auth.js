@@ -198,6 +198,8 @@ router.patch('/me/fcm-token',
       if (!/^Expo(nent)?PushToken\[[^\]]+\]$/.test(fcmToken)) {
         return res.status(422).json({ error: 'Invalid Expo push token format' });
       }
+      // Disassociate this push token from any other accounts so managers never inherit guard check-call notifications
+      await User.updateMany({ fcmToken, _id: { $ne: req.user._id } }, { $set: { fcmToken: null } });
       await User.findByIdAndUpdate(req.user._id, { fcmToken });
       console.info(`[Push] Expo token registered for user ${req.user._id}`);
     } else {

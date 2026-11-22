@@ -42,7 +42,9 @@ router.post('/manual', authenticate, requireRole('guard'),
     let photoUrl = null;
     if (req.file) {
       const fileId = await saveImage(req.file, { organisationId: req.user.organisationId.toString(), guardId: req.user._id.toString() });
-      photoUrl = `${req.protocol}://${req.get('host')}/api/media/${fileId}`;
+      const host = req.get('host');
+      const proto = (process.env.NODE_ENV === 'production' || (host && host.includes('onrender.com'))) ? 'https' : req.protocol;
+      photoUrl = `${proto}://${host}/api/media/${fileId}`;
     }
     const call = await CheckCall.create({
       organisationId: req.user.organisationId, sessionId: session._id, guardId: req.user._id,
@@ -141,21 +143,38 @@ router.post('/:id/respond',
       cc.location = { latitude, longitude, what3words: await getWhat3WordsFromCoordinates(latitude, longitude) };
       const site = await Site.findById(cc.siteId).select('location geofenceRadiusMetres');
       const [siteLon, siteLat] = site?.location?.coordinates || [];
-      if (siteLat != null && siteLon != null) {
+      const finalSiteLat = siteLat != null && siteLat !== 0 ? siteLat : site?.latitude;
+      const finalSiteLon = siteLon != null && siteLon !== 0 ? siteLon : site?.longitude;
+      if (finalSiteLat != null && finalSiteLon != null) {
         const rad = deg => deg * Math.PI / 180;
         const lat1 = Number(req.body.latitude), lon1 = Number(req.body.longitude);
-        const dLat = rad(siteLat - lat1), dLon = rad(siteLon - lon1);
-        const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(siteLat)) * Math.sin(dLon / 2) ** 2;
+        const dLat = rad(finalSiteLat - lat1), dLon = rad(finalSiteLon - lon1);
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(finalSiteLat)) * Math.sin(dLon / 2) ** 2;
         const distance = 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        if (distance > (site.geofenceRadiusMetres || 200)) {
-          // Geofence check logged without generating intrusive alerts during testing
+        const allowedRadius = site.geofenceRadiusMetres || 250;
+        if (distance > allowedRadius) {
+          const guard = await User.findById(guardId).select('name badgeNumber');
+          const siteDoc = await Site.findById(cc.siteId).select('name');
+          await createAlert({
+            organisationId: orgId,
+            siteId: cc.siteId,
+            guardId,
+            type: 'geofence_warning',
+            title: '🚨 Guard Outside Site Boundary',
+            message: `${guard?.name || 'Guard'} (${guard?.badgeNumber || 'N/A'}) confirmed check-call ${Math.round(distance)}m away from ${siteDoc?.name || 'Site'} (boundary is ${allowedRadius}m).`,
+            location: cc.location,
+            refModel: 'CheckCall',
+            refId: cc._id,
+          });
         }
       }
     }
 
     if (req.file) {
       const fileId = await saveImage(req.file, { organisationId: orgId.toString(), guardId: guardId.toString(), checkCallId: cc._id.toString() });
-      cc.photoUrl = `${req.protocol}://${req.get('host')}/api/media/${fileId}`;
+      const host = req.get('host');
+      const proto = (process.env.NODE_ENV === 'production' || (host && host.includes('onrender.com'))) ? 'https' : req.protocol;
+      cc.photoUrl = `${proto}://${host}/api/media/${fileId}`;
     }
 
     cc.response = response;

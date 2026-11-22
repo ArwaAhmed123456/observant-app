@@ -285,7 +285,7 @@ router.get('/shift-calls', authenticate, requireRole('manager','admin'),
       managerAlerted:   cc.managerAlerted,
       gps:              cc.location?.latitude != null && cc.location?.longitude != null ? `${cc.location.latitude.toFixed(5)}, ${cc.location.longitude.toFixed(5)}` : null,
       checkpointStatus: cc.response || 'Pending',
-      images:           includeImages && cc.photoUrl ? [{ url: cc.photoUrl, checkpointName: 'Check call evidence', capturedAt: cc.respondedAt || cc.firedAt }] : [],
+      images:           includeImages && cc.photoUrl ? [{ url: String(cc.photoUrl).replace(/^http:\/\//i, 'https://'), checkpointName: 'Check call evidence', capturedAt: cc.respondedAt || cc.firedAt }] : [],
     }));
 
     const patrolRows = patrols.map(p => ({
@@ -308,7 +308,7 @@ router.get('/shift-calls', authenticate, requireRole('manager','admin'),
       note:               p.managerNote || null,
       images: includeImages ? (p.captures || []).filter(capture => capture.photoUrl).map(capture => ({
         id: capture._id,
-        url: capture.photoUrl,
+        url: String(capture.photoUrl).replace(/^http:\/\//i, 'https://'),
         checkpointName: capture.checkpointId?.name || 'Checkpoint',
         capturedAt: capture.capturedAt,
         latitude: capture.latitude,

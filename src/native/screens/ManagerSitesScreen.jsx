@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet,
+  Alert, Image, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet,
   Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,6 +10,7 @@ import { AppHeader } from '../components/AppHeader';
 import { EmptyState } from '../components/EmptyState';
 import { P, SP, BR, FONT, SH_TOKENS, input, btnPrimary } from '../../ds';
 import { isValidWhat3Words, normalizeWhat3Words } from '../../utils/what3words';
+import { authorizedImageSource } from '../../services/api';
 
 const PAGE_SIZE = 10;
 const emptySite = { name: '', address: '', postcode: '', what3words: '', latitude: '', longitude: '', geofenceRadiusMetres: '250', notes: '' };
@@ -184,6 +185,18 @@ export function ManagerSitesScreen({ navigation }) {
                     <Text style={styles.siteAddress} numberOfLines={2}>{[site.address, site.postcode].filter(Boolean).join(' · ') || 'No address added'}</Text>
                   </View>
                 </View>
+                {Boolean(site.imageUrl || site.mapImageUrl) && (
+                  <View style={styles.siteImageContainer}>
+                    <Image
+                      source={authorizedImageSource(site.imageUrl || site.mapImageUrl)}
+                      style={styles.sitePreviewImage}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.satelliteBadge}>
+                      <Text style={styles.satelliteBadgeText}>🛰️ Google Earth Satellite Imagery</Text>
+                    </View>
+                  </View>
+                )}
                 <View style={styles.siteFacts}>
                   <View style={styles.factItem}><Users size={12} color={P.t3} /><Text style={styles.factText}>{guardsForSite(id)} guards</Text></View>
                   <View style={styles.factItem}><MapPin size={12} color={P.t3} /><Text style={styles.factText}>{checkpointsForSite(id)} checkpoints</Text></View>
@@ -270,6 +283,10 @@ const styles = StyleSheet.create({
   countLabel: { color: P.t3, fontSize: 11, fontWeight: '700', marginBottom: SP.px8 },
   siteList: { flex: 1 },
   siteCard: { ...SH_TOKENS.sm, backgroundColor: P.bg2, borderWidth: 1, borderColor: P.b2, borderRadius: BR.md, padding: SP.px16, marginBottom: SP.px10 },
+  siteImageContainer: { width: '100%', height: 140, borderRadius: BR.sm, overflow: 'hidden', marginTop: SP.px10, marginBottom: SP.px6, position: 'relative' },
+  sitePreviewImage: { width: '100%', height: '100%' },
+  satelliteBadge: { position: 'absolute', bottom: 6, left: 6, backgroundColor: 'rgba(2, 6, 23, 0.75)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: BR.xs },
+  satelliteBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700' },
   siteHeading: { flexDirection: 'row', alignItems: 'center', gap: SP.px10 },
   siteIcon: { width: 36, height: 36, borderRadius: BR.sm, backgroundColor: P.blueSubtle, alignItems: 'center', justifyContent: 'center' },
   siteName: { color: P.t1, fontSize: 15, fontWeight: '800' }, siteAddress: { color: P.t3, fontSize: 11, marginTop: 2 },

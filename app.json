@@ -10,6 +10,7 @@
     "android": {
       "package": "com.observantsecurity.app",
       "versionCode": 3,
+      "usesCleartextTraffic": true,
       "softwareKeyboardLayoutMode": "pan",
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",

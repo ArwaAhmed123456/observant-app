@@ -25,6 +25,8 @@ const siteSchema = new mongoose.Schema({
   geofenceRadiusMetres: { type: Number, default: 200 },
 
   active:  { type: Boolean, default: true },
+  imageUrl: { type: String, default: null },
+  mapImageUrl: { type: String, default: null },
   notes:   { type: String, default: null },
 }, { timestamps: true });
 

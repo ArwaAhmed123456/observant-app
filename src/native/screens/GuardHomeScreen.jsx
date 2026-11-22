@@ -15,6 +15,7 @@ import {
   AlertOctagon, PhoneCall, ShieldCheck, MapPin, Clock,
   Calendar, CheckCircle2, ChevronRight, AlertTriangle, Radio
 } from 'lucide-react-native';
+import * as Location from 'expo-location';
 import { useApp, formatTime, formatDate } from '../../context/AppContext';
 import { AppHeader } from '../components/AppHeader';
 import { GuardLogoutButton } from '../components/GuardLogoutButton';
@@ -23,6 +24,7 @@ import {
   P, SP, BR, FONT, SH_TOKENS, GR, card, SCREEN, TAB_H, statusToken,
 } from '../../ds';
 import { enqueue } from '../../services/offlineQueue';
+import { apiPost } from '../../services/api';
 import { getUKDayKey, getUKDateKey } from '../../utils/scheduleDates';
 
 function ukWallClockToDate(dateKey, time) {
@@ -165,6 +167,37 @@ export function GuardHomeScreen({ navigation }) {
     return unsub;
   }, []);
 
+  // Periodic geofence monitoring during active shift
+  useEffect(() => {
+    if (!activeSession) return undefined;
+    let cancelled = false;
+
+    const checkGeofence = async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (cancelled || !loc?.coords) return;
+        await apiPost('/api/shifts/geofence-breach', {
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+          siteId: activeSession.siteId,
+        });
+      } catch (_) {
+        // silent background check
+      }
+    };
+
+    const interval = setInterval(checkGeofence, 60000);
+    const timeout = setTimeout(checkGeofence, 20000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [activeSession?.id, activeSession?._id, activeSession?.siteId]);
+
   const handleBookOn = async () => {
     if (!effectiveSiteId) {
       Alert.alert('No Site Assigned', 'Contact your manager to be assigned to a site.');
@@ -176,7 +209,44 @@ export function GuardHomeScreen({ navigation }) {
     }
     setBookingLoading(true);
     try {
-      await bookOn(gId, effectiveSiteId);
+      let coords = null;
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+          coords = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        }
+      } catch (locErr) {
+        console.warn('[GuardHome] Location fetch error:', locErr.message);
+      }
+
+      const currentSite = sites?.find(s => String(s.id || s._id) === String(effectiveSiteId));
+      const sLat = currentSite?.latitude != null ? Number(currentSite.latitude) : (currentSite?.location?.coordinates?.[1] ? Number(currentSite.location.coordinates[1]) : null);
+      const sLng = currentSite?.longitude != null ? Number(currentSite.longitude) : (currentSite?.location?.coordinates?.[0] ? Number(currentSite.location.coordinates[0]) : null);
+      const allowedRadius = currentSite?.geofenceRadiusMetres || 250;
+
+      if (sLat != null && sLng != null) {
+        if (!coords) {
+          Alert.alert('Location Required', 'GPS location is required to verify that you are on site before booking on. Please enable location permissions.');
+          setBookingLoading(false);
+          return;
+        }
+        const rad = deg => deg * Math.PI / 180;
+        const dLat = rad(sLat - coords.latitude);
+        const dLon = rad(sLng - coords.longitude);
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(rad(coords.latitude)) * Math.cos(rad(sLat)) * Math.sin(dLon / 2) ** 2;
+        const distance = Math.round(6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+        if (distance > allowedRadius) {
+          Alert.alert(
+            'Outside Site Parameter',
+            `You are approximately ${distance}m away from ${currentSite.name}.\n\nYou must be physically within the defined site boundary (${allowedRadius}m) to book on duty.`
+          );
+          setBookingLoading(false);
+          return;
+        }
+      }
+
+      await bookOn(gId, effectiveSiteId, coords);
     } catch (error) {
       Alert.alert('Cannot Book On', error?.message || 'No duty scheduled for this time.');
     } finally {
