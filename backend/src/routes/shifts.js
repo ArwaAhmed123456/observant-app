@@ -210,14 +210,17 @@ router.post('/book-off',
     const session = await ShiftSession.findOne(filter);
     if (!session) return res.status(404).json({ error: 'No active session found to book off.' });
 
-    // Active patrol check
+    // Auto-close any active in-progress patrol cleanly on book-off
     const activePatrol = await PatrolSession.findOne({
       organisationId: req.user.organisationId,
       guardId: session.guardId,
       status: 'in_progress',
-    }).select('_id');
+    });
     if (activePatrol) {
-      return res.status(409).json({ error: 'Finish your active patrol before booking off.' });
+      activePatrol.finishedAt = new Date();
+      activePatrol.status = activePatrol.capturedCheckpointIds?.length > 0 ? 'complete' : 'incomplete';
+      activePatrol.managerNote = 'Auto-closed on shift book-off';
+      await activePatrol.save();
     }
 
     // Scheduled end time enforcement (UK time)

@@ -292,7 +292,7 @@ export function ManagerDashboardScreen({ navigation }) {
     });
 
   const priorityAlerts = mgrAlerts.filter(alert =>
-    ['sos', 'random_prompt_ignored', 'check_call_missed', 'check_call_issue', 'geofence_warning', 'patrol_missing_checkpoints'].includes(alert.type)
+    ['sos', 'random_prompt_ignored', 'check_call_missed', 'check_call_issue', 'geofence_warning', 'patrol_missing_checkpoints', 'guard_not_arrived', 'guard_booked_late'].includes(alert.type)
       && !alert.read
   ).slice(0, 3);
 

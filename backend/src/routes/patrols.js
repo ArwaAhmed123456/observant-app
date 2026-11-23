@@ -326,6 +326,20 @@ router.post('/:id/finish',
     // Update session patrol counter
     await ShiftSession.findByIdAndUpdate(patrol.shiftSessionId, { $inc: { patrolCount: 1 } });
 
+    // If shift session already booked off or ended earlier, finalize cleanly without manager alerts
+    if (patrol.shiftSessionId) {
+      const parentSession = await ShiftSession.findById(patrol.shiftSessionId).select('bookedOffAt scheduledEndAt');
+      if (parentSession?.bookedOffAt || (parentSession?.scheduledEndAt && now.getTime() > new Date(parentSession.scheduledEndAt).getTime() + 15 * 60 * 1000)) {
+        patrol.finishedAt = now;
+        patrol.status = missingIds.length > 0 ? 'incomplete' : 'complete';
+        patrol.missingCheckpointIds = missingIds;
+        if (managerNote) patrol.managerNote = managerNote;
+        if (req.body.stepCount != null) patrol.stepCount = Math.max(0, parseInt(req.body.stepCount, 10) || 0);
+        await patrol.save();
+        return res.json({ patrol, shiftEnded: true, message: 'Patrol saved. Shift had already ended.' });
+      }
+    }
+
     // Persist patrol record
     {
       const guard = await User.findById(guardId).select('name badgeNumber');

@@ -21,6 +21,7 @@ const alertSchema = new mongoose.Schema({
       'patrol_missing_checkpoints',
       'patrol_complete',
       'guard_booked_late',
+      'guard_not_arrived',
       'shift_end_reminder',
       'random_prompt_ignored',
       'sos',

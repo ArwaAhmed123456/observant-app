@@ -15,6 +15,11 @@ async function fireDueCheckCalls(now = new Date()) {
         { _id: session._id, bookedOffAt: null },
         { $set: { bookedOffAt: session.scheduledEndAt, nextCheckCallAt: null, autoEnded: true } }
       );
+      // Auto-close any active in-progress patrols so they cannot be submitted hours later
+      await PatrolSession.updateMany(
+        { shiftSessionId: session._id, status: 'in_progress' },
+        { $set: { status: 'incomplete', finishedAt: session.scheduledEndAt, managerNote: 'Auto-closed at scheduled shift end' } }
+      );
       continue;
     }
     const dueAt = session.nextCheckCallAt;
@@ -309,8 +314,9 @@ async function checkLateArrivals(now = new Date()) {
     const shiftStartAt = parseTimeOnDate(todayShift.start, now);
     const shiftEndAt = calculateShiftEndDateTime(todayShift.start, todayShift.end, now);
 
-    // If shift has not started yet or has already ended, skip
-    if (now < shiftStartAt || now > shiftEndAt) continue;
+    // If shift has not reached start time + 5 min grace, or has already ended, skip
+    const gracePeriodMs = 5 * 60 * 1000;
+    if (now.getTime() < shiftStartAt.getTime() + gracePeriodMs || now > shiftEndAt) continue;
 
     // Check if guard has an active session or booked on for this shift
     const activeSession = await ShiftSession.findOne({
@@ -334,7 +340,7 @@ async function checkLateArrivals(now = new Date()) {
       organisationId: roster.organisationId,
       guardId: roster.guardId,
       siteId: roster.siteId,
-      type: 'guard_booked_late',
+      type: { $in: ['guard_not_arrived', 'guard_booked_late'] },
       createdAt: { $gte: startOfDay }
     });
     if (alreadyAlerted) continue;
@@ -349,8 +355,8 @@ async function checkLateArrivals(now = new Date()) {
         organisationId: roster.organisationId,
         siteId: roster.siteId,
         guardId: roster.guardId,
-        type: 'guard_booked_late',
-        title: '🚨 Guard Not Arrived On Site',
+        type: 'guard_not_arrived',
+        title: '🚨 Guard not arrived on site',
         message: `${guard?.name || 'Guard'}${guard?.badgeNumber ? ` (${guard.badgeNumber})` : ''} has not arrived on site for scheduled shift starting at ${todayShift.start} at ${site?.name || 'Site'}. Currently ${diffMins} min overdue.`,
         refModel: 'ShiftRoster',
         refId: roster._id,
