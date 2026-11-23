@@ -68,13 +68,26 @@ function shiftDetails(session) {
   return { shiftDate: toDayKey(shiftDate), shiftType };
 }
 
+function getSlotIndex(shiftType, hour) {
+  if (shiftType === 'Day') {
+    if (hour >= 7 && hour <= 19) return hour - 7;
+    return -1;
+  } else {
+    if (hour >= 19) return hour - 19;
+    if (hour <= 7) return hour + 5;
+    return -1;
+  }
+}
+
 function createShiftRow({ siteId, siteName, officerId, officerName, badgeNumber, shiftDate, shiftType, shiftStart, shiftEnd }) {
   const firstHour = shiftType === 'Day' ? 7 : 19;
   const start = new Date(`${shiftDate}T${String(firstHour).padStart(2, '0')}:00:00.000Z`);
   return {
     siteId: String(siteId), siteName: siteName || 'Unknown site',
     officerId: String(officerId), officerName: officerName || 'Unknown officer', badgeNumber: badgeNumber || null,
-    shiftDate, shiftType, shiftStart: shiftStart || null, shiftEnd: shiftEnd || null,
+    shiftDate, shiftType,
+    shiftTimes: shiftType === 'Day' ? '07:00–19:00' : '19:00–07:00',
+    shiftStart: shiftStart || null, shiftEnd: shiftEnd || null,
     hourlyChecks: Array.from({ length: 13 }, (_, index) => ({
       hour: hourLabel(new Date(start.getTime() + index * HOUR_MS)),
       scheduledAt: new Date(start.getTime() + index * HOUR_MS).toISOString(),
@@ -134,9 +147,8 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
     const checkCallQuery = {
       organisationId,
       siteId: siteFilter,
-      firedAt: { $gte: parsed.start, $lt: new Date(parsed.endExclusive.getTime() + 24 * HOUR_MS) },
+      firedAt: { $gte: parsed.start, $lt: parsed.endExclusive },
       ...(officerId ? { guardId: officerId } : {}),
-      ...(sessionIds.length ? { $or: [{ sessionId: { $in: sessionIds } }, { sessionId: null }] } : { sessionId: null }),
     };
     const checkCalls = await CheckCall.find(checkCallQuery)
       .sort({ respondedAt: 1, firedAt: 1 })
@@ -144,8 +156,6 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       .populate('siteId', 'name');
 
     const rowsByKey = new Map();
-    const sessionToRow = new Map();
-    const reportSessionIds = new Set(sessions.map(session => String(session._id)));
     const ensureRow = values => {
       const type = values.shiftType;
       if (requestedShiftType && type.toLowerCase() !== String(requestedShiftType).toLowerCase()) return null;
@@ -154,76 +164,62 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       const row = rowsByKey.get(key);
       if (values.shiftStart && (!row.shiftStart || values.shiftStart < row.shiftStart)) row.shiftStart = values.shiftStart;
       if (values.shiftEnd && (!row.shiftEnd || values.shiftEnd > row.shiftEnd)) row.shiftEnd = values.shiftEnd;
+      if (values.shiftTimes) row.shiftTimes = values.shiftTimes;
       return row;
     };
 
     sessions.forEach(session => {
       if (!session.guardId || !session.siteId) return;
       const details = shiftDetails(session);
-      const row = ensureRow({
+      ensureRow({
         siteId: session.siteId._id, siteName: session.siteId.name,
         officerId: session.guardId._id, officerName: session.guardId.name, badgeNumber: session.guardId.badgeNumber,
-        ...details, shiftStart: session.bookedOnAt, shiftEnd: session.bookedOffAt,
+        ...details,
+        shiftStart: session.bookedOnAt,
+        shiftEnd: session.bookedOffAt,
+        shiftTimes: session.scheduledStart && session.scheduledEnd ? `${session.scheduledStart}–${session.scheduledEnd}` : (details.shiftType === 'Day' ? '07:00–19:00' : '19:00–07:00'),
       });
-      if (row) sessionToRow.set(String(session._id), row);
     });
 
-    const configuredWindow = Number(organisation?.settings?.checkCallWindowMinutes ?? 10);
-    const windowMinutes = Number.isFinite(configuredWindow) ? Math.max(0, configuredWindow) : 10;
     checkCalls.forEach(call => {
       if (!call.guardId || !call.siteId) return;
-      let row = call.sessionId ? sessionToRow.get(String(call.sessionId)) : null;
-      if (!row) {
-        const callTime = call.respondedAt ? new Date(call.respondedAt) : new Date(call.firedAt);
-        const matchingSession = sessions.find(s => {
-          if (String(s.guardId._id) !== String(call.guardId._id)) return false;
-          const sStart = new Date(s.bookedOnAt).getTime();
-          const sEnd = s.bookedOffAt ? new Date(s.bookedOffAt).getTime() : (s.scheduledEndAt ? new Date(s.scheduledEndAt).getTime() : sStart + 13 * HOUR_MS);
-          const cTime = callTime.getTime();
-          return cTime >= (sStart - 45 * 60 * 1000) && cTime <= (sEnd + 45 * 60 * 1000);
-        });
-        if (matchingSession) {
-          row = sessionToRow.get(String(matchingSession._id));
-        }
+      const at = new Date(call.respondedAt || call.firedAt);
+      const hour = at.getUTCHours();
+      const shiftType = (hour >= 7 && hour < 19) ? 'Day' : 'Night';
+      const shiftDateObj = new Date(at);
+      if (shiftType === 'Night' && hour < 7) {
+        shiftDateObj.setUTCDate(shiftDateObj.getUTCDate() - 1);
       }
-      if (!row) {
-        const callTime = call.respondedAt ? new Date(call.respondedAt) : new Date(call.firedAt);
-        const callHour = callTime.getUTCHours();
-        const callShiftType = (callHour >= 7 && callHour < 19) ? 'Day' : 'Night';
-        const callDate = new Date(Date.UTC(callTime.getUTCFullYear(), callTime.getUTCMonth(), callTime.getUTCDate()));
-        if (callShiftType === 'Night' && callHour < 7) callDate.setUTCDate(callDate.getUTCDate() - 1);
-        const shiftDate = toDayKey(callDate);
+      const shiftDate = toDayKey(shiftDateObj);
 
-        row = ensureRow({
-          siteId: call.siteId._id,
-          siteName: call.siteId.name,
-          officerId: call.guardId._id,
-          officerName: call.guardId.name,
-          badgeNumber: call.guardId.badgeNumber,
-          shiftDate,
-          shiftType: callShiftType,
-          shiftStart: call.firedAt,
-          shiftEnd: call.respondedAt || call.firedAt,
-        });
-      }
+      const row = ensureRow({
+        siteId: call.siteId._id,
+        siteName: call.siteId.name,
+        officerId: call.guardId._id,
+        officerName: call.guardId.name,
+        badgeNumber: call.guardId.badgeNumber,
+        shiftDate,
+        shiftType,
+        shiftStart: call.firedAt,
+        shiftEnd: call.respondedAt || call.firedAt,
+        shiftTimes: shiftType === 'Day' ? '07:00–19:00' : '19:00–07:00',
+      });
       if (!row) return;
-      const checkedAt = call.respondedAt ? new Date(call.respondedAt) : null;
-      const slotReference = checkedAt || call.firedAt || call.scheduledFor;
-      const firstSlot = new Date(`${row.shiftDate}T${row.shiftType === 'Day' ? '07' : '19'}:00:00.000Z`);
-      const refTime = new Date(slotReference).getTime();
-      const index = Math.round((refTime - firstSlot.getTime()) / HOUR_MS);
-      if (index < 0 || index > 12) return;
-      const scheduledAt = new Date(firstSlot.getTime() + index * HOUR_MS);
-      const entryTime = checkedAt ? `${String(checkedAt.getUTCHours()).padStart(2, '0')}${String(checkedAt.getUTCMinutes()).padStart(2, '0')}` : null;
-      const isLate = false;
-      const entry = {
-        id: String(call._id), timestamp: checkedAt ? checkedAt.toISOString() : null,
-        time: entryTime,
-        response: call.response || 'yes', scheduledAt: scheduledAt.toISOString(), isLate: false,
-        isRandom: Boolean(call.isRandom), note: call.note || null,
-      };
-      row.hourlyChecks[index].checks.push(entry);
-      row.hourlyChecks[index].isLate = false;
+
+      const slotIdx = getSlotIndex(shiftType, hour);
+      if (slotIdx >= 0 && slotIdx < 13) {
+        const checkedAt = call.respondedAt ? new Date(call.respondedAt) : at;
+        const entryTime = `${String(checkedAt.getUTCHours()).padStart(2, '0')}:${String(checkedAt.getUTCMinutes()).padStart(2, '0')}`;
+        const entry = {
+          id: String(call._id),
+          timestamp: checkedAt.toISOString(),
+          time: entryTime,
+          response: call.response || 'yes',
+          isRandom: Boolean(call.isRandom),
+          note: call.note || null,
+        };
+        row.hourlyChecks[slotIdx].checks.push(entry);
+      }
     });
 
     const rows = [...rowsByKey.values()].sort((a, b) => {

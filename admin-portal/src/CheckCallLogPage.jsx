@@ -297,96 +297,116 @@ export default function CheckCallLogPage({ session }) {
             </thead>
             <tbody>
               {dayGroups.map(({ dateKey, shifts }) => {
-                return shifts.map((row, idx) => {
-                  const isLastInDay = idx === shifts.length - 1;
-                  const borderBottom = isLastInDay ? '2.5px solid #000' : '1px solid #000';
-
-                  const cells = Array.from({ length: 13 }, (_, slotIdx) => {
-                    const slotData = row.hourlyChecks?.[slotIdx];
-                    const activeCheck = slotData?.checks?.[0];
-                    let text = '-';
-                    if (activeCheck && activeCheck.time) {
-                      text = activeCheck.time;
-                    }
-                    return (
+                return (
+                  <React.Fragment key={`day-group-${dateKey}`}>
+                    <tr>
                       <td
-                        key={slotIdx}
+                        colSpan={16}
                         style={{
-                          border: '1px solid #000',
-                          borderBottom,
-                          padding: '5px 2px',
-                          textAlign: 'center',
-                          verticalAlign: 'middle',
-                          fontSize: 10.5,
-                          color: '#000',
-                          fontWeight: 'normal',
-                          whiteSpace: 'nowrap'
+                          background: '#f1f5f9',
+                          border: '1.5px solid #000',
+                          borderBottom: '1px solid #000',
+                          padding: '6px 10px',
+                          fontSize: 11,
+                          fontWeight: 'bold',
+                          color: '#0f172a',
+                          textAlign: 'left'
                         }}
                       >
-                        {text}
+                        📅 {new Date(dateKey + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric' })}
                       </td>
-                    );
-                  });
-
-                  return (
-                    <tr key={`${dateKey}-${row.officerId}-${idx}`}>
-                      {idx === 0 && (
-                        <td
-                          rowSpan={shifts.length}
-                          style={{
-                            border: '1px solid #000',
-                            borderBottom: '2.5px solid #000',
-                            padding: '6px 4px',
-                            fontSize: 9.5,
-                            fontWeight: 'bold',
-                            textAlign: 'center',
-                            textTransform: 'uppercase',
-                            verticalAlign: 'middle',
-                            lineHeight: 1.3,
-                            background: '#fff'
-                          }}
-                        >
-                          {(row.siteName || 'TOTMONSLOW SOLAR FARM')
-                            .toUpperCase()
-                            .split(' ')
-                            .map((word, wi) => (
-                              <React.Fragment key={wi}>
-                                {word}
-                                <br />
-                              </React.Fragment>
-                            ))}
-                        </td>
-                      )}
-                      <td
-                        style={{
-                          border: '1px solid #000',
-                          borderBottom,
-                          padding: '5px 4px',
-                          fontSize: 10.5,
-                          textAlign: 'center',
-                          verticalAlign: 'middle',
-                          background: '#fff'
-                        }}
-                      >
-                        {row.officerName}
-                      </td>
-                      <td
-                        style={{
-                          border: '1px solid #000',
-                          borderBottom,
-                          padding: '5px 4px',
-                          fontSize: 10.5,
-                          textAlign: 'center',
-                          verticalAlign: 'middle',
-                          background: '#fff'
-                        }}
-                      >
-                        {row.shiftType}
-                      </td>
-                      {cells}
                     </tr>
-                  );
-                });
+                    {shifts.map((row, idx) => {
+                      const isLastInDay = idx === shifts.length - 1;
+                      const borderBottom = isLastInDay ? '2.5px solid #000' : '1px solid #000';
+
+                      const cells = Array.from({ length: 13 }, (_, slotIdx) => {
+                        const slotData = row.hourlyChecks?.[slotIdx];
+                        const checks = slotData?.checks || [];
+                        let text = '-';
+                        if (checks.length > 0) {
+                          text = checks.map(c => c.time).join('; ');
+                        }
+                        const hasIssue = checks.some(c => c.response === 'no' || c.response === 'missed');
+
+                        return (
+                          <td
+                            key={slotIdx}
+                            style={{
+                              border: '1px solid #000',
+                              borderBottom,
+                              padding: '5px 2px',
+                              textAlign: 'center',
+                              verticalAlign: 'middle',
+                              fontSize: 10,
+                              color: hasIssue ? '#dc2626' : '#000',
+                              fontWeight: hasIssue ? 'bold' : 'normal',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            {text}
+                          </td>
+                        );
+                      });
+
+                      return (
+                        <tr key={`${dateKey}-${row.officerId}-${idx}`}>
+                          <td
+                            style={{
+                              border: '1px solid #000',
+                              borderBottom,
+                              padding: '5px 4px',
+                              fontSize: 9.5,
+                              fontWeight: 'bold',
+                              textAlign: 'center',
+                              textTransform: 'uppercase',
+                              verticalAlign: 'middle',
+                              background: '#fff'
+                            }}
+                          >
+                            {row.siteName || 'Site'}
+                          </td>
+                          <td
+                            style={{
+                              border: '1px solid #000',
+                              borderBottom,
+                              padding: '5px 4px',
+                              fontSize: 10.5,
+                              textAlign: 'center',
+                              verticalAlign: 'middle',
+                              background: '#fff',
+                              fontWeight: 'bold'
+                            }}
+                          >
+                            {row.officerName}
+                            {row.badgeNumber ? (
+                              <span style={{ fontSize: 9, color: '#64748b', display: 'block', fontWeight: 'normal' }}>
+                                {row.badgeNumber}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td
+                            style={{
+                              border: '1px solid #000',
+                              borderBottom,
+                              padding: '5px 4px',
+                              fontSize: 9.5,
+                              textAlign: 'center',
+                              verticalAlign: 'middle',
+                              background: '#fff'
+                            }}
+                          >
+                            <span style={{ fontWeight: 'bold' }}>{row.shiftType}</span>
+                            <span style={{ fontSize: 8.5, color: '#64748b', display: 'block' }}>
+                              {row.shiftTimes || (row.shiftType === 'Day' ? '07:00–19:00' : '19:00–07:00')}
+                            </span>
+                          </td>
+                          {cells}
+                        </tr>
+                      );
+                    })}
+                  </React.Fragment>
+                );
               })}
             </tbody>
           </table>
