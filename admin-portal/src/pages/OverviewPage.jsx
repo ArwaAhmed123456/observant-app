@@ -58,7 +58,16 @@ export default function OverviewPage({ session, onNavigate }) {
           alertsRes.ok ? alertsRes.json() : { alerts: [] },
         ]);
 
-        let recent = (reportsData.rows || []);
+        let recent = (reportsData.rows || []).map(r => ({
+          id: r.id || r._id,
+          type: r.type || 'check_call',
+          guardName: r.guardName || r.guard,
+          site: r.site || r.siteName,
+          note: r.note || (r.type === 'patrol' ? 'Patrol round' : 'Hourly check verification'),
+          response: r.response || (r.status === 'in_progress' ? 'In Progress' : r.status === 'complete' ? 'Completed' : r.status || 'Verified'),
+          status: r.status,
+          date: r.date || r.timestamp,
+        }));
         if (recent.length === 0) {
           const fallbackRes = await fetch(`${API}/api/check-calls?limit=10`, { headers }).catch(() => ({ ok: false }));
           if (fallbackRes.ok) {
@@ -258,7 +267,11 @@ export default function OverviewPage({ session, onNavigate }) {
                     </div>
                   </div>
                   <div className="text-right">
-                    <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      (item.status === 'in_progress' || item.response === 'In Progress')
+                        ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    }`}>
                       {item.response || item.status || 'Verified'}
                     </span>
                     <div className="text-[10px] text-slate-400 mt-1">
