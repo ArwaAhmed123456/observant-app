@@ -62,19 +62,22 @@ function shiftDetails(session) {
   const scheduledStart = session.scheduledStart && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(session.scheduledStart)
     ? Number(session.scheduledStart.slice(0, 2))
     : actualStart.getUTCHours();
-  const shiftType = scheduledStart >= 7 && scheduledStart < 19 ? 'Day' : 'Night';
+  const shiftType = (scheduledStart >= 7 && scheduledStart < 19 && (actualStart.getUTCHours() !== 6 || actualStart.getUTCMinutes() < 40)) ? 'Day' : 'Night';
   const shiftDate = new Date(Date.UTC(actualStart.getUTCFullYear(), actualStart.getUTCMonth(), actualStart.getUTCDate()));
-  if (shiftType === 'Night' && scheduledStart < 7) shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
+  if (shiftType === 'Night' && actualStart.getUTCHours() < 12) shiftDate.setUTCDate(shiftDate.getUTCDate() - 1);
   return { shiftDate: toDayKey(shiftDate), shiftType };
 }
 
-function getSlotIndex(shiftType, hour) {
+function getSlotIndex(shiftType, hour, minute = 0) {
   if (shiftType === 'Day') {
+    if (hour === 6 && minute >= 40) return 0; // early check for 0700
     if (hour >= 7 && hour <= 19) return hour - 7;
     return -1;
   } else {
+    if (hour === 18 && minute >= 40) return 0; // early check for 1900
     if (hour >= 19) return hour - 19;
-    if (hour <= 7) return hour + 5;
+    if (hour <= 6) return hour + 5;
+    if (hour === 7) return 12; // finish check for 0700
     return -1;
   }
 }
@@ -128,10 +131,14 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
     const siteFilter = req.user.role === 'manager'
       ? { $in: siteId ? [siteId] : req.user.managedSiteIds }
       : siteId || { $exists: true };
+
+    const queryStart = new Date(parsed.start.getTime() - 6 * HOUR_MS);
+    const queryEnd = new Date(parsed.endExclusive.getTime() + 8 * HOUR_MS);
+
     const shiftQuery = {
       organisationId,
       siteId: siteFilter,
-      bookedOnAt: { $gte: parsed.start, $lt: parsed.endExclusive },
+      bookedOnAt: { $gte: queryStart, $lt: queryEnd },
       ...(officerId ? { guardId: officerId } : {}),
     };
 
@@ -143,11 +150,13 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
         .populate('siteId', 'name'),
     ]);
 
-    const sessionIds = sessions.map(session => session._id);
+    const sessionMap = new Map();
+    sessions.forEach(s => sessionMap.set(String(s._id), s));
+
     const checkCallQuery = {
       organisationId,
       siteId: siteFilter,
-      firedAt: { $gte: parsed.start, $lt: parsed.endExclusive },
+      firedAt: { $gte: queryStart, $lt: queryEnd },
       ...(officerId ? { guardId: officerId } : {}),
     };
     const checkCalls = await CheckCall.find(checkCallQuery)
@@ -185,12 +194,23 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       if (!call.guardId || !call.siteId) return;
       const at = new Date(call.respondedAt || call.firedAt);
       const hour = at.getUTCHours();
-      const shiftType = (hour >= 7 && hour < 19) ? 'Day' : 'Night';
-      const shiftDateObj = new Date(at);
-      if (shiftType === 'Night' && hour < 7) {
-        shiftDateObj.setUTCDate(shiftDateObj.getUTCDate() - 1);
+      const minute = at.getUTCMinutes();
+
+      let shiftDate, shiftType;
+      const session = call.sessionId ? sessionMap.get(String(call.sessionId)) : null;
+
+      if (session) {
+        const details = shiftDetails(session);
+        shiftDate = details.shiftDate;
+        shiftType = details.shiftType;
+      } else {
+        shiftType = (hour >= 7 && hour < 19) ? 'Day' : 'Night';
+        const shiftDateObj = new Date(at);
+        if (shiftType === 'Night' && hour < 7) {
+          shiftDateObj.setUTCDate(shiftDateObj.getUTCDate() - 1);
+        }
+        shiftDate = toDayKey(shiftDateObj);
       }
-      const shiftDate = toDayKey(shiftDateObj);
 
       const row = ensureRow({
         siteId: call.siteId._id,
@@ -206,7 +226,7 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       });
       if (!row) return;
 
-      const slotIdx = getSlotIndex(shiftType, hour);
+      const slotIdx = getSlotIndex(shiftType, hour, minute);
       if (slotIdx >= 0 && slotIdx < 13) {
         const checkedAt = call.respondedAt ? new Date(call.respondedAt) : at;
         const entryTime = `${String(checkedAt.getUTCHours()).padStart(2, '0')}:${String(checkedAt.getUTCMinutes()).padStart(2, '0')}`;
@@ -222,15 +242,17 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       }
     });
 
-    const rows = [...rowsByKey.values()].sort((a, b) => {
-      if (a.siteName !== b.siteName) return a.siteName.localeCompare(b.siteName);
-      if (a.shiftDate !== b.shiftDate) return a.shiftDate.localeCompare(b.shiftDate);
-      if (a.shiftType !== b.shiftType) return a.shiftType === 'Day' ? -1 : 1;
-      const timeA = new Date(a.shiftStart || 0).getTime();
-      const timeB = new Date(b.shiftStart || 0).getTime();
-      if (timeA !== timeB) return timeA - timeB;
-      return (a.officerName || '').localeCompare(b.officerName || '');
-    });
+    const rows = [...rowsByKey.values()]
+      .filter(r => r.shiftDate >= startDate && r.shiftDate <= endDate)
+      .sort((a, b) => {
+        if (a.shiftDate !== b.shiftDate) return a.shiftDate.localeCompare(b.shiftDate);
+        if (a.siteName !== b.siteName) return a.siteName.localeCompare(b.siteName);
+        if (a.shiftType !== b.shiftType) return a.shiftType === 'Day' ? -1 : 1;
+        const timeA = new Date(a.shiftStart || 0).getTime();
+        const timeB = new Date(b.shiftStart || 0).getTime();
+        if (timeA !== timeB) return timeA - timeB;
+        return (a.officerName || '').localeCompare(b.officerName || '');
+      });
     res.json({
       company: { name: organisation?.name || 'Observant Security', slug: organisation?.slug || null, logoUrl: organisation?.logoUrl || null },
       dateRange: { startDate, endDate, timezone: 'UTC' },
