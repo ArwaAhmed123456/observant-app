@@ -22,9 +22,13 @@ function Icon({ name, size = 18 }) {
 
 export default function OverviewPage({ session, onNavigate }) {
   const [data, setData] = useState({
+    onDutyCount: 0,
     guardsCount: 0,
+    todayCallsCount: 0,
+    checkCallRate: '100%',
+    todayPatrolsCount: 0,
     sitesCount: 0,
-    recentCalls: [],
+    recentActivity: [],
     alerts: [],
     sites: [],
   });
@@ -36,16 +40,18 @@ export default function OverviewPage({ session, onNavigate }) {
       setLoading(true);
       try {
         const todayIso = new Date().toISOString().slice(0, 10);
-        const [usersRes, sitesRes, reportsRes, alertsRes] = await Promise.all([
-          fetch(`${API}/api/users?role=guard`, { headers: { Authorization: `Bearer ${session.accessToken}` } }),
-          fetch(`${API}/api/sites`, { headers: { Authorization: `Bearer ${session.accessToken}` } }),
-          fetch(`${API}/api/reports/shift-calls?from=${todayIso}T00:00:00.000Z&to=${todayIso}T23:59:59.999Z`, {
-            headers: { Authorization: `Bearer ${session.accessToken}` },
-          }).catch(() => ({ ok: false })),
-          fetch(`${API}/api/alerts?limit=5`, { headers: { Authorization: `Bearer ${session.accessToken}` } }).catch(() => ({ ok: false })),
+        const headers = { Authorization: `Bearer ${session.accessToken}` };
+
+        const [summaryRes, usersRes, sitesRes, reportsRes, alertsRes] = await Promise.all([
+          fetch(`${API}/api/reports/summary?from=${todayIso}T00:00:00.000Z&to=${todayIso}T23:59:59.999Z`, { headers }).catch(() => ({ ok: false })),
+          fetch(`${API}/api/users?role=guard`, { headers }).catch(() => ({ ok: false })),
+          fetch(`${API}/api/sites`, { headers }).catch(() => ({ ok: false })),
+          fetch(`${API}/api/reports/shift-calls?from=${todayIso}T00:00:00.000Z&to=${todayIso}T23:59:59.999Z`, { headers }).catch(() => ({ ok: false })),
+          fetch(`${API}/api/alerts?limit=5`, { headers }).catch(() => ({ ok: false })),
         ]);
 
-        const [usersData, sitesData, reportsData, alertsData] = await Promise.all([
+        const [summaryData, usersData, sitesData, reportsData, alertsData] = await Promise.all([
+          summaryRes.ok ? summaryRes.json() : { summary: {} },
           usersRes.ok ? usersRes.json() : { users: [] },
           sitesRes.ok ? sitesRes.json() : { sites: [] },
           reportsRes.ok ? reportsRes.json() : { rows: [] },
@@ -54,9 +60,7 @@ export default function OverviewPage({ session, onNavigate }) {
 
         let recent = (reportsData.rows || []);
         if (recent.length === 0) {
-          const fallbackRes = await fetch(`${API}/api/check-calls?limit=7`, {
-            headers: { Authorization: `Bearer ${session.accessToken}` },
-          }).catch(() => ({ ok: false }));
+          const fallbackRes = await fetch(`${API}/api/check-calls?limit=10`, { headers }).catch(() => ({ ok: false }));
           if (fallbackRes.ok) {
             const fallbackData = await fallbackRes.json();
             recent = (fallbackData.checkCalls || []).map(cc => ({
@@ -71,13 +75,30 @@ export default function OverviewPage({ session, onNavigate }) {
           }
         }
 
+        const prioritySites = ['totmonslow', 'testing site'];
+        const sortedSites = [...(sitesData.sites || [])].sort((a, b) => {
+          const aName = (a.name || '').toLowerCase();
+          const bName = (b.name || '').toLowerCase();
+          const aIdx = prioritySites.findIndex(p => aName.includes(p));
+          const bIdx = prioritySites.findIndex(p => bName.includes(p));
+          if (aIdx !== -1 && bIdx === -1) return -1;
+          if (aIdx === -1 && bIdx !== -1) return 1;
+          if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+          return aName.localeCompare(bName);
+        });
+
         if (alive) {
+          const sum = summaryData?.summary || {};
           setData({
+            onDutyCount: sum.activeSessions ?? (reportsData.rows?.filter(r => !r.shiftEnd)?.length || 0),
             guardsCount: (usersData.users || []).length,
+            todayCallsCount: sum.checkCalls?.total ?? (reportsData.rows?.filter(r => r.type === 'check_call')?.length || 0),
+            checkCallRate: sum.checkCalls?.rate || '100%',
+            todayPatrolsCount: sum.patrols?.total ?? (reportsData.rows?.filter(r => r.type === 'patrol')?.length || 0),
             sitesCount: (sitesData.sites || []).length,
-            recentCalls: recent.slice(0, 7),
+            recentActivity: recent.slice(0, 8),
             alerts: alertsData.alerts || [],
-            sites: sitesData.sites || [],
+            sites: sortedSites,
           });
         }
       } catch (err) {
@@ -130,52 +151,68 @@ export default function OverviewPage({ session, onNavigate }) {
 
       {/* KPI Cards */}
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {/* Card 1: Guards On Duty */}
         <div
           onClick={() => onNavigate('users')}
-          className="metric-card rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-blue-400 hover:shadow-md cursor-pointer transition-all"
-        >
-          <div className="flex items-center justify-between">
-            <div className="metric-icon tone-blue"><Icon name="shield" size={18} /></div>
-            <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">Directory</span>
-          </div>
-          <div className="mt-4 text-3xl font-extrabold text-slate-900">{data.guardsCount}</div>
-          <div className="mt-1 text-xs font-semibold text-slate-500">Active Security Guards</div>
-        </div>
-
-        <div
-          onClick={() => onNavigate('sites')}
-          className="metric-card rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-amber-400 hover:shadow-md cursor-pointer transition-all"
-        >
-          <div className="flex items-center justify-between">
-            <div className="metric-icon tone-gold"><Icon name="building" size={18} /></div>
-            <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">Perimeters</span>
-          </div>
-          <div className="mt-4 text-3xl font-extrabold text-slate-900">{data.sitesCount}</div>
-          <div className="mt-1 text-xs font-semibold text-slate-500">Client Sites & Geofences</div>
-        </div>
-
-        <div
-          onClick={() => onNavigate('reports')}
           className="metric-card rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-emerald-400 hover:shadow-md cursor-pointer transition-all"
         >
           <div className="flex items-center justify-between">
-            <div className="metric-icon tone-green"><Icon name="report" size={18} /></div>
-            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">Today</span>
+            <div className="metric-icon tone-green"><Icon name="shield" size={18} /></div>
+            <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live
+            </span>
           </div>
-          <div className="mt-4 text-3xl font-extrabold text-slate-900">{data.recentCalls.length}</div>
-          <div className="mt-1 text-xs font-semibold text-slate-500">Today's Check Calls & Patrols</div>
+          <div className="mt-4 text-3xl font-extrabold text-slate-900">{data.onDutyCount}</div>
+          <div className="mt-1 text-xs font-bold text-slate-800">Guards On Duty</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">{data.guardsCount} registered staff</div>
         </div>
 
+        {/* Card 2: Today's Check Calls */}
         <div
-          onClick={() => onNavigate('checklog')}
+          onClick={() => onNavigate('reports')}
+          className="metric-card rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-blue-400 hover:shadow-md cursor-pointer transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <div className="metric-icon tone-blue"><Icon name="report" size={18} /></div>
+            <span className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-full">
+              {data.checkCallRate} SLA
+            </span>
+          </div>
+          <div className="mt-4 text-3xl font-extrabold text-slate-900">{data.todayCallsCount}</div>
+          <div className="mt-1 text-xs font-bold text-slate-800">Today's Check Calls</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Hourly checks logged today</div>
+        </div>
+
+        {/* Card 3: Completed Patrols */}
+        <div
+          onClick={() => onNavigate('reports')}
+          className="metric-card rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-amber-400 hover:shadow-md cursor-pointer transition-all"
+        >
+          <div className="flex items-center justify-between">
+            <div className="metric-icon tone-gold"><Icon name="check" size={18} /></div>
+            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+              Completed
+            </span>
+          </div>
+          <div className="mt-4 text-3xl font-extrabold text-slate-900">{data.todayPatrolsCount}</div>
+          <div className="mt-1 text-xs font-bold text-slate-800">Site Patrols Completed</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Physical rounds verified</div>
+        </div>
+
+        {/* Card 4: Client Sites & Geofences */}
+        <div
+          onClick={() => onNavigate('sites')}
           className="metric-card rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-indigo-400 hover:shadow-md cursor-pointer transition-all"
         >
           <div className="flex items-center justify-between">
-            <div className="metric-icon tone-navy"><Icon name="calendar" size={18} /></div>
-            <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">Shift Matrix</span>
+            <div className="metric-icon tone-navy"><Icon name="building" size={18} /></div>
+            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full">
+              Perimeters
+            </span>
           </div>
-          <div className="mt-4 text-3xl font-extrabold text-slate-900">Live</div>
-          <div className="mt-1 text-xs font-semibold text-slate-500">Hourly Attendance Matrix</div>
+          <div className="mt-4 text-3xl font-extrabold text-slate-900">{data.sitesCount}</div>
+          <div className="mt-1 text-xs font-bold text-slate-800">Client Sites & Geofences</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Totmonslow & active zones</div>
         </div>
       </section>
 
@@ -197,12 +234,12 @@ export default function OverviewPage({ session, onNavigate }) {
           </div>
 
           <div className="mt-4 space-y-3">
-            {data.recentCalls.length === 0 ? (
+            {data.recentActivity.length === 0 ? (
               <div className="p-8 text-center text-slate-400 text-xs">
                 No recent activity logged for today yet. Active shifts will populate here.
               </div>
             ) : (
-              data.recentCalls.map((item, idx) => (
+              data.recentActivity.map((item, idx) => (
                 <div key={item.id || idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100/70 transition-colors">
                   <div className="flex items-center gap-3">
                     <div className={`h-8 w-8 rounded-lg flex items-center justify-center text-xs font-bold ${
@@ -248,10 +285,13 @@ export default function OverviewPage({ session, onNavigate }) {
                 <div key={site._id || site.id} className="flex items-center justify-between p-2.5 rounded-xl border border-slate-100 text-xs">
                   <div>
                     <div className="font-bold text-slate-800">{site.name}</div>
-                    <div className="text-[10px] text-slate-400">{site.address || 'London, UK'}</div>
+                    <div className="text-[10px] text-slate-400">
+                      {site.address || 'Operational Location'}
+                      {site.what3words ? ` · ${site.what3words}` : ''}
+                    </div>
                   </div>
-                  <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-semibold">
-                    {site.geofenceRadiusMetres || 200}m
+                  <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-semibold whitespace-nowrap">
+                    {site.geofenceRadiusMetres ? `${site.geofenceRadiusMetres}m` : '250m'}
                   </span>
                 </div>
               ))}
