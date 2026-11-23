@@ -186,6 +186,26 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
           row = sessionToRow.get(String(matchingSession._id));
         }
       }
+      if (!row) {
+        const callTime = call.respondedAt ? new Date(call.respondedAt) : new Date(call.firedAt);
+        const callHour = callTime.getUTCHours();
+        const callShiftType = (callHour >= 7 && callHour < 19) ? 'Day' : 'Night';
+        const callDate = new Date(Date.UTC(callTime.getUTCFullYear(), callTime.getUTCMonth(), callTime.getUTCDate()));
+        if (callShiftType === 'Night' && callHour < 7) callDate.setUTCDate(callDate.getUTCDate() - 1);
+        const shiftDate = toDayKey(callDate);
+
+        row = ensureRow({
+          siteId: call.siteId._id,
+          siteName: call.siteId.name,
+          officerId: call.guardId._id,
+          officerName: call.guardId.name,
+          badgeNumber: call.guardId.badgeNumber,
+          shiftDate,
+          shiftType: callShiftType,
+          shiftStart: call.firedAt,
+          shiftEnd: call.respondedAt || call.firedAt,
+        });
+      }
       if (!row) return;
       const checkedAt = call.respondedAt ? new Date(call.respondedAt) : null;
       const slotReference = checkedAt || call.firedAt || call.scheduledFor;
@@ -210,13 +230,10 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       if (a.siteName !== b.siteName) return a.siteName.localeCompare(b.siteName);
       if (a.shiftDate !== b.shiftDate) return a.shiftDate.localeCompare(b.shiftDate);
       if (a.shiftType !== b.shiftType) return a.shiftType === 'Day' ? -1 : 1;
-      const rankA = getOfficerRank(a.shiftType, a.officerName);
-      const rankB = getOfficerRank(b.shiftType, b.officerName);
-      if (rankA !== rankB) return rankA - rankB;
       const timeA = new Date(a.shiftStart || 0).getTime();
       const timeB = new Date(b.shiftStart || 0).getTime();
       if (timeA !== timeB) return timeA - timeB;
-      return a.officerName.localeCompare(b.officerName);
+      return (a.officerName || '').localeCompare(b.officerName || '');
     });
     res.json({
       company: { name: organisation?.name || 'Observant Security', slug: organisation?.slug || null, logoUrl: organisation?.logoUrl || null },

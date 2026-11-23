@@ -90,7 +90,31 @@ router.get('/', authenticate, asyncHandler(async (req, res) => {
     filter.siteId = siteId;
   }
 
-  if (weekStartDate) filter.weekStartDate = weekStartDate;
+  if (weekStartDate) {
+    // Return rosters explicitly published for this week, plus recurring rosters active for this week
+    const allMatching = await ShiftRoster.find({
+      ...filter,
+      $or: [
+        { weekStartDate },
+        { recurringWeekly: true, weekStartDate: { $lte: weekStartDate } }
+      ]
+    })
+      .populate('guardId', 'name badgeNumber siteId avatarUrl')
+      .populate('siteId',  'name address what3words latitude longitude')
+      .sort({ weekStartDate: -1 });
+
+    // Deduplicate by guardId and siteId so latest roster (exact week if published, or newest recurring) wins
+    const activeMap = new Map();
+    for (const r of allMatching) {
+      const gId = String(r.guardId?._id || r.guardId || '');
+      const sId = String(r.siteId?._id || r.siteId || '');
+      const key = `${gId}:${sId}`;
+      if (!activeMap.has(key)) {
+        activeMap.set(key, r);
+      }
+    }
+    return res.json({ rosters: Array.from(activeMap.values()) });
+  }
 
   const rosters = await ShiftRoster.find(filter)
     .populate('guardId', 'name badgeNumber siteId avatarUrl')

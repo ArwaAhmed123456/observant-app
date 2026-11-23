@@ -52,11 +52,30 @@ export default function OverviewPage({ session, onNavigate }) {
           alertsRes.ok ? alertsRes.json() : { alerts: [] },
         ]);
 
+        let recent = (reportsData.rows || []);
+        if (recent.length === 0) {
+          const fallbackRes = await fetch(`${API}/api/check-calls?limit=7`, {
+            headers: { Authorization: `Bearer ${session.accessToken}` },
+          }).catch(() => ({ ok: false }));
+          if (fallbackRes.ok) {
+            const fallbackData = await fallbackRes.json();
+            recent = (fallbackData.checkCalls || []).map(cc => ({
+              id: cc._id,
+              type: 'check_call',
+              guardName: cc.guardId?.name,
+              site: cc.siteId?.name,
+              note: cc.note || 'Hourly check verification',
+              response: cc.response || 'Verified',
+              date: cc.respondedAt || cc.firedAt,
+            }));
+          }
+        }
+
         if (alive) {
           setData({
             guardsCount: (usersData.users || []).length,
             sitesCount: (sitesData.sites || []).length,
-            recentCalls: (reportsData.rows || []).slice(0, 7),
+            recentCalls: recent.slice(0, 7),
             alerts: alertsData.alerts || [],
             sites: sitesData.sites || [],
           });

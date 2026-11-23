@@ -14,7 +14,7 @@ const COLUMN_DEFS = [
   ['guardId', 'Guard ID'], ['site', 'Site'], ['gps', 'Location GPS'],
   ['status', 'Checkpoint / Call Status'], ['notes', 'Guard Notes'], ['images', 'Site Images'],
 ];
-const DEFAULT_COLUMNS = { event: true, timestamp: true, guard: true, guardId: true, site: true, gps: false, status: true, notes: true, images: false };
+const DEFAULT_COLUMNS = { event: true, timestamp: true, guard: true, guardId: true, site: true, gps: false, status: true, notes: true, images: true };
 
 function Icon({ name, size = 18 }) {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true };
@@ -50,8 +50,12 @@ function dateWindow(period, customFrom, customTo) {
   if (period === 'week') {
     const mondayOffset = (today.getDay() + 6) % 7;
     start.setDate(today.getDate() - mondayOffset);
-  } else if (period === 'month') start = new Date(today.getFullYear(), today.getMonth(), 1);
-  else if (period === 'custom') {
+    end = new Date(start);
+    end.setDate(start.getDate() + 6);
+  } else if (period === 'month') {
+    start = new Date(today.getFullYear(), today.getMonth(), 1);
+    end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  } else if (period === 'custom') {
     return { from: customFrom || dayString(today), to: customTo || dayString(today) };
   }
   return { from: dayString(start), to: dayString(end) };
@@ -128,7 +132,7 @@ export default function App() {
   const [siteId, setSiteId] = useState('');
   const [eventType, setEventType] = useState('combined');
   const [query, setQuery] = useState('');
-  const [includeImages, setIncludeImages] = useState(false);
+  const [includeImages, setIncludeImages] = useState(true);
   const [columns, setColumns] = useState(DEFAULT_COLUMNS);
   const [rows, setRows] = useState([]);
   const [guards, setGuards] = useState([]);
