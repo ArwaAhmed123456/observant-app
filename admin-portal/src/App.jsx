@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import logo from '../../assets/logo.png';
+import logo from './assets/logo.png';
 import CheckCallLogPage from './CheckCallLogPage.jsx';
 import OverviewPage from './pages/OverviewPage.jsx';
 import UsersPage from './pages/UsersPage.jsx';

@@ -12,8 +12,9 @@ node_modules
 **/.gradle/
 android/app/build/
 android/build/
-dist
+/dist
 dist-ssr
+!admin-portal/dist
 *.local
 .expo/
 .expo

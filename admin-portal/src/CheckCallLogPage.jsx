@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import logo from '../../assets/logo.png';
+import logo from './assets/logo.png';
 
 const API = (import.meta.env.VITE_API_URL || 'https://observant-api-zl49.onrender.com').replace(/\/$/, '');
 const pad = value => String(value).padStart(2, '0');

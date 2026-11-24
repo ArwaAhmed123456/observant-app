@@ -99,6 +99,18 @@ app.use('/api/sos',          sosRoutes);
 app.use('/api/manual-log',   manualLogRoutes);
 app.use('/api/audit-logs',   auditLogRoutes);
 
+// ── Static Web Portal (Admin / Manager) ──────────────────────────────────────
+const path = require('path');
+const fs = require('fs');
+const adminDistPath = path.resolve(__dirname, '../../admin-portal/dist');
+if (fs.existsSync(adminDistPath)) {
+  app.use(express.static(adminDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path === '/health') return next();
+    res.sendFile(path.join(adminDistPath, 'index.html'));
+  });
+}
+
 // ── 404 ───────────────────────────────────────────────────────────────────────
 app.use((req, res) =>
   res.status(404).json({ error: `Route ${req.method} ${req.path} not found` })

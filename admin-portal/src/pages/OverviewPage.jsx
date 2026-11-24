@@ -132,6 +132,58 @@ export default function OverviewPage({ session, onNavigate }) {
           return aName.localeCompare(bName);
         });
 
+        const rows = reportsData.rows || [];
+        const guardsDetailed = allGuards.map(g => {
+          const gId = String(g._id || g.id || '');
+          const gRows = rows.filter(r => String(r.guardId) === gId || r.guardName === g.name);
+          const shiftRow = gRows.find(r => r.type === 'shift' || r.shiftStart);
+          const calls = gRows.filter(r => r.type === 'check_call');
+          const patrols = gRows.filter(r => r.type === 'patrol');
+          const lastActivity = gRows[0]?.date || gRows[0]?.timestamp || null;
+
+          let status = 'OFF DUTY';
+          let bookedOnTime = null;
+          let isLate = false;
+
+          if (shiftRow) {
+            if (!shiftRow.shiftEnd) {
+              status = 'ON DUTY';
+            } else {
+              status = 'BOOKED OFF';
+            }
+            if (shiftRow.shiftStart) {
+              bookedOnTime = new Date(shiftRow.shiftStart).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }
+            if (shiftRow.isLate || shiftRow.note?.toLowerCase().includes('late')) {
+              isLate = true;
+              if (status === 'ON DUTY') {
+                status = 'ATTENTION';
+              }
+            }
+          }
+
+          const hasAlert = (alertsData.alerts || []).some(a => String(a.guardId) === gId && !a.resolved);
+          if (hasAlert && status === 'ON DUTY') {
+            status = 'ATTENTION';
+          }
+
+          const activeWeight = status === 'ON DUTY' ? 3 : status === 'ATTENTION' ? 2 : status === 'BOOKED OFF' ? 1 : 0;
+
+          return {
+            id: gId,
+            name: g.name,
+            badgeNumber: g.badgeNumber ? `SIA: ${g.badgeNumber}` : `SIA: ${gId.slice(-8).toUpperCase()}`,
+            siteName: g.siteId?.name || allSites[0]?.name || 'Totmonslow Solar Farm',
+            status,
+            bookedOnTime,
+            isLate,
+            callsCount: calls.length,
+            patrolsCount: patrols.length,
+            lastActivity,
+            activeWeight,
+          };
+        }).sort((a, b) => b.activeWeight - a.activeWeight || a.name.localeCompare(b.name));
+
         if (alive) {
           const sum = summaryData?.summary || {};
           setData({
@@ -150,6 +202,7 @@ export default function OverviewPage({ session, onNavigate }) {
             recentActivity: recent.slice(0, 8),
             alerts: alertsData.alerts || [],
             sites: sortedSites,
+            guards: guardsDetailed,
           });
         }
       } catch (err) {
@@ -225,7 +278,7 @@ export default function OverviewPage({ session, onNavigate }) {
           </div>
           <div className="mt-4 text-3xl font-extrabold text-slate-900">{data.onDutyCount}</div>
           <div className="mt-1 text-xs font-bold text-slate-800">Guards On Duty</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">{data.guardsCount} registered staff</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">{data.guardsCount} {isManager ? 'site officers' : 'registered staff'}</div>
         </div>
 
         {/* Card 2: Today's Check Calls */}
@@ -268,12 +321,129 @@ export default function OverviewPage({ session, onNavigate }) {
           <div className="flex items-center justify-between">
             <div className="metric-icon tone-navy"><Icon name="building" size={18} /></div>
             <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-full">
-              Perimeters
+              {isManager ? 'Assigned Site' : 'Perimeters'}
             </span>
           </div>
-          <div className="mt-4 text-3xl font-extrabold text-slate-900">{data.sitesCount}</div>
-          <div className="mt-1 text-xs font-bold text-slate-800">{isManager ? 'Your Assigned Sites' : 'Client Sites & Geofences'}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">{isManager ? 'Active operational perimeter' : 'Totmonslow & active zones'}</div>
+          <div className="mt-4 text-2xl font-extrabold text-slate-900 truncate">
+            {isManager ? (data.sites[0]?.name || 'Totmonslow') : data.sitesCount}
+          </div>
+          <div className="mt-1 text-xs font-bold text-slate-800">{isManager ? 'Your Operational Site' : 'Client Sites & Geofences'}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">{isManager ? '250m active perimeter' : 'Totmonslow & active zones'}</div>
+        </div>
+      </section>
+
+      {/* Security Officers Live Directory (Matches Mobile Overview) */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-extrabold text-slate-900">
+                {isManager ? 'Totmonslow Security Officers' : 'Security Officers Directory'}
+              </h2>
+              <span className="text-xs bg-slate-100 text-slate-700 font-bold px-2.5 py-0.5 rounded-full">
+                {data.guards?.length || 0}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Live officer attendance, shift verification, and check call telemetry
+            </p>
+          </div>
+          <button
+            onClick={() => onNavigate('schedules')}
+            className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center gap-1"
+          >
+            Schedules & Rosters <Icon name="arrowRight" size={13} />
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-3.5 md:grid-cols-2 lg:grid-cols-3">
+          {(!data.guards || data.guards.length === 0) ? (
+            <div className="col-span-full p-8 text-center text-slate-400 text-xs">
+              No security officers found for this site.
+            </div>
+          ) : (
+            data.guards.map(guard => (
+              <div
+                key={guard.id}
+                className="rounded-2xl border border-slate-200 bg-white p-4 shadow-xs hover:border-slate-300 hover:shadow-sm transition-all space-y-3"
+              >
+                {/* Header: Name, SIA, Status Badge */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center font-extrabold text-slate-700 text-xs shrink-0">
+                      {guard.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900">{guard.name}</div>
+                      <div className="text-[11px] text-slate-500">{guard.badgeNumber}</div>
+                    </div>
+                  </div>
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold border shrink-0 ${
+                    guard.status === 'ON DUTY'
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : guard.status === 'ATTENTION'
+                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                      : 'bg-slate-100 text-slate-600 border-slate-200'
+                  }`}>
+                    {guard.status}
+                  </span>
+                </div>
+
+                {/* Site & Booking Time */}
+                <div className="text-xs text-slate-600 flex items-center gap-1.5 flex-wrap">
+                  <Icon name="pin" size={13} />
+                  <span className="font-semibold text-slate-800">{guard.siteName}</span>
+                  {guard.bookedOnTime && (
+                    <span className="text-[11px] text-slate-500">
+                      · Booked on at {guard.bookedOnTime} {guard.isLate && <span className="text-amber-600 font-bold">· late</span>}
+                    </span>
+                  )}
+                </div>
+
+                {/* Calls & Patrols bar (exact match to Mobile StatusTile) */}
+                <div className="rounded-xl bg-slate-50 border border-slate-100 p-2.5 flex items-center justify-between text-xs font-mono text-slate-700">
+                  <div className="flex items-center gap-2.5">
+                    <span className="inline-flex items-center gap-1 text-emerald-700 font-bold">
+                      <Icon name="check" size={13} /> {guard.callsCount}/{guard.callsCount} calls
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span className="inline-flex items-center gap-1 text-slate-700 font-semibold">
+                      <Icon name="shield" size={13} /> {guard.patrolsCount} patrols
+                    </span>
+                  </div>
+                  {guard.lastActivity && (
+                    <span className="text-[10px] text-slate-400 font-sans">
+                      Last: {new Date(guard.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                  <button
+                    onClick={() => onNavigate('reports')}
+                    className="text-[11px] text-slate-500 hover:text-slate-800 flex items-center gap-1"
+                  >
+                    Call path telemetry <Icon name="arrowRight" size={11} />
+                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => onNavigate('schedules')}
+                      className="px-2 py-0.5 text-[10px] font-bold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors border border-amber-200"
+                    >
+                      Assign site
+                    </button>
+                    <button
+                      onClick={() => onNavigate('reports')}
+                      className="px-2 py-0.5 text-[10px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors border border-blue-200"
+                    >
+                      Manual Log
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </section>
 
