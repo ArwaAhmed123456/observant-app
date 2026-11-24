@@ -144,6 +144,14 @@ router.post('/book-on',
     // Calculate scheduled end timestamp in UK time
     const scheduledEndAt = shiftEndAt;
 
+    // Schedule at most 2 surprise patrols in whole day/night (24h period)
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const dayNightPromptCount = await RandomPromptLog.countDocuments({
+      guardId,
+      triggeredAt: { $gte: twentyFourHoursAgo },
+    });
+    const canScheduleSurprise = dayNightPromptCount < 2;
+
     const session = await ShiftSession.create({
       organisationId: orgId,
       guardId,
@@ -154,10 +162,8 @@ router.post('/book-on',
       scheduledEnd,
       scheduledEndAt,
       nextCheckCallAt: new Date(now.getTime() + 60 * 60 * 1000),
-      // Schedule exactly 2 random surprise patrols per shift:
-      // First prompt: randomly between 1.5h and 4.5h from book-on
-      nextRandomPromptAt: new Date(now.getTime() + (1.5 + Math.random() * 3.0) * 60 * 60 * 1000),
-      randomPromptCount: 0,
+      nextRandomPromptAt: canScheduleSurprise ? new Date(now.getTime() + (1.5 + Math.random() * 3.0) * 60 * 60 * 1000) : null,
+      randomPromptCount: canScheduleSurprise ? 0 : 2,
       punctuality,
       punctualityMinutes: diffMins,
     });
@@ -228,8 +234,21 @@ router.post('/book-off',
     if (!endAt && session.scheduledEnd) {
       endAt = calculateShiftEndDateTime(session.scheduledStart, session.scheduledEnd, session.bookedOnAt);
     }
-
     const now = new Date();
+    if (!endAt) {
+      const scheduledDay = dayKey(session.bookedOnAt || now);
+      const sessionWeekStart = getMondayOfWeek(session.bookedOnAt || now);
+      const roster = await ShiftRoster.findOne({
+        organisationId: req.user.organisationId,
+        guardId: session.guardId,
+        siteId: session.siteId,
+        weekStartDate: sessionWeekStart,
+      });
+      const dayShift = roster?.days?.[scheduledDay];
+      if (dayShift?.end) {
+        endAt = calculateShiftEndDateTime(dayShift.start, dayShift.end, session.bookedOnAt || now);
+      }
+    }
     const isEarly = endAt && now.getTime() < endAt.getTime();
 
     if (isEarly) {
@@ -269,9 +288,9 @@ router.post('/book-off',
         siteId: session.siteId,
         guardId: session.guardId,
         type: 'guard_signed_out',
-        title: isEarly ? '⚠️ Guard signed out early' : '✅ Guard signed out / Booked off',
+        title: isEarly ? '🚨 Guard signed out early / Shift not over' : '✅ Guard signed out / Booked off',
         message: isEarly
-          ? `${guardName}${badge} signed out early from shift at ${siteName}. Scheduled shift was until ${session.scheduledEnd || 'scheduled end'}.`
+          ? `${guardName}${badge} signed out early from shift at ${siteName} before time was over. Scheduled until ${session.scheduledEnd || (endAt ? endAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : 'scheduled end')}.`
           : `${guardName}${badge} completed shift and signed out at ${siteName}.`,
         refModel: 'ShiftSession',
         refId: session._id,

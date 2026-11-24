@@ -13,16 +13,26 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
     try { validSiteId = new mongoose.Types.ObjectId(siteId); } catch (_) {}
   }
 
-  // Find all active managers who manage this site or organisation
+  // Look up site to get its direct manager if assigned
+  let siteManagerId = null;
+  if (siteId) {
+    try {
+      const siteDoc = await Site.findById(siteId).select('managerId');
+      if (siteDoc?.managerId) siteManagerId = siteDoc.managerId;
+    } catch (_) {}
+  }
+
+  // Find active managers who manage this site
   let managers = await User.find({
     organisationId,
     active: true,
     $or: [
-      { role: 'admin' },
       { role: 'manager', managedSiteIds: { $in: [validSiteId, siteId].filter(Boolean) } },
       { role: 'manager', siteId: { $in: [validSiteId, siteId].filter(Boolean) } },
+      ...(siteManagerId ? [{ _id: siteManagerId }] : []),
+      { role: 'admin' },
     ],
-  }).select('_id fcmToken name email notificationPreferences');
+  }).select('_id fcmToken name email notificationPreferences role');
 
   // Fallback: if no site-specific manager configured, notify admins only
   if (!managers.length) {
@@ -73,25 +83,19 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
     refId:    refId   || null,
   });
 
-  // Fire push notifications asynchronously with full officer telemetry
-  // For patrol_complete: only push if routinePatrolPush is explicitly enabled (opt-in)
-  // For ALL other alert types (missed check calls, SOS, incidents, etc.): push to everyone
-  // who has NOT set exceptionOnly to restrict to exceptions only.
-  // Default: all alert types go through unless manager has exceptionOnly=true AND
-  // this is a routine/non-exception alert type.
-  const exceptionAlertTypes = ['check_call_missed', 'random_prompt_ignored', 'sos', 'incident', 'patrol_incomplete', 'patrol_missing_checkpoints', 'guard_booked_late', 'guard_not_arrived', 'guard_not_signed_out', 'guard_signed_out', 'geofence_warning'];
-  const pushManagers = type === 'patrol_complete'
-    ? managers.filter(manager => manager.notificationPreferences?.routinePatrolPush === true)
-    : managers.filter(manager => {
-        // If manager set exceptionOnly, only send genuinely exceptional alerts
-        if (manager.notificationPreferences?.exceptionOnly) {
-          return exceptionAlertTypes.includes(type);
-        }
-        return true; // send everything by default
-      });
-  fcm.notifyManagers(alert, pushManagers).catch(err =>
-    console.error('[alertService] FCM error:', err.message)
-  );
+  // Routine patrol completion is normal operational progress and NOT an issue — do NOT push to managers
+  if (type === 'patrol_complete') {
+    return alert;
+  }
+
+  // All issue alert types: check call missed, check call issue, surprise patrol missed,
+  // guard not arrived / not on duty, early sign out / logout, incomplete patrol, SOS
+  const pushManagers = managers.filter(manager => !!manager.fcmToken);
+  if (pushManagers.length) {
+    fcm.notifyManagers(alert, pushManagers).catch(err =>
+      console.error('[alertService] FCM error:', err.message)
+    );
+  }
   sendIncidentAlertEmail(alert, managers).catch(err =>
     console.error('[alertService] Incident email error:', err.message)
   );

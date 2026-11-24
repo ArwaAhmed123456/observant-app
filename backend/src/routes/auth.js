@@ -9,7 +9,9 @@
  */
 const router  = require('express').Router();
 const { body } = require('express-validator');
-const { Organisation, User } = require('../models');
+const { Organisation, User, ShiftSession, Site, ShiftRoster } = require('../models');
+const { createAlert } = require('../services/alertService');
+const { calculateShiftEndDateTime, dayKey, getMondayOfWeek } = require('../utils/dateHelpers');
 const { authenticate }  = require('../middleware/auth');
 const validate          = require('../middleware/validate');
 const asyncHandler      = require('../utils/asyncHandler');
@@ -151,6 +153,68 @@ router.post('/refresh',
 
 // ── Logout ────────────────────────────────────────────────────────────────────
 router.post('/logout', authenticate, asyncHandler(async (req, res) => {
+  if (req.user.role === 'guard') {
+    try {
+      const activeSession = await ShiftSession.findOne({
+        organisationId: req.user.organisationId,
+        guardId: req.user._id,
+        bookedOffAt: null,
+      });
+      if (activeSession) {
+        const now = new Date();
+        let endAt = activeSession.scheduledEndAt;
+        if (!endAt && activeSession.scheduledEnd) {
+          endAt = calculateShiftEndDateTime(activeSession.scheduledStart, activeSession.scheduledEnd, activeSession.bookedOnAt);
+        }
+        if (!endAt) {
+          const scheduledDay = dayKey(activeSession.bookedOnAt || now);
+          const sessionWeekStart = getMondayOfWeek(activeSession.bookedOnAt || now);
+          const roster = await ShiftRoster.findOne({
+            organisationId: req.user.organisationId,
+            guardId: activeSession.guardId,
+            siteId: activeSession.siteId,
+            weekStartDate: sessionWeekStart,
+          });
+          const dayShift = roster?.days?.[scheduledDay];
+          if (dayShift?.end) {
+            endAt = calculateShiftEndDateTime(dayShift.start, dayShift.end, activeSession.bookedOnAt || now);
+          }
+        }
+
+        const isEarly = !endAt || now.getTime() < endAt.getTime();
+
+        // Close session
+        activeSession.bookedOffAt = now;
+        activeSession.nextCheckCallAt = null;
+        activeSession.nextRandomPromptAt = null;
+        await activeSession.save();
+
+        if (isEarly) {
+          const [guardUser, siteDoc] = await Promise.all([
+            User.findById(req.user._id).select('name badgeNumber'),
+            Site.findById(activeSession.siteId).select('name'),
+          ]);
+          const guardName = guardUser?.name || req.user.name || 'Guard';
+          const badge = guardUser?.badgeNumber ? ` (${guardUser.badgeNumber})` : '';
+          const siteName = siteDoc?.name || 'Site';
+
+          await createAlert({
+            organisationId: activeSession.organisationId,
+            siteId: activeSession.siteId,
+            guardId: activeSession.guardId,
+            type: 'guard_signed_out',
+            title: '🚨 Guard logged out before shift ended',
+            message: `${guardName}${badge} logged out of the app before shift was completed at ${siteName}.${activeSession.scheduledEnd ? ` Scheduled until ${activeSession.scheduledEnd}.` : ''}`,
+            refModel: 'ShiftSession',
+            refId: activeSession._id,
+          });
+        }
+      }
+    } catch (e) {
+      console.error('[auth/logout] Early logout check error:', e.message);
+    }
+  }
+
   await User.findByIdAndUpdate(req.user._id, { refreshTokenHash: null, fcmToken: null });
   res.json({ message: 'Logged out' });
 }));

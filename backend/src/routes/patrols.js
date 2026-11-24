@@ -160,8 +160,8 @@ router.post('/start',
     const sessionWeekStart = getMondayOfWeek(session.bookedOnAt || new Date());
     let roster = await ShiftRoster.findOne({ organisationId: orgId, guardId, siteId: session.siteId, weekStartDate: sessionWeekStart }).select('days checkpointIds');
     if (!roster) roster = await ShiftRoster.findOne({ organisationId: orgId, guardId, siteId: session.siteId, recurringWeekly: true, weekStartDate: { $lt: sessionWeekStart } }).sort({ weekStartDate: -1 }).select('days checkpointIds');
-    if (!roster?.days?.[scheduledDay]) return res.status(409).json({ error: 'No patrol shift is assigned at this site for this duty period. Ask your manager to correct the rota.', code: 'PATROL_ROSTER_REQUIRED' });
-    const configuredIds = roster.checkpointIds?.length ? roster.checkpointIds : null;
+
+    const configuredIds = roster?.checkpointIds?.length ? roster.checkpointIds : null;
     let assignedCheckpoints = [];
     if (configuredIds?.length) {
       assignedCheckpoints = await PatrolCheckpoint.find({
@@ -169,7 +169,7 @@ router.post('/start',
         _id: { $in: configuredIds },
       }).select('_id');
     }
-    // Fall back to all active checkpoints configured for this site if none matched
+    // Fall back to all active checkpoints configured for this site
     if (!assignedCheckpoints.length) {
       assignedCheckpoints = await PatrolCheckpoint.find({
         organisationId: orgId, siteId: session.siteId, active: true,
@@ -177,11 +177,6 @@ router.post('/start',
     }
     if (!assignedCheckpoints.length) return res.status(409).json({ error: 'No patrol checkpoints are configured for this site. Ask your manager to add checkpoints in the Checkpoints tab before starting a patrol.', code: 'PATROL_CHECKPOINTS_REQUIRED' });
     const assignedCheckpointIds = assignedCheckpoints.map(checkpoint => checkpoint._id);
-
-    const latest = await PatrolSession.findOne({ organisationId: orgId, guardId, status: { $in: ['complete', 'incomplete'] } }).sort({ finishedAt: -1 });
-    if (latest?.finishedAt && Date.now() - new Date(latest.finishedAt).getTime() < 60 * 60 * 1000 && !activePrompt) {
-      return res.status(429).json({ error: 'The next hourly patrol is not due yet. Complete a random patrol prompt if one is active.' });
-    }
 
     const patrol = await PatrolSession.create({
       organisationId:      orgId,

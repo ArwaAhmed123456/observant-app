@@ -116,8 +116,15 @@ async function fireDueRandomPrompts(now = new Date()) {
       continue;
     }
     const currentCount = session.randomPromptCount || 0;
-    if (currentCount >= 2) {
-      await ShiftSession.updateOne({ _id: session._id }, { $set: { nextRandomPromptAt: null } });
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * HOUR);
+    const dayNightPromptCount = await RandomPromptLog.countDocuments({
+      guardId: session.guardId,
+      triggeredAt: { $gte: twentyFourHoursAgo }
+    });
+
+    // Exactly at most 2 surprise patrols in whole day/night (24h period)
+    if (currentCount >= 2 || dayNightPromptCount >= 2) {
+      await ShiftSession.updateOne({ _id: session._id }, { $set: { nextRandomPromptAt: null, randomPromptCount: 2 } });
       continue;
     }
 
@@ -139,9 +146,9 @@ async function fireDueRandomPrompts(now = new Date()) {
       managerAlerted: false,
     });
 
-    // Exactly 2 surprise patrols per shift: schedule prompt 2 if this was prompt 1
+    // Exactly 2 surprise patrols in whole day/night: schedule prompt 2 ONLY if count in 24h will be < 2
     let nextPrompt = null;
-    if (currentCount === 0) {
+    if (currentCount === 0 && dayNightPromptCount + 1 < 2) {
       const shiftStart = new Date(session.bookedOnAt || now);
       // Window 2: randomly between 6.5h and 10h from bookedOnAt
       nextPrompt = new Date(shiftStart.getTime() + (6.5 + Math.random() * 3.5) * HOUR);
@@ -157,7 +164,7 @@ async function fireDueRandomPrompts(now = new Date()) {
       { _id: session._id },
       {
         $inc: { randomPromptCount: 1 },
-        $set: { nextRandomPromptAt: currentCount === 0 ? nextPrompt : null }
+        $set: { nextRandomPromptAt: nextPrompt }
       }
     );
 
@@ -186,7 +193,15 @@ async function scheduleMissingRandomPrompts(now = new Date()) {
   for (const session of sessions) {
     if (session.scheduledEndAt && now >= session.scheduledEndAt) continue;
     const currentCount = session.randomPromptCount || 0;
-    if (currentCount >= 2) continue;
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * HOUR);
+    const dayNightPromptCount = await RandomPromptLog.countDocuments({
+      guardId: session.guardId,
+      triggeredAt: { $gte: twentyFourHoursAgo }
+    });
+    if (currentCount >= 2 || dayNightPromptCount >= 2) {
+      await ShiftSession.updateOne({ _id: session._id }, { $set: { nextRandomPromptAt: null, randomPromptCount: 2 } });
+      continue;
+    }
 
     const activePrompt = await RandomPromptLog.exists({
       shiftSessionId: session._id,
