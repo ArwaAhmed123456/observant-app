@@ -449,16 +449,16 @@ function startOperationsWorker() {
     running = true;
     try {
       const now = new Date();
-      await fireDueCheckCalls(now);
-      await expireCheckCalls(now);
-      await checkLateArrivals(now);
-      await checkOverdueSignOuts(now);
-      await scheduleMissingCheckCalls(now);
-      await scheduleMissingRandomPrompts(now);
-      await fireDueRandomPrompts(now);
-      await warnShiftsEndingSoon(now);
-      await alertIgnoredPrompts(now);
-      await sendRoutinePatrolDigests(now);
+      await fireDueCheckCalls(now).catch(e => console.error('[OpsWorker] fireDueCheckCalls error:', e.message));
+      await expireCheckCalls(now).catch(e => console.error('[OpsWorker] expireCheckCalls error:', e.message));
+      await checkLateArrivals(now).catch(e => console.error('[OpsWorker] checkLateArrivals error:', e.message));
+      await checkOverdueSignOuts(now).catch(e => console.error('[OpsWorker] checkOverdueSignOuts error:', e.message));
+      await scheduleMissingCheckCalls(now).catch(e => console.error('[OpsWorker] scheduleMissingCheckCalls error:', e.message));
+      await scheduleMissingRandomPrompts(now).catch(e => console.error('[OpsWorker] scheduleMissingRandomPrompts error:', e.message));
+      await fireDueRandomPrompts(now).catch(e => console.error('[OpsWorker] fireDueRandomPrompts error:', e.message));
+      await warnShiftsEndingSoon(now).catch(e => console.error('[OpsWorker] warnShiftsEndingSoon error:', e.message));
+      await alertIgnoredPrompts(now).catch(e => console.error('[OpsWorker] alertIgnoredPrompts error:', e.message));
+      await sendRoutinePatrolDigests(now).catch(e => console.error('[OpsWorker] sendRoutinePatrolDigests error:', e.message));
     } catch (error) {
       console.error('[OpsWorker] Tick failed:', error.message);
     } finally { running = false; }
