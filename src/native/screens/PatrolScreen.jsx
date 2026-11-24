@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   Image, Modal, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform,
@@ -6,7 +6,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { authorizedImageSource } from '../../services/api';
-import { useApp, formatTime } from '../../context/AppContext';
+import { useApp, formatTime, getDistanceFromLatLonInMeters } from '../../context/AppContext';
 import { Camera, CheckCircle2, AlertTriangle, Play, Square, Navigation, ScanLine, Radio, Clock3, ShieldCheck, Footprints } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { GuardLogoutButton } from '../components/GuardLogoutButton';
@@ -37,48 +37,164 @@ export function PatrolScreen() {
   const [workingCheckpoint, setWorkingCheckpoint] = useState(null);
   const [now, setNow] = useState(Date.now());
   const [patrolSteps, setPatrolSteps] = useState(0);
+  const [patrolDistanceMeters, setPatrolDistanceMeters] = useState(0);
+
+  const initialSensorStepsRef = useRef(null);
+  const lastReportedStepsRef = useRef(0);
+  const accumulatedGpsDistanceRef = useRef(0);
+  const lastGpsCoordRef = useRef(null);
+  const patrolStartEpochRef = useRef(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
-  // Android Footsteps mechanism for site patrolling
+  // Calibrated Footsteps & Ground-Truth Movement Tracking
   useEffect(() => {
-    if (Platform.OS !== 'android' || !activePatrol || activePatrol.finishedAt) {
+    if (!activePatrol || activePatrol.finishedAt) {
       setPatrolSteps(0);
+      setPatrolDistanceMeters(0);
+      initialSensorStepsRef.current = null;
+      lastReportedStepsRef.current = 0;
+      accumulatedGpsDistanceRef.current = 0;
+      lastGpsCoordRef.current = null;
+      patrolStartEpochRef.current = null;
       return;
     }
-    let sub = null;
+
+    const patrolStartTime = activePatrol.startedAt
+      ? new Date(activePatrol.startedAt).getTime()
+      : Date.now();
+    patrolStartEpochRef.current = patrolStartTime;
+    initialSensorStepsRef.current = null;
+    lastReportedStepsRef.current = 0;
+    accumulatedGpsDistanceRef.current = 0;
+    lastGpsCoordRef.current = null;
+
     let isMounted = true;
+    let pedometerSub = null;
+    let locationSub = null;
+    let queryInterval = null;
 
     (async () => {
+      // 1. Hardware Pedometer with baseline offset deduction
       try {
         const Sensors = require('expo-sensors');
         const Pedometer = Sensors?.Pedometer;
-        if (!Pedometer) return;
+        if (Pedometer) {
+          const isAvailable = await Pedometer.isAvailableAsync().catch(() => false);
+          if (isAvailable) {
+            const perm = await Pedometer.requestPermissionsAsync().catch(() => ({ status: 'denied' }));
+            if (perm.status === 'granted') {
+              // Real-time step counter listener: deduct initial baseline to prevent reporting lifetime/daily device counts
+              pedometerSub = Pedometer.watchStepCount(result => {
+                if (!isMounted || result?.steps == null) return;
+                const raw = result.steps;
+                if (initialSensorStepsRef.current === null) {
+                  initialSensorStepsRef.current = raw;
+                  return;
+                }
+                const delta = raw - initialSensorStepsRef.current;
+                if (delta >= 0) {
+                  const elapsedSec = Math.max(1, (Date.now() - (patrolStartEpochRef.current || patrolStartTime)) / 1000);
+                  // Plausibility check: human walking speed is max ~3.5 steps/sec (210 steps/min)
+                  const maxPossible = Math.ceil(elapsedSec * 3.5);
+                  const valid = Math.min(delta, maxPossible);
+                  if (valid > lastReportedStepsRef.current) {
+                    lastReportedStepsRef.current = valid;
+                    setPatrolSteps(valid);
+                  }
+                }
+              });
 
-        const isAvailable = await Pedometer.isAvailableAsync();
-        if (!isAvailable) return;
-
-        const perm = await Pedometer.requestPermissionsAsync();
-        if (perm.status !== 'granted') return;
-
-        sub = Pedometer.watchStepCount(result => {
-          if (isMounted && result?.steps != null) {
-            setPatrolSteps(result.steps);
+              // Periodic query for the verified time window (from patrol start until now)
+              if (typeof Pedometer.getStepCountAsync === 'function') {
+                const pollSteps = async () => {
+                  try {
+                    const startWindow = new Date(patrolStartEpochRef.current || patrolStartTime);
+                    const countRes = await Pedometer.getStepCountAsync(startWindow, new Date());
+                    if (isMounted && countRes && typeof countRes.steps === 'number' && countRes.steps >= 0) {
+                      const elapsedSec = Math.max(1, (Date.now() - startWindow.getTime()) / 1000);
+                      const maxPossible = Math.ceil(elapsedSec * 3.5);
+                      const verified = Math.min(countRes.steps, maxPossible);
+                      if (verified > lastReportedStepsRef.current) {
+                        lastReportedStepsRef.current = verified;
+                        setPatrolSteps(verified);
+                      }
+                    }
+                  } catch (_) {}
+                };
+                pollSteps();
+                queryInterval = setInterval(pollSteps, 8000);
+              }
+            }
           }
-        });
+        }
       } catch (err) {
-        console.log('[PatrolScreen] Pedometer error:', err?.message);
+        console.warn('[PatrolScreen] Pedometer init warning:', err?.message);
+      }
+
+      // 2. High-Accuracy GPS Distance & Movement Verification
+      try {
+        let locPerm = await Location.getForegroundPermissionsAsync().catch(() => null);
+        if (locPerm?.status !== 'granted') {
+          locPerm = await Location.requestForegroundPermissionsAsync().catch(() => null);
+        }
+        if (locPerm?.status === 'granted') {
+          locationSub = await Location.watchPositionAsync(
+            {
+              accuracy: Location.Accuracy.Balanced,
+              distanceInterval: 4,
+              timeInterval: 3000,
+            },
+            position => {
+              if (!isMounted || !position?.coords) return;
+              const { latitude, longitude, accuracy } = position.coords;
+              if (accuracy > 30) return; // filter low-accuracy fixes
+
+              if (lastGpsCoordRef.current) {
+                const d = getDistanceFromLatLonInMeters(
+                  lastGpsCoordRef.current.latitude,
+                  lastGpsCoordRef.current.longitude,
+                  latitude,
+                  longitude
+                );
+                // Filter GPS noise (< 2.5m) and extreme teleportation jumps (> 60m in 3s)
+                if (d && d >= 2.5 && d <= 60) {
+                  accumulatedGpsDistanceRef.current += d;
+                  const totalDist = Math.round(accumulatedGpsDistanceRef.current);
+                  setPatrolDistanceMeters(totalDist);
+
+                  // Average human stride length is ~0.762m (2.5ft) -> ~1,312 steps/km
+                  const gpsEstimatedSteps = Math.round(totalDist / 0.762);
+
+                  // If hardware pedometer is asleep, unsupported, or under-reporting:
+                  if (lastReportedStepsRef.current === 0 || lastReportedStepsRef.current < gpsEstimatedSteps * 0.6) {
+                    const elapsedSec = Math.max(1, (Date.now() - (patrolStartEpochRef.current || patrolStartTime)) / 1000);
+                    const maxPossible = Math.ceil(elapsedSec * 3.5);
+                    const safeSteps = Math.min(gpsEstimatedSteps, maxPossible);
+                    if (safeSteps > lastReportedStepsRef.current) {
+                      lastReportedStepsRef.current = safeSteps;
+                      setPatrolSteps(safeSteps);
+                    }
+                  }
+                }
+              }
+              lastGpsCoordRef.current = { latitude, longitude };
+            }
+          ).catch(() => null);
+        }
+      } catch (err) {
+        console.warn('[PatrolScreen] GPS movement tracking warning:', err?.message);
       }
     })();
 
     return () => {
       isMounted = false;
-      if (sub && typeof sub.remove === 'function') {
-        sub.remove();
-      }
+      if (pedometerSub && typeof pedometerSub.remove === 'function') pedometerSub.remove();
+      if (locationSub && typeof locationSub.remove === 'function') locationSub.remove();
+      if (queryInterval) clearInterval(queryInterval);
     };
   }, [activePatrol?.id]);
 
@@ -214,7 +330,7 @@ export function PatrolScreen() {
         setExceptionDescription('');
         setIncompleteModal({ patrolId: activePatrol.id, missing: reallyMissing.length ? reallyMissing : result.missing || [], missingNames });
       } else {
-        Alert.alert('Patrol complete', `All manager-required checkpoint evidence has been recorded.${Platform.OS === 'android' && patrolSteps > 0 ? ` Total footsteps recorded: ${patrolSteps}.` : ''} Your next surprise check may arrive at any time.`);
+        Alert.alert('Patrol complete', `All manager-required checkpoint evidence has been recorded.${patrolSteps > 0 ? ` Total footsteps recorded: ${patrolSteps.toLocaleString()}${patrolDistanceMeters > 0 ? ` (${patrolDistanceMeters}m walked)` : ''}.` : ''} Your next surprise check may arrive at any time.`);
       }
     } catch (error) {
       Alert.alert('Could not finish patrol', error.message || 'Check your connection and try again.');
@@ -295,7 +411,7 @@ export function PatrolScreen() {
               <View style={styles.timerIcon}><Clock3 color={P.blue} size={22} /></View>
             </View>
 
-            {Platform.OS === 'android' && (
+            {activePatrol && !activePatrol.finishedAt && (
               <View style={styles.stepsCard}>
                 <View style={styles.stepsCardLeft}>
                   <View style={styles.stepsIconBadge}>
@@ -303,7 +419,12 @@ export function PatrolScreen() {
                   </View>
                   <View>
                     <Text style={styles.stepsLabel}>PATROL FOOTSTEPS</Text>
-                    <Text style={styles.stepsValue}>{patrolSteps.toLocaleString()} <Text style={styles.stepsUnit}>steps</Text></Text>
+                    <Text style={styles.stepsValue}>
+                      {patrolSteps.toLocaleString()} <Text style={styles.stepsUnit}>steps</Text>
+                      {patrolDistanceMeters > 0 && (
+                        <Text style={styles.stepsSubUnit}> · {patrolDistanceMeters >= 1000 ? `${(patrolDistanceMeters / 1000).toFixed(2)} km` : `${patrolDistanceMeters} m`}</Text>
+                      )}
+                    </Text>
                   </View>
                 </View>
                 <View style={styles.stepsStatusBadge}>
@@ -506,6 +627,7 @@ const styles = StyleSheet.create({
   stepsLabel: { color: '#065F46', fontSize: 10, fontWeight: '800', letterSpacing: 0.9 },
   stepsValue: { color: '#064E3B', fontSize: 24, fontWeight: '800', fontVariant: ['tabular-nums'], marginTop: 2 },
   stepsUnit: { fontSize: 13, fontWeight: '700', color: '#047857' },
+  stepsSubUnit: { fontSize: 12, fontWeight: '700', color: '#047857' },
   stepsStatusBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.white, paddingHorizontal: 9, paddingVertical: 5, borderRadius: BR.sm, borderWidth: 1, borderColor: '#A7F3D0' },
   stepsLiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: P.ok },
   stepsStatusText: { color: '#065F46', fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
