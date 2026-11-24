@@ -400,14 +400,19 @@ export function AppProvider({ children }) {
     setActivePatrol(null);
     setAntiIdlePrompt(false);
     setShiftEndWarning(false);
+    try {
+      await save(KEYS.CURRENT_USER_ID, null);
+    } catch (e) {
+      console.warn('[Observant] Error clearing local auth keys:', e);
+    }
     if (API_ENABLED) {
       try {
         await Promise.race([
           Promise.allSettled([
-            apiPatch('/api/auth/me/fcm-token', { fcmToken: null }),
-            apiPost('/api/auth/logout', {}),
+            apiPatch('/api/auth/me/fcm-token', { fcmToken: null }).catch(() => {}),
+            apiPost('/api/auth/logout', {}).catch(() => {}),
           ]),
-          new Promise(resolve => setTimeout(resolve, 1500))
+          new Promise(resolve => setTimeout(resolve, 800))
         ]);
       } catch {}
       try {
@@ -415,11 +420,6 @@ export function AppProvider({ children }) {
       } catch (e) {
         console.warn('[Observant] Error clearing local tokens:', e);
       }
-    }
-    try {
-      await save(KEYS.CURRENT_USER_ID, null);
-    } catch (e) {
-      console.warn('[Observant] Error clearing local auth keys:', e);
     }
   }, []);
 

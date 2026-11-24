@@ -21,6 +21,9 @@ function Icon({ name, size = 18 }) {
 }
 
 export default function OverviewPage({ session, onNavigate }) {
+  const isAdmin = ['admin', 'superadmin'].includes(session?.user?.role);
+  const isManager = session?.user?.role === 'manager';
+
   const [data, setData] = useState({
     onDutyCount: 0,
     guardsCount: 0,
@@ -84,8 +87,7 @@ export default function OverviewPage({ session, onNavigate }) {
           }
         }
 
-        const isManager = session?.user?.role === 'manager';
-        const isAdmin = ['admin', 'superadmin'].includes(session?.user?.role);
+        const currentUserId = String(session?.user?.id || session?.user?._id || '');
         const managerSiteIds = isManager ? [
           ...(session.user?.managedSiteIds || []),
           session.user?.siteId,
@@ -94,13 +96,24 @@ export default function OverviewPage({ session, onNavigate }) {
         let allGuards = usersData.users || [];
         let allSites = sitesData.sites || [];
 
-        if (isManager && managerSiteIds?.length) {
-          allSites = allSites.filter(s => managerSiteIds.includes(String(s._id || s.id)));
+        if (isManager) {
+          allSites = allSites.filter(s => {
+            const sId = String(s._id || s.id || '');
+            const sManagerId = String(s.managerId?._id || s.managerId || '');
+            if (managerSiteIds && managerSiteIds.length > 0) {
+              return managerSiteIds.includes(sId) || sManagerId === currentUserId;
+            }
+            if (sManagerId && sManagerId === currentUserId) return true;
+            return (s.name || '').toLowerCase().includes('totmonslow');
+          });
+
+          const allowedSiteIds = allSites.map(s => String(s._id || s.id));
           allGuards = allGuards.filter(g => {
             const gSite = String(g.siteId?._id || g.siteId || '');
             const gAssigned = (g.assignedSiteIds || []).map(id => String(id?._id || id || ''));
-            return managerSiteIds.includes(gSite) || gAssigned.some(id => managerSiteIds.includes(id));
+            return allowedSiteIds.includes(gSite) || gAssigned.some(id => allowedSiteIds.includes(id));
           });
+
           recent = recent.filter(r => {
             const rSite = (r.site || '').toLowerCase();
             return allSites.some(s => (s.name || '').toLowerCase() === rSite);
@@ -122,11 +135,17 @@ export default function OverviewPage({ session, onNavigate }) {
         if (alive) {
           const sum = summaryData?.summary || {};
           setData({
-            onDutyCount: sum.activeSessions ?? (reportsData.rows?.filter(r => !r.shiftEnd)?.length || 0),
+            onDutyCount: isManager
+              ? allGuards.filter(g => (reportsData.rows || []).some(r => (String(r.guardId) === String(g._id || g.id) || r.guardName === g.name) && !r.shiftEnd)).length
+              : (sum.activeSessions ?? (reportsData.rows?.filter(r => !r.shiftEnd)?.length || 0)),
             guardsCount: allGuards.length,
-            todayCallsCount: sum.checkCalls?.total ?? (reportsData.rows?.filter(r => r.type === 'check_call')?.length || 0),
+            todayCallsCount: isManager
+              ? (reportsData.rows || []).filter(r => r.type === 'check_call' && allSites.some(s => (s.name || '').toLowerCase() === (r.site || '').toLowerCase())).length
+              : (sum.checkCalls?.total ?? (reportsData.rows?.filter(r => r.type === 'check_call')?.length || 0)),
             checkCallRate: sum.checkCalls?.rate || '100%',
-            todayPatrolsCount: sum.patrols?.total ?? (reportsData.rows?.filter(r => r.type === 'patrol')?.length || 0),
+            todayPatrolsCount: isManager
+              ? (reportsData.rows || []).filter(r => r.type === 'patrol' && allSites.some(s => (s.name || '').toLowerCase() === (r.site || '').toLowerCase())).length
+              : (sum.patrols?.total ?? (reportsData.rows?.filter(r => r.type === 'patrol')?.length || 0)),
             sitesCount: allSites.length,
             recentActivity: recent.slice(0, 8),
             alerts: alertsData.alerts || [],

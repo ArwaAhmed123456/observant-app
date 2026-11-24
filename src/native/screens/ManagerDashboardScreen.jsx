@@ -85,7 +85,7 @@ export function ManagerDashboardScreen({ navigation }) {
   const todayStr = new Date().toISOString().slice(0,10);
 
   const todayStats = {
-    activeGuards:    guards.filter(g => (shiftSessions || []).some(s => (s.guardId === g.id || s.guardId === g._id) && !s.bookedOffAt)).length,
+    activeGuards:    guards.filter(g => getGuardStatus(g).active).length,
     totalCheckCalls: (checkCalls || []).filter(cc => cc.firedAt?.startsWith(todayStr) && guards.some(g => g.id === cc.guardId || g._id === cc.guardId)).length,
     missedCheckCalls: 0,
     completedPatrols:(patrolSessions || []).filter(ps => ps.startedAt?.startsWith(todayStr) && ps.finishedAt && guards.some(g => g.id === ps.guardId || g._id === ps.guardId)).length,
@@ -93,15 +93,29 @@ export function ManagerDashboardScreen({ navigation }) {
   };
 
   const getGuardStatus = g => {
-    const session = (shiftSessions || []).find(s => (s.guardId === g.id || s.guardId === g._id) && !s.bookedOffAt);
+    const gId = String(g.id || g._id || '');
+    const session = (shiftSessions || []).find(s => {
+      const sGuardId = String(s.guardId?._id || s.guardId?.id || s.guardId || '');
+      return sGuardId === gId && !s.bookedOffAt && s.status !== 'completed' && s.status !== 'booked_off';
+    });
     return { active: !!session, session };
   };
 
   const sortedGuards = useMemo(() => {
     return [...guards].sort((a, b) => {
-      const aActive = (shiftSessions || []).some(s => (s.guardId === a.id || s.guardId === a._id) && !s.bookedOffAt);
-      const bActive = (shiftSessions || []).some(s => (s.guardId === b.id || s.guardId === b._id) && !s.bookedOffAt);
-      if (bActive !== aActive) return bActive ? 1 : -1; // On-duty (available) guards shown above
+      const { active: aActive, session: aSession } = getGuardStatus(a);
+      const { active: bActive, session: bSession } = getGuardStatus(b);
+
+      // Active (on-duty) guards MUST always be displayed above inactive / booked-off guards
+      if (aActive !== bActive) return aActive ? -1 : 1;
+
+      // If both active, show most recently booked on guard first
+      if (aActive && bActive) {
+        const aTime = new Date(aSession?.bookedOnAt || 0).getTime();
+        const bTime = new Date(bSession?.bookedOnAt || 0).getTime();
+        if (bTime !== aTime) return bTime - aTime;
+      }
+
       return (a.name || '').localeCompare(b.name || '');
     });
   }, [guards, shiftSessions]);
