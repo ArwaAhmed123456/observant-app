@@ -309,7 +309,13 @@ router.post('/:id/finish',
     }
     const managerNote = String(req.body.managerNote || '').trim();
     if (managerNote.length > 500) return res.status(400).json({ error: 'The exception description must be 500 characters or fewer.' });
-    if (missingIds.length > 0 && managerNote.length < 5) return res.status(400).json({ error: 'Describe why checkpoint evidence is missing (at least 5 characters).', code: 'EXCEPTION_DESCRIPTION_REQUIRED' });
+    const genericFiller = /^(all\s*(good|ok|fine|clear)|good|fine|ok|nothing|n\/?a|none|test|nothing to report)$/i;
+    if (missingIds.length > 0 && (managerNote.length < 5 || genericFiller.test(managerNote))) {
+      return res.status(400).json({
+        error: 'Please describe the actual operational reason why checkpoints were missed (generic terms like "All good" or "All ok" are not permitted).',
+        code: 'VALID_EXCEPTION_REASON_REQUIRED',
+      });
+    }
 
     const now    = new Date();
     const status = missingIds.length > 0 ? 'incomplete' : 'complete';
@@ -344,17 +350,24 @@ router.post('/:id/finish',
     {
       const guard = await User.findById(guardId).select('name badgeNumber');
       const evidencePhotos = patrol.captures.map(capture => capture.photoUrl).filter(Boolean);
+      const isMissing = status === 'incomplete' && missingIds.length > 0;
       await createAlert({
         organisationId: orgId,
         siteId:   patrol.siteId,
         guardId,
-        type: 'patrol_complete',
-        title: 'Patrol completed',
-        message: `${guard?.name || 'Guard'} completed all required patrol checkpoints.`,
+        type: isMissing ? 'patrol_missing_checkpoints' : 'patrol_complete',
+        title: isMissing ? `⚠️ Incomplete Patrol (${missingIds.length} Missing)` : 'Patrol completed',
+        message: isMissing
+          ? `${guard?.name || 'Guard'} finished patrol with ${missingIds.length} checkpoint(s) missing. Reason: ${managerNote}`
+          : `${guard?.name || 'Guard'} completed all required patrol checkpoints.`,
         photoUrls: evidencePhotos,
         refModel: 'PatrolSession',
         refId:    patrol._id,
       });
+      if (isMissing) {
+        patrol.managerAlerted = true;
+        await patrol.save();
+      }
     }
 
     res.json({ patrol });
@@ -464,6 +477,37 @@ router.post('/random-prompt/:id/respond',
     );
     if (!log) return res.status(410).json({ error: 'The 10-minute surprise patrol response window has expired.' });
     res.json({ log });
+  })
+);
+
+// ── Admin/Manager: Edit patrol session ───────────────────────────────────────
+router.patch('/sessions/:id', authenticate, requireRole('manager', 'admin', 'superadmin'),
+  asyncHandler(async (req, res) => {
+    const { status, managerNote, notes, startedAt, finishedAt } = req.body;
+    const patrol = await PatrolSession.findOne({
+      _id: req.params.id,
+      organisationId: req.user.organisationId,
+    });
+    if (!patrol) return res.status(404).json({ error: 'Patrol session not found' });
+    if (status !== undefined) patrol.status = status;
+    if (managerNote !== undefined) patrol.managerNote = managerNote;
+    if (notes !== undefined) patrol.notes = notes;
+    if (startedAt !== undefined) patrol.startedAt = new Date(startedAt);
+    if (finishedAt !== undefined) patrol.finishedAt = finishedAt ? new Date(finishedAt) : null;
+    await patrol.save();
+    res.json({ patrol });
+  })
+);
+
+// ── Admin/Manager: Delete patrol session ─────────────────────────────────────
+router.delete('/sessions/:id', authenticate, requireRole('manager', 'admin', 'superadmin'),
+  asyncHandler(async (req, res) => {
+    const patrol = await PatrolSession.findOneAndDelete({
+      _id: req.params.id,
+      organisationId: req.user.organisationId,
+    });
+    if (!patrol) return res.status(404).json({ error: 'Patrol session not found' });
+    res.json({ success: true, deletedId: patrol._id });
   })
 );
 

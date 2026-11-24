@@ -141,6 +141,29 @@ export default function App() {
   const [pageError, setPageError] = useState('');
   const [imagePreview, setImagePreview] = useState(null);
 
+  // CRUD state for reports
+  const [editingRow, setEditingRow] = useState(null);
+  const [deletingRow, setDeletingRow] = useState(null);
+  const [showAddLogModal, setShowAddLogModal] = useState(false);
+  const [newLogData, setNewLogData] = useState({
+    guardId: '',
+    siteId: '',
+    response: 'yes',
+    note: '',
+    time: new Date().toISOString().slice(0, 16),
+  });
+  const [crudBusy, setCrudBusy] = useState(false);
+  const [crudError, setCrudError] = useState('');
+
+  const isAdmin = ['admin', 'superadmin'].includes(session?.user?.role);
+  const isManager = session?.user?.role === 'manager';
+
+  useEffect(() => {
+    if (!isAdmin && ['users', 'sites'].includes(activePage)) {
+      setActivePage('overview');
+    }
+  }, [isAdmin, activePage]);
+
   const range = useMemo(() => dateWindow(period, customFrom, customTo), [period, customFrom, customTo]);
   const protectedImages = useProtectedImages(rows, includeImages, session?.accessToken);
   const imageSourceCount = useMemo(() => new Set(rows.flatMap(row => (row.images || []).map(image => image.url).filter(Boolean))).size, [rows]);
@@ -210,15 +233,112 @@ export default function App() {
   function toggleColumn(key) { setColumns(previous => ({ ...previous, [key]: !previous[key] })); }
   function printReport() { window.print(); }
 
+  // Handlers for CRUD
+  async function handleSaveEdit(e) {
+    e.preventDefault();
+    if (!editingRow) return;
+    setCrudBusy(true);
+    setCrudError('');
+    try {
+      if (editingRow.type === 'check_call') {
+        const updated = await apiRequest(`/api/check-calls/${editingRow.id}`, session.accessToken, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            response: editingRow.response,
+            note: editingRow.note,
+            respondedAt: editingRow.date ? new Date(editingRow.date).toISOString() : undefined,
+          }),
+        });
+        setRows(prev => prev.map(r => r.id === editingRow.id ? { ...r, ...editingRow, status: editingRow.response === 'yes' ? 'Verified' : editingRow.response } : r));
+      } else {
+        const updated = await apiRequest(`/api/patrols/sessions/${editingRow.id}`, session.accessToken, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status: editingRow.status,
+            notes: editingRow.note,
+          }),
+        });
+        setRows(prev => prev.map(r => r.id === editingRow.id ? { ...r, ...editingRow, note: editingRow.note } : r));
+      }
+      setEditingRow(null);
+    } catch (err) {
+      setCrudError(err.message || 'Failed to save changes');
+    } finally {
+      setCrudBusy(false);
+    }
+  }
+
+  async function handleConfirmDelete() {
+    if (!deletingRow) return;
+    setCrudBusy(true);
+    setCrudError('');
+    try {
+      if (deletingRow.type === 'check_call') {
+        await apiRequest(`/api/check-calls/${deletingRow.id}`, session.accessToken, { method: 'DELETE' });
+      } else {
+        await apiRequest(`/api/patrols/sessions/${deletingRow.id}`, session.accessToken, { method: 'DELETE' });
+      }
+      setRows(prev => prev.filter(r => r.id !== deletingRow.id));
+      setDeletingRow(null);
+    } catch (err) {
+      setCrudError(err.message || 'Failed to delete record');
+    } finally {
+      setCrudBusy(false);
+    }
+  }
+
+  async function handleCreateLog(e) {
+    e.preventDefault();
+    setCrudBusy(true);
+    setCrudError('');
+    try {
+      const targetGuard = guards.find(g => (g._id || g.id) === newLogData.guardId) || guards[0];
+      const targetSite = sites.find(s => (s._id || s.id) === newLogData.siteId) || sites[0];
+      if (!targetGuard || !targetSite) throw new Error('Please select an active guard and site.');
+      const res = await apiRequest('/api/check-calls/admin-create', session.accessToken, {
+        method: 'POST',
+        body: JSON.stringify({
+          guardId: targetGuard._id || targetGuard.id,
+          siteId: targetSite._id || targetSite.id,
+          response: newLogData.response,
+          note: newLogData.note,
+          respondedAt: newLogData.time ? new Date(newLogData.time).toISOString() : new Date().toISOString(),
+        }),
+      });
+      const created = res.checkCall;
+      const newRow = {
+        id: created._id,
+        type: 'check_call',
+        guardName: targetGuard.name,
+        badgeNumber: targetGuard.badgeNumber,
+        site: targetSite.name,
+        response: created.response,
+        status: created.response === 'yes' ? 'Verified' : created.response,
+        note: created.note || '',
+        date: created.respondedAt || created.firedAt,
+        images: [],
+      };
+      setRows(prev => [newRow, ...prev]);
+      setShowAddLogModal(false);
+      setNewLogData({ guardId: '', siteId: '', response: 'yes', note: '', time: new Date().toISOString().slice(0, 16) });
+    } catch (err) {
+      setCrudError(err.message || 'Failed to create log entry');
+    } finally {
+      setCrudBusy(false);
+    }
+  }
+
   const navItems = [
     { section: 'Operations' },
     { id: 'overview', label: 'Live Overview', icon: 'grid' },
     { id: 'reports', label: 'Shift & Patrol Reports', icon: 'report' },
     { id: 'checklog', label: 'Check Call Log', icon: 'calendar' },
     { id: 'schedules', label: 'Schedules & Rosters', icon: 'clock' },
-    { section: 'Administration' },
-    { id: 'users', label: 'Team & Members', icon: 'users' },
-    { id: 'sites', label: 'Sites & Locations', icon: 'building' },
+    ...(isAdmin ? [
+      { section: 'Administration' },
+      { id: 'users', label: 'Team & Members', icon: 'users' },
+      { id: 'sites', label: 'Sites & Locations', icon: 'building' },
+    ] : []),
   ];
 
   const getPageTitle = () => {
@@ -416,9 +536,17 @@ export default function App() {
                   <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">Shift call & patrol reports</h1>
                   <p className="mt-2 max-w-2xl text-sm text-slate-500">Review activity, tailor the report columns, and print an executive-ready site record.</p>
                 </div>
-                <button className="primary-button print-trigger" onClick={printReport} disabled={!visibleRows.length || imagesLoading}>
-                  <Icon name="print" size={17} /> {imagesLoading ? 'Preparing images…' : 'Print report'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-amber-400 transition-colors shadow-sm"
+                    onClick={() => { setCrudError(''); setShowAddLogModal(true); }}
+                  >
+                    <Icon name="grid" size={15} /> + Add Log Entry
+                  </button>
+                  <button className="primary-button print-trigger" onClick={printReport} disabled={!visibleRows.length || imagesLoading}>
+                    <Icon name="print" size={17} /> {imagesLoading ? 'Preparing images…' : 'Print report'}
+                  </button>
+                </div>
               </section>
 
               <section className="metric-grid mt-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -513,8 +641,26 @@ export default function App() {
                 ) : (
                   <div className="table-scroll">
                     <table className="report-table w-full border-collapse text-left">
-                      <thead><tr>{COLUMN_DEFS.filter(([key]) => columns[key] && (key !== 'images' || includeImages)).map(([key, label]) => <th key={key}>{label}</th>)}</tr></thead>
-                      <tbody>{visibleRows.map(row => <ReportRow key={`${row.type}-${row.id}`} row={row} columns={columns} includeImages={includeImages} imageUrls={protectedImages} onOpenImage={setImagePreview} />)}</tbody>
+                      <thead>
+                        <tr>
+                          {COLUMN_DEFS.filter(([key]) => columns[key] && (key !== 'images' || includeImages)).map(([key, label]) => <th key={key}>{label}</th>)}
+                          <th className="screen-only text-right" style={{ width: 130 }}>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {visibleRows.map(row => (
+                          <ReportRow
+                            key={`${row.type}-${row.id}`}
+                            row={row}
+                            columns={columns}
+                            includeImages={includeImages}
+                            imageUrls={protectedImages}
+                            onOpenImage={setImagePreview}
+                            onEdit={setEditingRow}
+                            onDelete={setDeletingRow}
+                          />
+                        ))}
+                      </tbody>
                     </table>
                   </div>
                 )}
@@ -524,6 +670,227 @@ export default function App() {
           )}
         </div>
       </main>
+
+      {/* Edit Entry Modal */}
+      {editingRow && (
+        <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setEditingRow(null)}>
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-slate-900">
+                Edit {editingRow.type === 'patrol' ? 'Patrol Session' : 'Check Call Entry'}
+              </h3>
+              <button className="text-slate-400 hover:text-slate-600" onClick={() => setEditingRow(null)}><Icon name="close" /></button>
+            </div>
+            {crudError && <div className="mt-3 rounded-lg bg-red-50 p-2.5 text-xs font-semibold text-red-700">{crudError}</div>}
+            <form className="mt-4 space-y-4" onSubmit={handleSaveEdit}>
+              <div>
+                <label className="text-xs font-bold text-slate-700">Security Officer</label>
+                <div className="mt-1 text-sm font-semibold text-slate-800">{editingRow.guardName || 'Officer'} {editingRow.badgeNumber ? `(${editingRow.badgeNumber})` : ''}</div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700">Site Location</label>
+                <div className="mt-1 text-sm text-slate-600">{editingRow.site || 'Site'}</div>
+              </div>
+
+              {editingRow.type === 'check_call' ? (
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Verification Response</label>
+                  <select
+                    className="form-input mt-1.5 w-full"
+                    value={editingRow.response || 'yes'}
+                    onChange={e => setEditingRow({ ...editingRow, response: e.target.value })}
+                  >
+                    <option value="yes">Verified (Yes)</option>
+                    <option value="missed">Missed</option>
+                    <option value="no">Issue / Alert (No)</option>
+                  </select>
+                </div>
+              ) : (
+                <div>
+                  <label className="text-xs font-bold text-slate-700">Patrol Status</label>
+                  <select
+                    className="form-input mt-1.5 w-full"
+                    value={editingRow.status || 'complete'}
+                    onChange={e => setEditingRow({ ...editingRow, status: e.target.value })}
+                  >
+                    <option value="complete">Complete</option>
+                    <option value="incomplete">Incomplete / Missing Checkpoints</option>
+                    <option value="in_progress">In Progress</option>
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Timestamp</label>
+                <input
+                  type="datetime-local"
+                  className="form-input mt-1.5 w-full"
+                  value={editingRow.date ? new Date(editingRow.date).toISOString().slice(0, 16) : ''}
+                  onChange={e => setEditingRow({ ...editingRow, date: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Officer / Exception Notes</label>
+                <textarea
+                  className="form-input mt-1.5 w-full h-24"
+                  value={editingRow.note || ''}
+                  onChange={e => setEditingRow({ ...editingRow, note: e.target.value })}
+                  placeholder="Notes regarding this check call or patrol round..."
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                  onClick={() => setEditingRow(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={crudBusy}
+                  className="rounded-xl bg-amber-500 px-5 py-2 text-xs font-extrabold text-slate-950 hover:bg-amber-400 disabled:opacity-50"
+                >
+                  {crudBusy ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deletingRow && (
+        <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setDeletingRow(null)}>
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3 text-red-600">
+              <span className="text-2xl">⚠️</span>
+              <h3 className="text-base font-bold text-slate-900">Delete {deletingRow.type === 'patrol' ? 'Patrol Record' : 'Check Call'}</h3>
+            </div>
+            <p className="mt-3 text-xs text-slate-600 leading-relaxed">
+              Are you sure you want to permanently delete this {deletingRow.type === 'patrol' ? 'patrol' : 'check call'} record for <strong>{deletingRow.guardName}</strong> at <strong>{deletingRow.site}</strong>? This action cannot be undone.
+            </p>
+            {crudError && <div className="mt-3 rounded-lg bg-red-50 p-2 text-xs font-semibold text-red-700">{crudError}</div>}
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                onClick={() => setDeletingRow(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={crudBusy}
+                className="rounded-xl bg-red-600 px-5 py-2 text-xs font-bold text-white hover:bg-red-700 disabled:opacity-50"
+                onClick={handleConfirmDelete}
+              >
+                {crudBusy ? 'Deleting…' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Manual Check Call Modal */}
+      {showAddLogModal && (
+        <div className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setShowAddLogModal(false)}>
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-slate-900">+ Add Manual Log / Check Call</h3>
+              <button className="text-slate-400 hover:text-slate-600" onClick={() => setShowAddLogModal(false)}><Icon name="close" /></button>
+            </div>
+            {crudError && <div className="mt-3 rounded-lg bg-red-50 p-2.5 text-xs font-semibold text-red-700">{crudError}</div>}
+            <form className="mt-4 space-y-4" onSubmit={handleCreateLog}>
+              <div>
+                <label className="text-xs font-bold text-slate-700">Security Officer *</label>
+                <select
+                  className="form-input mt-1.5 w-full"
+                  required
+                  value={newLogData.guardId}
+                  onChange={e => setNewLogData({ ...newLogData, guardId: e.target.value })}
+                >
+                  <option value="">Select an active officer...</option>
+                  {guards.map(g => (
+                    <option key={g._id || g.id} value={g._id || g.id}>
+                      {g.name} {g.badgeNumber ? `(${g.badgeNumber})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Site Location *</label>
+                <select
+                  className="form-input mt-1.5 w-full"
+                  required
+                  value={newLogData.siteId}
+                  onChange={e => setNewLogData({ ...newLogData, siteId: e.target.value })}
+                >
+                  <option value="">Select a client site...</option>
+                  {sites.map(s => (
+                    <option key={s._id || s.id} value={s._id || s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Check Call Response</label>
+                <select
+                  className="form-input mt-1.5 w-full"
+                  value={newLogData.response}
+                  onChange={e => setNewLogData({ ...newLogData, response: e.target.value })}
+                >
+                  <option value="yes">Verified / All Ok (Yes)</option>
+                  <option value="missed">Missed Check Call</option>
+                  <option value="no">Issue Reported (No)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Date & Time</label>
+                <input
+                  type="datetime-local"
+                  className="form-input mt-1.5 w-full"
+                  value={newLogData.time}
+                  onChange={e => setNewLogData({ ...newLogData, time: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700">Log Notes</label>
+                <textarea
+                  className="form-input mt-1.5 w-full h-20"
+                  value={newLogData.note}
+                  onChange={e => setNewLogData({ ...newLogData, note: e.target.value })}
+                  placeholder="Hourly verification note or manager override reason..."
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                  onClick={() => setShowAddLogModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={crudBusy}
+                  className="rounded-xl bg-amber-500 px-5 py-2 text-xs font-extrabold text-slate-950 hover:bg-amber-400 disabled:opacity-50"
+                >
+                  {crudBusy ? 'Creating…' : 'Create Entry'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {imagePreview && <div className="image-modal" role="dialog" aria-modal="true" onClick={() => setImagePreview(null)}><button className="modal-close" aria-label="Close image"><Icon name="close" /></button><img src={imagePreview.src} alt={imagePreview.name} onClick={event => event.stopPropagation()} /><p>{imagePreview.name}</p></div>}
     </div>
@@ -538,11 +905,11 @@ function PrintHeader({ range, logo, filters }) {
   return <div className="print-header"><img src={logo} alt="Observant Security logo" /><div><div className="print-brand-name">OBSERVANT SECURITY</div><div className="print-report-name">Shift Call & Patrol Report</div></div><div className="print-meta"><b>Reporting period</b><span>{range.from} — {range.to}</span><span>{filters}</span></div></div>;
 }
 
-function ReportRow({ row, columns, includeImages, imageUrls, onOpenImage }) {
+function ReportRow({ row, columns, includeImages, imageUrls, onOpenImage, onEdit, onDelete }) {
   const isPatrol = row.type === 'patrol';
   const rawStatus = isPatrol ? (row.status || 'complete') : (row.response || 'yes');
-  const status = ['yes', 'complete'].includes(rawStatus) ? (rawStatus === 'yes' ? 'Verified' : 'Complete') : 'Verified';
-  const statusTone = 'status-good';
+  const status = ['yes', 'complete'].includes(rawStatus) ? (rawStatus === 'yes' ? 'Verified' : 'Complete') : (rawStatus === 'in_progress' ? 'In Progress' : 'Flagged');
+  const statusTone = status === 'Verified' || status === 'Complete' ? 'status-good' : 'status-bad';
   const images = includeImages ? row.images || [] : [];
   const selected = COLUMN_DEFS.filter(([key]) => columns[key] && (key !== 'images' || includeImages));
   return <tr>
@@ -561,5 +928,23 @@ function ReportRow({ row, columns, includeImages, imageUrls, onOpenImage }) {
       }) : <span className="muted-cell">No photos</span>}</div></td>;
       return null;
     })}
+    <td className="screen-only whitespace-nowrap text-right py-2 px-3">
+      <div className="flex items-center justify-end gap-1.5">
+        <button
+          onClick={() => onEdit({ ...row })}
+          className="rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-2.5 py-1 text-xs font-bold transition-colors"
+          title="Edit entry"
+        >
+          Edit
+        </button>
+        <button
+          onClick={() => onDelete(row)}
+          className="rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 px-2.5 py-1 text-xs font-bold transition-colors"
+          title="Delete entry"
+        >
+          Delete
+        </button>
+      </div>
+    </td>
   </tr>;
 }

@@ -43,7 +43,7 @@ async function getManagerSiteIds(user) {
     managerId: user._id,
     active: true,
   }).distinct('_id');
-  return [...new Set([...(user.managedSiteIds || []), ...ownedSiteIds].map(String))];
+  return [...new Set([...(user.managedSiteIds || []), ...(user.siteId ? [user.siteId] : []), ...ownedSiteIds].map(String))];
 }
 
 // ════════════════════════════════════════════════════════════

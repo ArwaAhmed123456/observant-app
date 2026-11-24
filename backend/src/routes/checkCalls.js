@@ -317,4 +317,57 @@ router.get('/:id', authenticate, asyncHandler(async (req, res) => {
   res.json({ checkCall: cc });
 }));
 
+// ── Admin/Manager: Manually create check call ─────────────────────────────────
+router.post('/admin-create', authenticate, requireRole('manager', 'admin', 'superadmin'),
+  asyncHandler(async (req, res) => {
+    const { siteId, guardId, firedAt, response = 'yes', note, category, sessionId } = req.body;
+    if (!siteId || !guardId) return res.status(400).json({ error: 'siteId and guardId are required' });
+    const now = firedAt ? new Date(firedAt) : new Date();
+    const call = await CheckCall.create({
+      organisationId: req.user.organisationId,
+      sessionId: sessionId || null,
+      guardId,
+      siteId,
+      firedAt: now,
+      respondedAt: now,
+      response,
+      note: note || null,
+      category: category || null,
+      isManualLog: true,
+    });
+    res.status(201).json({ checkCall: call });
+  })
+);
+
+// ── Admin/Manager: Edit check call ───────────────────────────────────────────
+router.patch('/:id', authenticate, requireRole('manager', 'admin', 'superadmin'),
+  asyncHandler(async (req, res) => {
+    const { response, note, category, firedAt, respondedAt } = req.body;
+    const call = await CheckCall.findOne({
+      _id: req.params.id,
+      organisationId: req.user.organisationId,
+    });
+    if (!call) return res.status(404).json({ error: 'Check call record not found' });
+    if (response !== undefined) call.response = response;
+    if (note !== undefined) call.note = note;
+    if (category !== undefined) call.category = category;
+    if (firedAt !== undefined) call.firedAt = new Date(firedAt);
+    if (respondedAt !== undefined) call.respondedAt = respondedAt ? new Date(respondedAt) : null;
+    await call.save();
+    res.json({ checkCall: call });
+  })
+);
+
+// ── Admin/Manager: Delete check call ─────────────────────────────────────────
+router.delete('/:id', authenticate, requireRole('manager', 'admin', 'superadmin'),
+  asyncHandler(async (req, res) => {
+    const call = await CheckCall.findOneAndDelete({
+      _id: req.params.id,
+      organisationId: req.user.organisationId,
+    });
+    if (!call) return res.status(404).json({ error: 'Check call record not found' });
+    res.json({ success: true, deletedId: call._id });
+  })
+);
+
 module.exports = router;

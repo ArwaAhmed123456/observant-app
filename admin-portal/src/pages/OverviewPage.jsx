@@ -84,8 +84,31 @@ export default function OverviewPage({ session, onNavigate }) {
           }
         }
 
+        const isManager = session?.user?.role === 'manager';
+        const isAdmin = ['admin', 'superadmin'].includes(session?.user?.role);
+        const managerSiteIds = isManager ? [
+          ...(session.user?.managedSiteIds || []),
+          session.user?.siteId,
+        ].filter(Boolean).map(String) : null;
+
+        let allGuards = usersData.users || [];
+        let allSites = sitesData.sites || [];
+
+        if (isManager && managerSiteIds?.length) {
+          allSites = allSites.filter(s => managerSiteIds.includes(String(s._id || s.id)));
+          allGuards = allGuards.filter(g => {
+            const gSite = String(g.siteId?._id || g.siteId || '');
+            const gAssigned = (g.assignedSiteIds || []).map(id => String(id?._id || id || ''));
+            return managerSiteIds.includes(gSite) || gAssigned.some(id => managerSiteIds.includes(id));
+          });
+          recent = recent.filter(r => {
+            const rSite = (r.site || '').toLowerCase();
+            return allSites.some(s => (s.name || '').toLowerCase() === rSite);
+          });
+        }
+
         const prioritySites = ['totmonslow', 'testing site'];
-        const sortedSites = [...(sitesData.sites || [])].sort((a, b) => {
+        const sortedSites = [...allSites].sort((a, b) => {
           const aName = (a.name || '').toLowerCase();
           const bName = (b.name || '').toLowerCase();
           const aIdx = prioritySites.findIndex(p => aName.includes(p));
@@ -100,11 +123,11 @@ export default function OverviewPage({ session, onNavigate }) {
           const sum = summaryData?.summary || {};
           setData({
             onDutyCount: sum.activeSessions ?? (reportsData.rows?.filter(r => !r.shiftEnd)?.length || 0),
-            guardsCount: (usersData.users || []).length,
+            guardsCount: allGuards.length,
             todayCallsCount: sum.checkCalls?.total ?? (reportsData.rows?.filter(r => r.type === 'check_call')?.length || 0),
             checkCallRate: sum.checkCalls?.rate || '100%',
             todayPatrolsCount: sum.patrols?.total ?? (reportsData.rows?.filter(r => r.type === 'patrol')?.length || 0),
-            sitesCount: (sitesData.sites || []).length,
+            sitesCount: allSites.length,
             recentActivity: recent.slice(0, 8),
             alerts: alertsData.alerts || [],
             sites: sortedSites,
@@ -136,12 +159,22 @@ export default function OverviewPage({ session, onNavigate }) {
             Observant security operations are online. Monitor active shifts, check call frequencies, site patrols, and staff deployments across all client locations.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
-            <button
-              onClick={() => onNavigate('users')}
-              className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-amber-400 transition-colors shadow-lg"
-            >
-              <Icon name="plus" size={15} /> Add Guard / Manager
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => onNavigate('users')}
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-amber-400 transition-colors shadow-lg"
+              >
+                <Icon name="plus" size={15} /> Add Guard / Manager
+              </button>
+            )}
+            {isManager && (
+              <button
+                onClick={() => onNavigate('schedules')}
+                className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:bg-amber-400 transition-colors shadow-lg"
+              >
+                <Icon name="calendar" size={15} /> View Schedules & Rosters
+              </button>
+            )}
             <button
               onClick={() => onNavigate('checklog')}
               className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 text-xs font-bold text-white hover:bg-white/20 transition-colors backdrop-blur-md"
@@ -162,7 +195,7 @@ export default function OverviewPage({ session, onNavigate }) {
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {/* Card 1: Guards On Duty */}
         <div
-          onClick={() => onNavigate('users')}
+          onClick={() => onNavigate(isAdmin ? 'users' : 'schedules')}
           className="metric-card rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-emerald-400 hover:shadow-md cursor-pointer transition-all"
         >
           <div className="flex items-center justify-between">
@@ -210,7 +243,7 @@ export default function OverviewPage({ session, onNavigate }) {
 
         {/* Card 4: Client Sites & Geofences */}
         <div
-          onClick={() => onNavigate('sites')}
+          onClick={() => onNavigate(isAdmin ? 'sites' : 'reports')}
           className="metric-card rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-indigo-400 hover:shadow-md cursor-pointer transition-all"
         >
           <div className="flex items-center justify-between">
@@ -220,8 +253,8 @@ export default function OverviewPage({ session, onNavigate }) {
             </span>
           </div>
           <div className="mt-4 text-3xl font-extrabold text-slate-900">{data.sitesCount}</div>
-          <div className="mt-1 text-xs font-bold text-slate-800">Client Sites & Geofences</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Totmonslow & active zones</div>
+          <div className="mt-1 text-xs font-bold text-slate-800">{isManager ? 'Your Assigned Sites' : 'Client Sites & Geofences'}</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">{isManager ? 'Active operational perimeter' : 'Totmonslow & active zones'}</div>
         </div>
       </section>
 
@@ -318,10 +351,16 @@ export default function OverviewPage({ session, onNavigate }) {
         <div className="lg:col-span-4 space-y-6">
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <h2 className="text-sm font-bold text-slate-900">Operational Sites</h2>
-              <button onClick={() => onNavigate('sites')} className="text-xs font-bold text-blue-600">
-                View all ({data.sites.length})
-              </button>
+              <h2 className="text-sm font-bold text-slate-900">{isManager ? 'Your Site' : 'Operational Sites'}</h2>
+              {isAdmin ? (
+                <button onClick={() => onNavigate('sites')} className="text-xs font-bold text-blue-600">
+                  View all ({data.sites.length})
+                </button>
+              ) : (
+                <span className="text-xs font-semibold text-slate-500">
+                  {data.sites.length} Active {data.sites.length === 1 ? 'Location' : 'Locations'}
+                </span>
+              )}
             </div>
             <div className="mt-3 space-y-2">
               {data.sites.slice(0, 4).map(site => (
@@ -344,20 +383,24 @@ export default function OverviewPage({ session, onNavigate }) {
           <div className="rounded-2xl border border-slate-200 bg-linear-to-b from-slate-50 to-white p-5 shadow-sm">
             <h2 className="text-sm font-bold text-slate-900">Quick Actions</h2>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                onClick={() => onNavigate('users')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold gap-1 text-center"
-              >
-                <Icon name="users" size={18} />
-                <span>Manage Users</span>
-              </button>
-              <button
-                onClick={() => onNavigate('sites')}
-                className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold gap-1 text-center"
-              >
-                <Icon name="building" size={18} />
-                <span>Manage Sites</span>
-              </button>
+              {isAdmin && (
+                <button
+                  onClick={() => onNavigate('users')}
+                  className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold gap-1 text-center"
+                >
+                  <Icon name="users" size={18} />
+                  <span>Manage Users</span>
+                </button>
+              )}
+              {isAdmin && (
+                <button
+                  onClick={() => onNavigate('sites')}
+                  className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold gap-1 text-center"
+                >
+                  <Icon name="building" size={18} />
+                  <span>Manage Sites</span>
+                </button>
+              )}
               <button
                 onClick={() => onNavigate('schedules')}
                 className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold gap-1 text-center"
@@ -372,6 +415,15 @@ export default function OverviewPage({ session, onNavigate }) {
                 <Icon name="report" size={18} />
                 <span>Reports</span>
               </button>
+              {isManager && (
+                <button
+                  onClick={() => onNavigate('checklog')}
+                  className="col-span-2 flex items-center justify-center p-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold gap-2 text-center"
+                >
+                  <Icon name="calendar" size={18} />
+                  <span>Open Check Call Log</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

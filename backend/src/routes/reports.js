@@ -82,10 +82,11 @@ function getSlotIndex(shiftType, hour, minute = 0) {
   }
 }
 
-function createShiftRow({ siteId, siteName, officerId, officerName, badgeNumber, shiftDate, shiftType, shiftStart, shiftEnd }) {
+function createShiftRow({ siteId, siteName, officerId, officerName, badgeNumber, shiftDate, shiftType, shiftStart, shiftEnd, sessionId }) {
   const firstHour = shiftType === 'Day' ? 7 : 19;
   const start = new Date(`${shiftDate}T${String(firstHour).padStart(2, '0')}:00:00.000Z`);
   return {
+    sessionId: sessionId ? String(sessionId) : null,
     siteId: String(siteId), siteName: siteName || 'Unknown site',
     officerId: String(officerId), officerName: officerName || 'Unknown officer', badgeNumber: badgeNumber || null,
     shiftDate, shiftType,
@@ -171,6 +172,7 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       const key = [values.siteId, values.officerId, values.shiftDate, type].join(':');
       if (!rowsByKey.has(key)) rowsByKey.set(key, createShiftRow(values));
       const row = rowsByKey.get(key);
+      if (values.sessionId && !row.sessionId) row.sessionId = String(values.sessionId);
       if (values.shiftStart && (!row.shiftStart || values.shiftStart < row.shiftStart)) row.shiftStart = values.shiftStart;
       if (values.shiftEnd && (!row.shiftEnd || values.shiftEnd > row.shiftEnd)) row.shiftEnd = values.shiftEnd;
       if (values.shiftTimes) row.shiftTimes = values.shiftTimes;
@@ -181,6 +183,7 @@ router.get('/check-call-log', authenticate, requireRole('manager', 'admin'),
       if (!session.guardId || !session.siteId) return;
       const details = shiftDetails(session);
       ensureRow({
+        sessionId: session._id,
         siteId: session.siteId._id, siteName: session.siteId.name,
         officerId: session.guardId._id, officerName: session.guardId.name, badgeNumber: session.guardId.badgeNumber,
         ...details,
@@ -427,11 +430,14 @@ router.get('/summary', authenticate, requireRole('manager','admin'),
     if (to)   dateFilter.$lte = new Date(to);
 
     const siteFilter = {};
+    const managerSiteIds = req.user.role === 'manager'
+      ? [...new Set([...(req.user.managedSiteIds || []), req.user.siteId].filter(Boolean).map(String))]
+      : null;
     if (siteId) {
-      if (req.user.role === 'manager' && !req.user.managedSiteIds.some(id => String(id) === String(siteId))) return res.status(403).json({ error: 'Site is outside your assigned sites.' });
+      if (req.user.role === 'manager' && !managerSiteIds.includes(String(siteId))) return res.status(403).json({ error: 'Site is outside your assigned sites.' });
       siteFilter.siteId = siteId;
     } else if (req.user.role === 'manager') {
-      siteFilter.siteId = { $in: req.user.managedSiteIds };
+      siteFilter.siteId = { $in: managerSiteIds };
     }
 
     const ccFilter = { organisationId: orgId, ...siteFilter };

@@ -416,6 +416,53 @@ router.patch('/:id',
   })
 );
 
+// ── Admin/Manager: Manually create shift session ──────────────────────────────
+router.post('/admin-create',
+  authenticate, requireRole('manager', 'admin', 'superadmin'),
+  asyncHandler(async (req, res) => {
+    const { siteId, guardId, scheduledStart, scheduledEnd, bookedOnAt, bookedOffAt } = req.body;
+    if (!siteId || !guardId) return res.status(400).json({ error: 'siteId and guardId are required.' });
+
+    const session = await ShiftSession.create({
+      organisationId: req.user.organisationId,
+      siteId,
+      guardId,
+      scheduledStart: scheduledStart || '07:00',
+      scheduledEnd: scheduledEnd || '19:00',
+      bookedOnAt: bookedOnAt ? new Date(bookedOnAt) : new Date(),
+      bookedOffAt: bookedOffAt ? new Date(bookedOffAt) : null,
+      punctuality: 'on_time',
+      punctualityMinutes: 0,
+    });
+
+    const populated = await ShiftSession.findById(session._id)
+      .populate('guardId', 'name badgeNumber')
+      .populate('siteId', 'name');
+
+    res.status(201).json({ session: populated });
+  })
+);
+
+// ── Admin/Manager: Delete shift session ───────────────────────────────────────
+router.delete('/:id',
+  authenticate, requireRole('manager', 'admin', 'superadmin'),
+  asyncHandler(async (req, res) => {
+    const session = await ShiftSession.findOneAndDelete({
+      _id: req.params.id,
+      organisationId: req.user.organisationId,
+    });
+    if (!session) return res.status(404).json({ error: 'Shift session not found.' });
+
+    // Optionally clean up associated check calls
+    if (req.query.deleteCalls !== 'false') {
+      const { CheckCall } = require('../models');
+      await CheckCall.deleteMany({ sessionId: session._id });
+    }
+
+    res.json({ success: true, deletedId: session._id });
+  })
+);
+
 // ── Geofence breach monitor ──────────────────────────────────────────────────
 router.post('/geofence-breach',
   authenticate, requireRole('guard'),
