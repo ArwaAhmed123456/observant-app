@@ -255,11 +255,23 @@ export function ManagerDashboardScreen({ navigation }) {
     if (type === 'sos') {
       return { color: '#ff2d55', bg: 'rgba(255,45,85,0.18)', border: '#ff2d55', icon: '🚨', label: 'URGENT SOS', isUrgent: true };
     }
-    if (type === 'random_prompt_ignored') {
-      return { color: '#16a34a', bg: 'rgba(22,163,74,0.12)', border: '#16a34a', icon: '✓', label: 'SURPRISE PATROL VERIFIED' };
+    if (type === 'guard_not_arrived') {
+      return { color: '#ef4444', bg: 'rgba(239,68,68,0.14)', border: '#ef4444', icon: '🚨', label: 'NOT ON DUTY', isUrgent: true };
     }
     if (type === 'check_call_missed') {
-      return { color: '#16a34a', bg: 'rgba(22,163,74,0.12)', border: '#16a34a', icon: '✓', label: 'CALL VERIFIED' };
+      return { color: '#ef4444', bg: 'rgba(239,68,68,0.14)', border: '#ef4444', icon: '📞', label: 'MISSED CHECK CALL', isUrgent: true };
+    }
+    if (type === 'guard_not_signed_out') {
+      return { color: '#ea580c', bg: 'rgba(234,88,12,0.14)', border: '#ea580c', icon: '⏰', label: 'NOT SIGNED OUT' };
+    }
+    if (type === 'guard_booked_late') {
+      return { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: '#d97706', icon: '⚠', label: 'LATE ARRIVAL' };
+    }
+    if (type === 'guard_signed_out') {
+      return { color: '#16a34a', bg: 'rgba(22,163,74,0.12)', border: '#16a34a', icon: '✓', label: 'SIGNED OUT' };
+    }
+    if (type === 'random_prompt_ignored') {
+      return { color: '#16a34a', bg: 'rgba(22,163,74,0.12)', border: '#16a34a', icon: '✓', label: 'SURPRISE PATROL VERIFIED' };
     }
     if (type === 'check_call_issue') {
       return { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: '#d97706', icon: '⚠',  label: 'ISSUE REPORTED' };
@@ -268,7 +280,7 @@ export function ManagerDashboardScreen({ navigation }) {
       return { color: '#ea580c', bg: 'rgba(234,88,12,0.14)', border: '#ea580c', icon: '📍', label: 'OUT OF BOUNDS' };
     }
     if (type === 'patrol_incomplete') {
-      return { color: '#16a34a', bg: 'rgba(22,163,74,0.12)', border: '#16a34a', icon: '✓', label: 'PATROL VERIFIED' };
+      return { color: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: '#d97706', icon: '⚠', label: 'PATROL INCOMPLETE' };
     }
     return { color: COLORS.info, bg: COLORS.infoBg, border: COLORS.info, icon: 'ℹ', label: 'OPERATIONAL INFO' };
   };
@@ -285,14 +297,14 @@ export function ManagerDashboardScreen({ navigation }) {
       return userSiteIds.has(String(a.siteId || ''));
     })
     .sort((a, b) => {
-      // SOS always first
-      if (['sos', 'random_prompt_ignored'].includes(a.type) && !['sos', 'random_prompt_ignored'].includes(b.type)) return -1;
-      if (['sos', 'random_prompt_ignored'].includes(b.type) && !['sos', 'random_prompt_ignored'].includes(a.type)) return 1;
+      // SOS and critical alerts always first
+      if (['sos', 'guard_not_arrived', 'check_call_missed'].includes(a.type) && !['sos', 'guard_not_arrived', 'check_call_missed'].includes(b.type)) return -1;
+      if (['sos', 'guard_not_arrived', 'check_call_missed'].includes(b.type) && !['sos', 'guard_not_arrived', 'check_call_missed'].includes(a.type)) return 1;
       return new Date(b.createdAt) - new Date(a.createdAt);
     });
 
   const priorityAlerts = mgrAlerts.filter(alert =>
-    ['sos', 'random_prompt_ignored', 'check_call_missed', 'check_call_issue', 'geofence_warning', 'patrol_missing_checkpoints', 'guard_not_arrived', 'guard_booked_late'].includes(alert.type)
+    ['sos', 'guard_not_arrived', 'check_call_missed', 'guard_not_signed_out', 'guard_booked_late', 'check_call_issue', 'patrol_missing_checkpoints'].includes(alert.type)
       && !alert.read
   ).slice(0, 3);
 

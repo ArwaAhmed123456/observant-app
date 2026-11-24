@@ -254,6 +254,32 @@ router.post('/book-off',
     session.nextRandomPromptAt = null;
     await session.save();
 
+    // Alert managers of guard sign-out
+    try {
+      const [guardUser, siteDoc] = await Promise.all([
+        User.findById(session.guardId).select('name badgeNumber'),
+        Site.findById(session.siteId).select('name'),
+      ]);
+      const guardName = guardUser?.name || req.user.name || 'Guard';
+      const badge = guardUser?.badgeNumber ? ` (${guardUser.badgeNumber})` : '';
+      const siteName = siteDoc?.name || 'Site';
+
+      await createAlert({
+        organisationId: session.organisationId,
+        siteId: session.siteId,
+        guardId: session.guardId,
+        type: 'guard_signed_out',
+        title: isEarly ? '⚠️ Guard signed out early' : '✅ Guard signed out / Booked off',
+        message: isEarly
+          ? `${guardName}${badge} signed out early from shift at ${siteName}. Scheduled shift was until ${session.scheduledEnd || 'scheduled end'}.`
+          : `${guardName}${badge} completed shift and signed out at ${siteName}.`,
+        refModel: 'ShiftSession',
+        refId: session._id,
+      });
+    } catch (err) {
+      console.error('[shifts/book-off] Failed to notify managers of sign out:', err.message);
+    }
+
     await audit({
       req,
       action: 'shift_booked_off',

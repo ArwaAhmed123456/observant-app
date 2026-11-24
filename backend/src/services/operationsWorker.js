@@ -10,15 +10,10 @@ async function fireDueCheckCalls(now = new Date()) {
   const sessions = await ShiftSession.find({ bookedOffAt: null, nextCheckCallAt: { $lte: now } }).limit(100);
   for (const session of sessions) {
     if (session.scheduledEndAt && now >= session.scheduledEndAt) {
-      // Shift has ended; book off cleanly and do not fire further check calls
+      // Shift scheduled end reached; do not schedule further check calls
       await ShiftSession.updateOne(
         { _id: session._id, bookedOffAt: null },
-        { $set: { bookedOffAt: session.scheduledEndAt, nextCheckCallAt: null, autoEnded: true } }
-      );
-      // Auto-close any active in-progress patrols so they cannot be submitted hours later
-      await PatrolSession.updateMany(
-        { shiftSessionId: session._id, status: 'in_progress' },
-        { $set: { status: 'incomplete', finishedAt: session.scheduledEndAt, managerNote: 'Auto-closed at scheduled shift end' } }
+        { $set: { nextCheckCallAt: null } }
       );
       continue;
     }
@@ -297,7 +292,7 @@ async function checkLateArrivals(now = new Date()) {
   const currentDay = dayKey(now);
 
   const rosters = await ShiftRoster.find({
-    acceptanceStatus: 'accepted',
+    acceptanceStatus: { $ne: 'rejected' },
     $or: [
       { weekStartDate: weekStart },
       { recurringWeekly: true }
@@ -335,15 +330,25 @@ async function checkLateArrivals(now = new Date()) {
     });
     if (sessionToday) continue;
 
-    // Check if we already alerted the manager for this guard today
-    const alreadyAlerted = await Alert.exists({
+    // If guard already booked on late, do not alert as not arrived
+    const bookedLate = await Alert.exists({
       organisationId: roster.organisationId,
       guardId: roster.guardId,
       siteId: roster.siteId,
-      type: { $in: ['guard_not_arrived', 'guard_booked_late'] },
+      type: 'guard_booked_late',
       createdAt: { $gte: startOfDay }
     });
-    if (alreadyAlerted) continue;
+    if (bookedLate) continue;
+
+    // Check if we already alerted the manager for this guard in the last 60 minutes
+    const recentAlert = await Alert.findOne({
+      organisationId: roster.organisationId,
+      guardId: roster.guardId,
+      siteId: roster.siteId,
+      type: 'guard_not_arrived',
+      createdAt: { $gte: new Date(now.getTime() - 60 * 60 * 1000) }
+    });
+    if (recentAlert) continue;
 
     const diffMins = Math.max(1, Math.round((now.getTime() - shiftStartAt.getTime()) / 60000));
     try {
@@ -356,13 +361,67 @@ async function checkLateArrivals(now = new Date()) {
         siteId: roster.siteId,
         guardId: roster.guardId,
         type: 'guard_not_arrived',
-        title: '🚨 Guard not arrived on site',
-        message: `${guard?.name || 'Guard'}${guard?.badgeNumber ? ` (${guard.badgeNumber})` : ''} has not arrived on site for scheduled shift starting at ${todayShift.start} at ${site?.name || 'Site'}. Currently ${diffMins} min overdue.`,
+        title: '🚨 Guard did not sign in / Not on duty',
+        message: `${guard?.name || 'Guard'}${guard?.badgeNumber ? ` (${guard.badgeNumber})` : ''} has not signed in / not on duty for scheduled shift starting at ${todayShift.start} at ${site?.name || 'Site'}. Overdue by ${diffMins} min.`,
         refModel: 'ShiftRoster',
         refId: roster._id,
       });
     } catch (err) {
       console.error('[OpsWorker] Failed to create late arrival alert:', err.message);
+    }
+  }
+}
+
+async function checkOverdueSignOuts(now = new Date()) {
+  const graceMinutes = 10;
+  const sessions = await ShiftSession.find({
+    bookedOffAt: null,
+    scheduledEndAt: { $ne: null, $lte: new Date(now.getTime() - graceMinutes * 60 * 1000) },
+  }).limit(50);
+
+  for (const session of sessions) {
+    // If shift is > 2 hours overdue, auto-end it
+    if (now.getTime() > session.scheduledEndAt.getTime() + 2 * HOUR) {
+      await ShiftSession.updateOne(
+        { _id: session._id, bookedOffAt: null },
+        { $set: { bookedOffAt: new Date(session.scheduledEndAt.getTime() + 2 * HOUR), nextCheckCallAt: null, autoEnded: true } }
+      );
+      await PatrolSession.updateMany(
+        { shiftSessionId: session._id, status: 'in_progress' },
+        { $set: { status: 'incomplete', finishedAt: now, managerNote: 'Auto-closed after shift sign-out expired' } }
+      );
+      continue;
+    }
+
+    // Check if we already alerted manager in the last 60 minutes
+    const recentAlert = await Alert.findOne({
+      organisationId: session.organisationId,
+      guardId: session.guardId,
+      siteId: session.siteId,
+      refId: session._id,
+      type: 'guard_not_signed_out',
+      createdAt: { $gte: new Date(now.getTime() - 60 * 60 * 1000) },
+    });
+    if (recentAlert) continue;
+
+    const diffMins = Math.max(1, Math.round((now.getTime() - session.scheduledEndAt.getTime()) / 60000));
+    try {
+      const [guard, site] = await Promise.all([
+        User.findById(session.guardId).select('name badgeNumber'),
+        Site.findById(session.siteId).select('name'),
+      ]);
+      await createAlert({
+        organisationId: session.organisationId,
+        siteId: session.siteId,
+        guardId: session.guardId,
+        type: 'guard_not_signed_out',
+        title: '⏰ Guard not signed out',
+        message: `${guard?.name || 'Guard'}${guard?.badgeNumber ? ` (${guard.badgeNumber})` : ''} has not signed out for shift that finished at ${session.scheduledEnd || 'scheduled time'} at ${site?.name || 'Site'}. Overdue by ${diffMins} min.`,
+        refModel: 'ShiftSession',
+        refId: session._id,
+      });
+    } catch (err) {
+      console.error('[OpsWorker] Failed to create not signed out alert:', err.message);
     }
   }
 }
@@ -377,6 +436,7 @@ function startOperationsWorker() {
       await fireDueCheckCalls(now);
       await expireCheckCalls(now);
       await checkLateArrivals(now);
+      await checkOverdueSignOuts(now);
       await scheduleMissingCheckCalls(now);
       await scheduleMissingRandomPrompts(now);
       await fireDueRandomPrompts(now);
@@ -392,4 +452,4 @@ function startOperationsWorker() {
   tick();
 }
 
-module.exports = { startOperationsWorker, fireDueCheckCalls, expireCheckCalls, checkLateArrivals, fireDueRandomPrompts, scheduleMissingCheckCalls, scheduleMissingRandomPrompts, warnShiftsEndingSoon, alertIgnoredPrompts };
+module.exports = { startOperationsWorker, fireDueCheckCalls, expireCheckCalls, checkLateArrivals, checkOverdueSignOuts, fireDueRandomPrompts, scheduleMissingCheckCalls, scheduleMissingRandomPrompts, warnShiftsEndingSoon, alertIgnoredPrompts };

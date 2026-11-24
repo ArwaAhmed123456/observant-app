@@ -79,7 +79,7 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
   // who has NOT set exceptionOnly to restrict to exceptions only.
   // Default: all alert types go through unless manager has exceptionOnly=true AND
   // this is a routine/non-exception alert type.
-  const exceptionAlertTypes = ['check_call_missed', 'random_prompt_ignored', 'sos', 'incident', 'patrol_incomplete', 'patrol_missing_checkpoints', 'guard_booked_late', 'guard_not_arrived', 'geofence_warning'];
+  const exceptionAlertTypes = ['check_call_missed', 'random_prompt_ignored', 'sos', 'incident', 'patrol_incomplete', 'patrol_missing_checkpoints', 'guard_booked_late', 'guard_not_arrived', 'guard_not_signed_out', 'guard_signed_out', 'geofence_warning'];
   const pushManagers = type === 'patrol_complete'
     ? managers.filter(manager => manager.notificationPreferences?.routinePatrolPush === true)
     : managers.filter(manager => {

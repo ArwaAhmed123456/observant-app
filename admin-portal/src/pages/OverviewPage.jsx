@@ -225,6 +225,36 @@ export default function OverviewPage({ session, onNavigate }) {
         </div>
       </section>
 
+      {/* Active Operational Alerts Banner (if any) */}
+      {data.alerts.length > 0 && (
+        <section className="rounded-2xl border border-red-200 bg-red-50/70 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+              <h2 className="text-sm font-bold text-red-950">Active Operational Alerts ({data.alerts.length})</h2>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {data.alerts.slice(0, 4).map(alert => (
+              <div key={alert._id || alert.id} className="flex items-start justify-between p-3 rounded-xl bg-white border border-red-100 shadow-xs">
+                <div className="flex items-start gap-2.5">
+                  <span className="text-base leading-none">
+                    {alert.type === 'sos' ? '🚨' : alert.type === 'guard_not_arrived' ? '🚨' : alert.type === 'check_call_missed' ? '📞' : alert.type === 'guard_not_signed_out' ? '⏰' : alert.type === 'guard_signed_out' ? '✓' : '⚠️'}
+                  </span>
+                  <div>
+                    <div className="text-xs font-bold text-slate-900">{alert.title}</div>
+                    <div className="text-[11px] text-slate-600 mt-0.5">{alert.message}</div>
+                  </div>
+                </div>
+                <div className="text-[10px] text-slate-400 whitespace-nowrap ml-4">
+                  {new Date(alert.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Main Split Grid: Live Activity Feed + Quick Management */}
       <section className="grid gap-6 lg:grid-cols-12">
         {/* Left Column: Recent Activity */}

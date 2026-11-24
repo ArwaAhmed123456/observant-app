@@ -22,6 +22,8 @@ const alertSchema = new mongoose.Schema({
       'patrol_complete',
       'guard_booked_late',
       'guard_not_arrived',
+      'guard_signed_out',
+      'guard_not_signed_out',
       'shift_end_reminder',
       'random_prompt_ignored',
       'sos',
@@ -40,7 +42,7 @@ const alertSchema = new mongoose.Schema({
   location:{ type: mongoose.Schema.Types.Mixed, default: null },
 
   // Reference to the source document
-  refModel: { type: String, enum: ['CheckCall', 'PatrolSession', 'ShiftSession', 'RandomPromptLog', 'User'], default: null },
+  refModel: { type: String, enum: ['CheckCall', 'PatrolSession', 'ShiftSession', 'RandomPromptLog', 'User', 'ShiftRoster'], default: null },
   refId:    { type: mongoose.Schema.Types.ObjectId, default: null },
 
   // Read tracking per manager
