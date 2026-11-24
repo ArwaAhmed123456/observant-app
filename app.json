@@ -21,6 +21,8 @@
         "barStyle": "light-content"
       },
       "permissions": [
+        "POST_NOTIFICATIONS",
+        "android.permission.POST_NOTIFICATIONS",
         "CAMERA",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",

@@ -6,6 +6,7 @@ import { apiPatch } from './api';
 // Controls how notifications are handled when the app is in the FOREGROUND
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
+    shouldShowAlert:  true,
     shouldShowBanner: true,
     shouldShowList:   true,
     shouldPlaySound:  true,
@@ -16,7 +17,7 @@ Notifications.setNotificationHandler({
 export async function registerPushNotifications() {
   try {
     if (Platform.OS === 'android') {
-      // Android requires an explicit channel with sound + high importance
+      // Android requires an explicit channel with sound + max importance
       await Notifications.setNotificationChannelAsync('observant_alerts', {
         name: 'Security operations alerts',
         importance: Notifications.AndroidImportance.MAX,
@@ -24,12 +25,15 @@ export async function registerPushNotifications() {
         sound: 'default',
         enableVibrate: true,
         showBadge: true,
+        enableLights: true,
+        lightColor: '#FFBF00',
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       });
     }
 
-    // Request permission — on iOS this triggers the system dialog
+    // Request permission — on iOS and Android 13+ this triggers the system dialog
     const canReceiveNotifications = permission => {
-      if (Platform.OS !== 'ios') return permission.granted;
+      if (Platform.OS !== 'ios') return permission.granted || permission.status === 'granted';
       const status = permission.ios?.status;
       return permission.granted || [
         Notifications.IosAuthorizationStatus.AUTHORIZED,
