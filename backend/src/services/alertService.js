@@ -24,13 +24,13 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
     ],
   }).select('_id fcmToken name email notificationPreferences');
 
-  // Fallback: if no site-specific manager configured, notify all active managers
+  // Fallback: if no site-specific manager configured, notify admins only
   if (!managers.length) {
     managers = await User.find({
       organisationId,
       active: true,
-      role: { $in: ['manager', 'admin'] },
-    }).select('_id fcmToken name email notificationPreferences');
+      role: 'admin',
+    }).select('_id fcmToken name email notificationPreferences role managedSiteIds siteId');
   }
 
   const managerIds = managers.map(m => m._id);

@@ -256,7 +256,7 @@ export function ManagerDashboardScreen({ navigation }) {
       return { color: '#ff2d55', bg: 'rgba(255,45,85,0.18)', border: '#ff2d55', icon: '🚨', label: 'URGENT SOS', isUrgent: true };
     }
     if (type === 'guard_not_arrived') {
-      return { color: '#ef4444', bg: 'rgba(239,68,68,0.14)', border: '#ef4444', icon: '🚨', label: 'NOT ON DUTY', isUrgent: true };
+      return { color: '#ef4444', bg: 'rgba(239,68,68,0.14)', border: '#ef4444', icon: '🚨', label: 'NOT BOOKED ON', isUrgent: true };
     }
     if (type === 'check_call_missed') {
       return { color: '#ef4444', bg: 'rgba(239,68,68,0.14)', border: '#ef4444', icon: '📞', label: 'MISSED CHECK CALL', isUrgent: true };

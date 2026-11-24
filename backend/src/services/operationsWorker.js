@@ -309,9 +309,8 @@ async function checkLateArrivals(now = new Date()) {
     const shiftStartAt = parseTimeOnDate(todayShift.start, now);
     const shiftEndAt = calculateShiftEndDateTime(todayShift.start, todayShift.end, now);
 
-    // If shift has not reached start time + 5 min grace, or has already ended, skip
-    const gracePeriodMs = 5 * 60 * 1000;
-    if (now.getTime() < shiftStartAt.getTime() + gracePeriodMs || now > shiftEndAt) continue;
+    // If shift has not reached exact scheduled start time, or has already ended, skip
+    if (now.getTime() < shiftStartAt.getTime() || now > shiftEndAt) continue;
 
     // Check if guard has an active session or booked on for this shift
     const activeSession = await ShiftSession.findOne({
@@ -350,19 +349,21 @@ async function checkLateArrivals(now = new Date()) {
     });
     if (recentAlert) continue;
 
-    const diffMins = Math.max(1, Math.round((now.getTime() - shiftStartAt.getTime()) / 60000));
+    const diffMins = Math.round((now.getTime() - shiftStartAt.getTime()) / 60000);
     try {
       const [guard, site] = await Promise.all([
         User.findById(roster.guardId).select('name badgeNumber'),
         Site.findById(roster.siteId).select('name'),
       ]);
+      const guardStr = `${guard?.name || 'Guard'}${guard?.badgeNumber ? ` (${guard.badgeNumber})` : ''}`;
+      const siteStr = site?.name || 'Site';
       await createAlert({
         organisationId: roster.organisationId,
         siteId: roster.siteId,
         guardId: roster.guardId,
         type: 'guard_not_arrived',
-        title: '🚨 Guard did not sign in / Not on duty',
-        message: `${guard?.name || 'Guard'}${guard?.badgeNumber ? ` (${guard.badgeNumber})` : ''} has not signed in / not on duty for scheduled shift starting at ${todayShift.start} at ${site?.name || 'Site'}. Overdue by ${diffMins} min.`,
+        title: '🚨 Guard did not booked on',
+        message: `${guardStr} was supposed to be booked on at ${todayShift.start} at ${siteStr} but did not.${diffMins > 0 ? ` Currently ${diffMins} min overdue.` : ''}`,
         refModel: 'ShiftRoster',
         refId: roster._id,
       });

@@ -69,10 +69,16 @@ export default function CheckCallLogPage({ session }) {
       request('/api/sites', session.accessToken, controller.signal),
       request('/api/users?role=guard', session.accessToken, controller.signal),
     ]).then(([siteData, guardData]) => {
-      setSites(siteData.sites || []);
-      setGuards(guardData.users || []);
+      const siteList = siteData.sites || [];
+      const guardList = guardData.users || [];
+      setSites(siteList);
+      setGuards(guardList);
+
+      const totmonslowSite = siteList.find(s => (s.name || '').toLowerCase().includes('totmonslow'));
+      const defaultSiteId = totmonslowSite ? (totmonslowSite._id || totmonslowSite.id) : (siteList[0]?._id || siteList[0]?.id || '');
+      const initialFilters = { ...filters, site: defaultSiteId };
+      generate(initialFilters);
     }).catch(reason => { if (reason.name !== 'AbortError') setError(reason.message); });
-    generate(filters);
     return () => controller.abort();
   }, [allowed, session?.accessToken]);
 
