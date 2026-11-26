@@ -107,7 +107,6 @@ async function fireDueRandomPrompts(now = new Date()) {
   const sessions = await ShiftSession.find({
     bookedOffAt: null,
     nextRandomPromptAt: { $lte: now, $ne: null },
-    $or: [{ randomPromptCount: { $lt: 2 } }, { randomPromptCount: { $exists: false } }]
   }).limit(100);
 
   for (const session of sessions) {
@@ -115,15 +114,19 @@ async function fireDueRandomPrompts(now = new Date()) {
       await ShiftSession.updateOne({ _id: session._id }, { $set: { nextRandomPromptAt: null } });
       continue;
     }
-    const currentCount = session.randomPromptCount || 0;
+
+    // Source of truth: count prompts already fired for this shift session
+    const sessionLogs = await RandomPromptLog.find({ shiftSessionId: session._id }).sort({ triggeredAt: 1 });
+    const sessionCount = sessionLogs.length;
+
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * HOUR);
     const dayNightPromptCount = await RandomPromptLog.countDocuments({
       guardId: session.guardId,
       triggeredAt: { $gte: twentyFourHoursAgo }
     });
 
-    // Exactly at most 2 surprise patrols in whole day/night (24h period)
-    if (currentCount >= 2 || dayNightPromptCount >= 2) {
+    // Exactly at most 2 surprise patrols in whole day/night and per shift session
+    if (sessionCount >= 2 || dayNightPromptCount >= 2) {
       await ShiftSession.updateOne({ _id: session._id }, { $set: { nextRandomPromptAt: null, randomPromptCount: 2 } });
       continue;
     }
@@ -146,25 +149,24 @@ async function fireDueRandomPrompts(now = new Date()) {
       managerAlerted: false,
     });
 
-    // Exactly 2 surprise patrols in whole day/night: schedule prompt 2 ONLY if count in 24h will be < 2
+    // Schedule Prompt 2 ONLY if this was Prompt 1 and total in 24h will be < 2
     let nextPrompt = null;
-    if (currentCount === 0 && dayNightPromptCount + 1 < 2) {
-      const shiftStart = new Date(session.bookedOnAt || now);
-      // Window 2: randomly between 6.5h and 10h from bookedOnAt
-      nextPrompt = new Date(shiftStart.getTime() + (6.5 + Math.random() * 3.5) * HOUR);
-      if (session.scheduledEndAt && nextPrompt >= session.scheduledEndAt) {
-        nextPrompt = new Date(session.scheduledEndAt.getTime() - (1 + Math.random() * 1.5) * HOUR);
-      }
-      if (nextPrompt <= now) {
-        nextPrompt = new Date(now.getTime() + (2 + Math.random() * 2.5) * HOUR);
+    if (sessionCount === 0 && dayNightPromptCount + 1 < 2) {
+      // Must be at least 4.5 hours after Prompt 1 to spread across whole 12h duty
+      nextPrompt = new Date(now.getTime() + (4.5 + Math.random() * 2.0) * HOUR);
+      // Ensure it doesn't exceed shift end (must be at least 45 mins before shift ends)
+      if (session.scheduledEndAt && nextPrompt >= new Date(session.scheduledEndAt.getTime() - 45 * 60 * 1000)) {
+        nextPrompt = null;
       }
     }
 
     await ShiftSession.updateOne(
       { _id: session._id },
       {
-        $inc: { randomPromptCount: 1 },
-        $set: { nextRandomPromptAt: nextPrompt }
+        $set: {
+          randomPromptCount: sessionCount + 1,
+          nextRandomPromptAt: nextPrompt
+        }
       }
     );
 
@@ -187,22 +189,28 @@ async function scheduleMissingRandomPrompts(now = new Date()) {
   const sessions = await ShiftSession.find({
     bookedOffAt: null,
     nextRandomPromptAt: null,
-    $or: [{ randomPromptCount: { $lt: 2 } }, { randomPromptCount: { $exists: false } }]
   }).limit(100);
 
   for (const session of sessions) {
     if (session.scheduledEndAt && now >= session.scheduledEndAt) continue;
-    const currentCount = session.randomPromptCount || 0;
+
+    // Source of truth: count prompts already fired for this shift session
+    const sessionLogs = await RandomPromptLog.find({ shiftSessionId: session._id }).sort({ triggeredAt: 1 });
+    const sessionCount = sessionLogs.length;
+
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * HOUR);
     const dayNightPromptCount = await RandomPromptLog.countDocuments({
       guardId: session.guardId,
       triggeredAt: { $gte: twentyFourHoursAgo }
     });
-    if (currentCount >= 2 || dayNightPromptCount >= 2) {
+
+    // If 2 prompts already given in this shift session or in 24h, do NOT schedule any more!
+    if (sessionCount >= 2 || dayNightPromptCount >= 2) {
       await ShiftSession.updateOne({ _id: session._id }, { $set: { nextRandomPromptAt: null, randomPromptCount: 2 } });
       continue;
     }
 
+    // If there is currently an active prompt waiting for response, do nothing
     const activePrompt = await RandomPromptLog.exists({
       shiftSessionId: session._id,
       responded: false,
@@ -211,29 +219,38 @@ async function scheduleMissingRandomPrompts(now = new Date()) {
     if (activePrompt) continue;
 
     const shiftStart = new Date(session.bookedOnAt || now);
-    let nextPrompt;
-    if (currentCount === 0) {
-      // First prompt: between 1.5h and 4.5h from bookedOnAt
-      nextPrompt = new Date(shiftStart.getTime() + (1.5 + Math.random() * 3.0) * HOUR);
+    let nextPrompt = null;
+
+    if (sessionCount === 0) {
+      // First prompt: between 2.5h and 4.5h from bookedOnAt
+      nextPrompt = new Date(shiftStart.getTime() + (2.5 + Math.random() * 2.0) * HOUR);
       if (nextPrompt <= now) {
-        nextPrompt = new Date(now.getTime() + (20 + Math.random() * 40) * 60 * 1000);
+        nextPrompt = new Date(now.getTime() + (30 + Math.random() * 30) * 60 * 1000);
       }
-    } else {
-      // Second prompt: between 6.5h and 10h from bookedOnAt
-      nextPrompt = new Date(shiftStart.getTime() + (6.5 + Math.random() * 3.5) * HOUR);
-      if (nextPrompt <= now) {
-        nextPrompt = new Date(now.getTime() + (45 + Math.random() * 60) * 60 * 1000);
-      }
+    } else if (sessionCount === 1) {
+      // Second prompt: MUST be at least 4.5 hours after the first prompt!
+      const firstTriggeredAt = sessionLogs[0].triggeredAt.getTime();
+      const minSpacing = 4.5 * HOUR;
+      nextPrompt = new Date(Math.max(
+        firstTriggeredAt + minSpacing,
+        now.getTime() + (45 + Math.random() * 45) * 60 * 1000
+      ));
     }
 
-    if (session.scheduledEndAt && nextPrompt >= session.scheduledEndAt) {
-      nextPrompt = new Date(session.scheduledEndAt.getTime() - 30 * 60 * 1000);
+    // Must be at least 45 mins before shift end
+    if (session.scheduledEndAt && nextPrompt >= new Date(session.scheduledEndAt.getTime() - 45 * 60 * 1000)) {
+      nextPrompt = null;
     }
 
-    if (nextPrompt > now) {
+    if (nextPrompt && nextPrompt > now) {
       await ShiftSession.updateOne(
         { _id: session._id, bookedOffAt: null, nextRandomPromptAt: null },
         { $set: { nextRandomPromptAt: nextPrompt } }
+      );
+    } else if (!nextPrompt) {
+      await ShiftSession.updateOne(
+        { _id: session._id },
+        { $set: { nextRandomPromptAt: null, randomPromptCount: 2 } }
       );
     }
   }

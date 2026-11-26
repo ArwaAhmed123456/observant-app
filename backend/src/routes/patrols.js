@@ -187,7 +187,6 @@ router.post('/start',
       startedAt:           new Date(),
       triggeredByAntiIdle: Boolean(activePrompt),
     });
-    await ShiftSession.findByIdAndUpdate(session._id, { $set: { nextRandomPromptAt: null } });
     if (activePrompt) {
       activePrompt.responded = true;
       activePrompt.respondedAt = new Date();
