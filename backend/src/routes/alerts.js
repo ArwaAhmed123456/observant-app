@@ -25,12 +25,15 @@ router.get('/', authenticate, requireRole('manager','admin'),
       type: type || { $nin: ['random_prompt_ignored'] },
     };
     if (req.user.role === 'manager') {
-      filter.managerIds = req.user._id;
       if (siteId) {
         if (!req.user.managedSiteIds.some(id => String(id) === String(siteId))) return res.status(403).json({ error: 'Site is outside your assigned area.' });
         filter.siteId = siteId;
+        filter.managerIds = req.user._id;
       } else {
-        filter.siteId = { $in: req.user.managedSiteIds };
+        filter.$or = [
+          { managerIds: req.user._id },
+          { siteId: { $in: req.user.managedSiteIds } }
+        ];
       }
     } else if (siteId) {
       filter.siteId = siteId;

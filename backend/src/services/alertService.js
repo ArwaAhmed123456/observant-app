@@ -32,15 +32,37 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
       ...(siteManagerId ? [{ _id: siteManagerId }] : []),
       { role: 'admin' },
     ],
-  }).select('_id fcmToken name email notificationPreferences role');
+  }).select('_id fcmToken name email notificationPreferences role managedSiteIds siteId');
 
-  // Fallback: if no site-specific manager configured, notify admins only
+  // Fallback 1: if no site-specific manager configured, find active managers / admins
   if (!managers.length) {
     managers = await User.find({
       organisationId,
       active: true,
-      role: 'admin',
+      role: { $in: ['admin', 'manager'] },
     }).select('_id fcmToken name email notificationPreferences role managedSiteIds siteId');
+  }
+
+  // Fallback 2: Check if ANY matched manager actually has an active push token.
+  // If no matched manager has an active push token (e.g. site manager has not logged into the mobile app),
+  // fallback to all active managers/admins in the company who DO have active push tokens so alerts are never lost!
+  let pushManagers = managers.filter(manager => !!manager.fcmToken);
+  if (!pushManagers.length) {
+    const orgManagersWithPush = await User.find({
+      organisationId,
+      active: true,
+      role: { $in: ['manager', 'admin'] },
+      fcmToken: { $ne: null, $exists: true },
+    }).select('_id fcmToken name email notificationPreferences role managedSiteIds siteId');
+
+    if (orgManagersWithPush.length) {
+      pushManagers = orgManagersWithPush;
+      for (const om of orgManagersWithPush) {
+        if (!managers.some(m => m._id.toString() === om._id.toString())) {
+          managers.push(om);
+        }
+      }
+    }
   }
 
   const managerIds = managers.map(m => m._id);
@@ -90,7 +112,6 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
 
   // All issue alert types: check call missed, check call issue, surprise patrol missed,
   // guard not arrived / not on duty, early sign out / logout, incomplete patrol, SOS
-  const pushManagers = managers.filter(manager => !!manager.fcmToken);
   if (pushManagers.length) {
     try {
       await fcm.notifyManagers(alert, pushManagers);

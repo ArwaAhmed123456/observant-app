@@ -412,6 +412,9 @@ router.post('/sites',
       notes: notes || null,
     });
     await User.findByIdAndUpdate(managerId, { $addToSet: { managedSiteIds: site._id } });
+    if (req.user && req.user._id && req.user._id.toString() !== managerId.toString()) {
+      await User.findByIdAndUpdate(req.user._id, { $addToSet: { managedSiteIds: site._id } });
+    }
     await audit({ req, action: 'site_created', targetModel: 'Site', targetId: site._id, targetName: site.name });
     res.status(201).json({ site, what3wordsLookupUnavailable: Boolean(latNum != null && lngNum != null && !finalW3w) });
   })
