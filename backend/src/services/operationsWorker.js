@@ -306,14 +306,29 @@ async function checkLateArrivals(now = new Date()) {
   const weekStart = getMondayOfWeek(now);
   const currentDay = dayKey(now);
 
-  const rosters = await ShiftRoster.find({
+  const rawRosters = await ShiftRoster.find({
     acceptanceStatus: { $ne: 'rejected' },
     $or: [
       { weekStartDate: weekStart },
       { recurringWeekly: true }
     ]
-  }).limit(200);
+  }).sort({ weekStartDate: -1 }).limit(300);
 
+  // Group by guardId + siteId: prioritize current week's roster, otherwise latest recurring
+  const rosterMap = new Map();
+  for (const r of rawRosters) {
+    const key = `${r.guardId}_${r.siteId}`;
+    if (!rosterMap.has(key)) {
+      rosterMap.set(key, r);
+    } else {
+      const existing = rosterMap.get(key);
+      if (existing.weekStartDate !== weekStart && r.weekStartDate === weekStart) {
+        rosterMap.set(key, r);
+      }
+    }
+  }
+
+  const rosters = Array.from(rosterMap.values());
   const startOfDay = new Date(now);
   startOfDay.setHours(0, 0, 0, 0);
 
@@ -354,17 +369,17 @@ async function checkLateArrivals(now = new Date()) {
     });
     if (bookedLate) continue;
 
-    // Check if we already alerted the manager for this guard in the last 60 minutes
+    // Check if we already alerted the manager for this guard in the last 30 minutes
     const recentAlert = await Alert.findOne({
       organisationId: roster.organisationId,
       guardId: roster.guardId,
       siteId: roster.siteId,
       type: 'guard_not_arrived',
-      createdAt: { $gte: new Date(now.getTime() - 60 * 60 * 1000) }
+      createdAt: { $gte: new Date(now.getTime() - 30 * 60 * 1000) }
     });
     if (recentAlert) continue;
 
-    const diffMins = Math.round((now.getTime() - shiftStartAt.getTime()) / 60000);
+    const diffMins = Math.max(0, Math.round((now.getTime() - shiftStartAt.getTime()) / 60000));
     try {
       const [guard, site] = await Promise.all([
         User.findById(roster.guardId).select('name badgeNumber'),
@@ -377,8 +392,8 @@ async function checkLateArrivals(now = new Date()) {
         siteId: roster.siteId,
         guardId: roster.guardId,
         type: 'guard_not_arrived',
-        title: '🚨 Guard did not booked on',
-        message: `${guardStr} was supposed to be booked on at ${todayShift.start} at ${siteStr} but did not.${diffMins > 0 ? ` Currently ${diffMins} min overdue.` : ''}`,
+        title: '🚨 Guard did not book on',
+        message: `Hey, ${guardStr} did not book on while their shift started at ${todayShift.start} at ${siteStr}.${diffMins > 0 ? ` Currently ${diffMins} min overdue.` : ''}`,
         refModel: 'ShiftRoster',
         refId: roster._id,
       });

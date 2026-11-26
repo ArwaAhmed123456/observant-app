@@ -11,10 +11,12 @@ const router = require('express').Router();
 const { Alert } = require('../models');
 const { authenticate, requireRole } = require('../middleware/auth');
 const asyncHandler = require('../utils/asyncHandler');
+const { checkLateArrivals } = require('../services/operationsWorker');
 
 // ── List alerts ───────────────────────────────────────────────────────────────
 router.get('/', authenticate, requireRole('manager','admin'),
   asyncHandler(async (req, res) => {
+    checkLateArrivals().catch(e => console.error('[alerts] checkLateArrivals error:', e.message));
     const { type, siteId, read, limit = 50, page = 1 } = req.query;
     const orgId = req.user.organisationId;
 

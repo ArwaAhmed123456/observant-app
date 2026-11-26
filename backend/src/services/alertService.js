@@ -92,9 +92,11 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
   // guard not arrived / not on duty, early sign out / logout, incomplete patrol, SOS
   const pushManagers = managers.filter(manager => !!manager.fcmToken);
   if (pushManagers.length) {
-    fcm.notifyManagers(alert, pushManagers).catch(err =>
-      console.error('[alertService] FCM error:', err.message)
-    );
+    try {
+      await fcm.notifyManagers(alert, pushManagers);
+    } catch (err) {
+      console.error('[alertService] FCM error:', err.message);
+    }
   }
   sendIncidentAlertEmail(alert, managers).catch(err =>
     console.error('[alertService] Incident email error:', err.message)
