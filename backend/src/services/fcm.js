@@ -13,7 +13,7 @@ async function sendPush(tokens, { title, body, data = {} }) {
       data: Object.fromEntries(Object.entries(data).map(([key, value]) => [key, String(value)])),
       sound: 'default',
       priority: 'high',
-      channelId: 'observant_alerts',
+      channelId: 'observant_alerts_v2',
       _displayInForeground: true,
       badge: 1,
     }));

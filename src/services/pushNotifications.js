@@ -18,6 +18,18 @@ export async function registerPushNotifications() {
   try {
     if (Platform.OS === 'android') {
       // Android requires an explicit channel with sound + max importance
+      await Notifications.setNotificationChannelAsync('observant_alerts_v2', {
+        name: 'Urgent Security Alerts',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 300, 200, 300],
+        sound: 'default',
+        enableVibrate: true,
+        showBadge: true,
+        enableLights: true,
+        lightColor: '#EF4444',
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        bypassDnd: true,
+      });
       await Notifications.setNotificationChannelAsync('observant_alerts', {
         name: 'Security operations alerts',
         importance: Notifications.AndroidImportance.MAX,

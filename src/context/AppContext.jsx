@@ -202,6 +202,8 @@ export function AppProvider({ children }) {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  const refreshOperationsRef = useRef(null);
+
   // Register after sign-in/session restore, refresh a rolled token, and retry
   // after the app returns to the foreground.
   useEffect(() => {
@@ -222,16 +224,32 @@ export function AppProvider({ children }) {
     const appStateSubscription = AppState.addEventListener('change', state => {
       if (state === 'active') register();
     });
+
+    // Handle notifications received in the foreground: show immediate in-app Alert modal and refresh
+    const receivedSubscription = Notifications.addNotificationReceivedListener(notification => {
+      const content = notification?.request?.content;
+      if (content?.title || content?.body) {
+        Alert.alert(content.title || 'Security Alert', content.body || '', [{ text: 'OK' }]);
+      }
+      refreshOperationsRef.current?.();
+    });
+    const responseSubscription = Notifications.addNotificationResponseReceivedListener(() => {
+      refreshOperationsRef.current?.();
+    });
+
     return () => {
       mounted = false;
       tokenSubscription.remove();
       appStateSubscription.remove();
+      receivedSubscription.remove();
+      responseSubscription.remove();
     };
   }, [currentUser?.id]);
 
   useEffect(() => {
     if (!API_ENABLED || !currentUser) return undefined;
     const refreshOperations = async () => {
+      refreshOperationsRef.current = refreshOperations;
       try {
         const [shifts, calls, patrols, alerts, prompts, rostersResult, checkpointsResult] = await Promise.all([
           apiGet('/api/shifts?limit=500'),
