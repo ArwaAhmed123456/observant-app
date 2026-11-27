@@ -128,18 +128,25 @@ export async function apiRequest(path, options = {}, retry = true) {
   // Render free-tier cold-starts can take 20-30 seconds; this keeps retrying
   // over that window before surfacing an error to the user.
   const maxAttempts = 4;
-  const delays = [3000, 7000, 15000]; // waits between retries: 3s, 7s, 15s
+  const delays = [2000, 4000, 8000]; // waits between retries: 2s, 4s, 8s
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       response = await sendRequest(`${API_BASE_URL}${path}`, { ...options, headers }, isFormData);
-      break; // success — exit retry loop
+      // Retry transient server errors (Render cold start 502/503/504, request timeout 408, or rate limit 429)
+      if (response && (response.status >= 500 || response.status === 408 || response.status === 429)) {
+        if (attempt < maxAttempts) {
+          throw new Error(`Server returned temporary status ${response.status}`);
+        }
+      }
+      break; // success or standard client error — exit retry loop
     } catch (error) {
       if (attempt === maxAttempts) {
+        if (response) break;
         const cause = error?.message ? ` (${error.message})` : '';
-        throw new Error(`Cannot reach the Observant server at ${API_BASE_URL}. Check the server URL and connection.${cause}`);
+        throw new Error(`Cannot reach the Observant server at ${API_BASE_URL}. Check your connection.${cause}`);
       }
-      // Progressive wait to ride out a Render cold-start (the server wakes in ~20s)
-      await new Promise(resolve => setTimeout(resolve, delays[attempt - 1] || 15000));
+      // Progressive wait to ride out network glitches or Render cold-start
+      await new Promise(resolve => setTimeout(resolve, delays[attempt - 1] || 8000));
     }
   }
 

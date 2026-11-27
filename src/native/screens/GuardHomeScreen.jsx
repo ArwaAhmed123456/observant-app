@@ -25,6 +25,7 @@ import {
 } from '../../ds';
 import { enqueue } from '../../services/offlineQueue';
 import { apiPost } from '../../services/api';
+import { registerPushNotifications } from '../../services/pushNotifications';
 import { getUKDayKey, getUKDateKey } from '../../utils/scheduleDates';
 
 function ukWallClockToDate(dateKey, time) {
@@ -125,6 +126,11 @@ export function GuardHomeScreen({ navigation }) {
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(t);
+  }, []);
+
+  // ── Ensure push notification token is registered on screen mount ──────────
+  useEffect(() => {
+    registerPushNotifications().catch(() => {});
   }, []);
 
   // ── Clock glow pulse while on shift ──────────────────────────────────────
@@ -544,7 +550,21 @@ export function GuardHomeScreen({ navigation }) {
                     <Text style={s.nextUpLabel}>PATROL TOUR</Text>
                   </View>
                   <Text style={s.nextUpValue}>
-                    {donePatrols === 0 ? 'Now Due' : `~${Math.max(5, 60 - Math.floor((Date.now() - new Date(todayPatrols[todayPatrols.length-1]?.startedAt||Date.now()).getTime()) / 60000))}m`}
+                    {(() => {
+                      const now = new Date();
+                      const currentHour = now.getHours();
+                      const completedThisHour = todayPatrols.some(p => {
+                        if (!p.finishedAt) return false;
+                        const d = new Date(p.finishedAt);
+                        return d.toDateString() === now.toDateString() && d.getHours() === currentHour;
+                      });
+                      if (!completedThisHour || donePatrols === 0) return 'Now Due';
+                      const nextHour = new Date(now);
+                      nextHour.setHours(currentHour + 1, 0, 0, 0);
+                      const minsLeft = Math.max(1, Math.round((nextHour.getTime() - now.getTime()) / 60000));
+                      const timeStr = nextHour.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      return `${timeStr} (${minsLeft}m)`;
+                    })()}
                   </Text>
                   <Text style={s.nextUpSub}>{site?.name ? `${site.name.slice(0, 14)}…` : 'Active site'}</Text>
                 </View>

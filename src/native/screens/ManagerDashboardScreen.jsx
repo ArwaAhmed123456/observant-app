@@ -1,10 +1,11 @@
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert,
   Modal, TextInput, KeyboardAvoidingView, Platform, Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useApp, formatTime } from '../../context/AppContext';
+import { registerPushNotifications } from '../../services/pushNotifications';
 import { LogOut, Bell, MapPin, CheckCircle, AlertTriangle, Clock, Users, Zap, ClipboardList, Shield, PlusCircle, ChevronRight, X, Trash2, Camera } from 'lucide-react-native';
 import { AppHeader } from '../components/AppHeader';
 import { StatusTile } from '../components/StatusTile';
@@ -28,6 +29,10 @@ export function ManagerDashboardScreen({ navigation }) {
   } = useApp();
 
   const [tab, setTab] = useState('overview');
+
+  useEffect(() => {
+    registerPushNotifications().catch(() => {});
+  }, []);
 
   // Alert detail modal
   const [selectedAlert, setSelectedAlert] = useState(null);

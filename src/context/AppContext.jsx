@@ -380,6 +380,11 @@ export function AppProvider({ children }) {
           console.warn('[Login] Snapshot hydration fallback:', snapshotErr.message);
         }
 
+        // Immediately register push token on successful login
+        registerPushNotifications().catch(pushErr =>
+          console.warn('[Login] Immediate push token registration warning:', pushErr.message)
+        );
+
         return { success: true, user };
       } catch (error) {
         await setTokens(null);
@@ -1548,7 +1553,9 @@ export function AppProvider({ children }) {
     if (API_ENABLED) return;
 
     const base = lastPatrolEndTime ? new Date(lastPatrolEndTime) : new Date();
-    const nextPatrolAt = new Date(base.getTime() + PATROL_INTERVAL_MS);
+    // Schedule next patrol at the beginning of the following hour (e.g. 8:10 -> 9:00:00)
+    const nextPatrolAt = new Date(base);
+    nextPatrolAt.setHours(nextPatrolAt.getHours() + 1, 0, 0, 0);
     const antiIdleDelay = ANTI_IDLE_MIN_MS + Math.random() * (ANTI_IDLE_MAX_MS - ANTI_IDLE_MIN_MS);
 
     // Anti-idle: random prompt between 10-30 min after the last patrol (or shift start).
@@ -1656,10 +1663,8 @@ export function AppProvider({ children }) {
         setActivePatrol(saved);
         return saved.captures?.[saved.captures.length - 1];
       } catch (err) {
-        // If server is unreachable, fall through to local storage so patrol can continue offline
-        const isNetworkError = err?.message?.includes('Cannot reach') || err?.message?.includes('Network') || err?.message?.includes('fetch');
-        if (!isNetworkError) throw err;
-        // Fall through to local path below
+        console.warn('[Patrol] Live upload failed, saving evidence locally so guard never has to retake:', err.message);
+        // Fall through to local offline storage below so photo is NEVER lost!
       }
     }
     const capture = {

@@ -73,7 +73,10 @@ async function sendPush(tokens, { title, body, data = {} }) {
 }
 
 async function notifyManagers(alertDoc, managerUsers) {
-  const result = await sendPush(managerUsers.map(user => user.fcmToken).filter(Boolean), {
+  // Strictly enforce role separation: manager alerts only go to managers and admins
+  const validManagers = managerUsers.filter(user => user.role !== 'guard');
+  const tokens = validManagers.map(user => user.fcmToken).filter(Boolean);
+  const result = await sendPush(tokens, {
     title: alertDoc.title,
     body: alertDoc.message,
     data: {

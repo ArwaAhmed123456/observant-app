@@ -2,7 +2,7 @@ const jwt    = require('jsonwebtoken');
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 
-const ACCESS_EXPIRES  = process.env.JWT_ACCESS_EXPIRES  || '15m';
+const ACCESS_EXPIRES  = process.env.JWT_ACCESS_EXPIRES  || '24h';
 const REFRESH_EXPIRES = process.env.JWT_REFRESH_EXPIRES || '30d';
 
 function signAccess(userId, role, organisationId) {

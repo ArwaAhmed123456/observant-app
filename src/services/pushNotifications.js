@@ -3,6 +3,8 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { apiPatch } from './api';
 
+const EAS_PROJECT_ID = '186f259e-7f65-45b0-85ca-77788730578a';
+
 // Controls how notifications are handled when the app is in the FOREGROUND
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -72,13 +74,16 @@ export async function registerPushNotifications() {
     }
 
     const projectId = Constants.easConfig?.projectId
-      || Constants.expoConfig?.extra?.eas?.projectId;
-    const token = await Notifications.getExpoPushTokenAsync(
-      projectId ? { projectId } : undefined
-    );
+      || Constants.expoConfig?.extra?.eas?.projectId
+      || EAS_PROJECT_ID;
 
-    // Save the token to the server so alerts can reach this device
-    await apiPatch('/api/auth/me/fcm-token', { fcmToken: token.data });
+    const token = await Notifications.getExpoPushTokenAsync({ projectId });
+
+    if (token?.data) {
+      // Save the token to the server so alerts can reach this device
+      await apiPatch('/api/auth/me/fcm-token', { fcmToken: token.data });
+      console.log('[Observant] Push token successfully registered on server:', token.data);
+    }
     return true;
   } catch (error) {
     console.warn('[Observant] Push registration failed:', error.message);

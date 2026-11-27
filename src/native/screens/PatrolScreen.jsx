@@ -233,6 +233,15 @@ export function PatrolScreen() {
     return (!checkpoint.required || hasPhoto) && (!checkpoint.nfcRequired || hasNfc);
   }).length;
   const progress = checkpoints.length > 0 ? completedCount / checkpoints.length : 0;
+  const currentHour = new Date(now).getHours();
+  const completedThisHour = todayPatrols.some(p => {
+    if (!p.finishedAt) return false;
+    const d = new Date(p.finishedAt);
+    return d.toDateString() === new Date(now).toDateString() && d.getHours() === currentHour;
+  });
+  const nextHourDate = new Date(now);
+  nextHourDate.setHours(currentHour + 1, 0, 0, 0);
+  const nextHourStr = nextHourDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   const pendingPrompt = useMemo(() => [...(randomPromptLogs || [])].reverse().find(log =>
     !log.responded && !log.managerAlerted && log.sessionId === activeSession?.id
   ), [randomPromptLogs, activeSession?.id]);
@@ -522,6 +531,14 @@ export function PatrolScreen() {
             <View style={styles.startGlow} />
             <View style={styles.startIcon}><Navigation size={21} color={P.blue} /></View>
             <Text style={styles.startHeading}>{antiIdlePrompt ? 'Surprise patrol requested' : 'Ready to patrol?'}</Text>
+            <View style={[styles.hourlyScheduleBadge, completedThisHour && styles.hourlyScheduleDone]}>
+              <Clock3 size={13} color={completedThisHour ? P.ok : P.gold} />
+              <Text style={[styles.hourlyScheduleTxt, completedThisHour && styles.hourlyScheduleTxtDone]}>
+                {completedThisHour
+                  ? `Current hour complete · Next patrol starts at ${nextHourStr}`
+                  : `Hourly patrol due for current hour (${String(currentHour).padStart(2, '0')}:00 – ${nextHourStr})`}
+              </Text>
+            </View>
             <Text style={styles.startDescription}>Follow your assigned route, scan required NFC cards, and capture the site photos requested by your manager.</Text>
             <View style={styles.startMeta}><View style={styles.metaItem}><Radio size={14} color={P.blue} /><Text style={styles.metaText}>NFC verified</Text></View><View style={styles.metaItem}><Camera size={14} color={P.goldDark} /><Text style={styles.metaText}>Photo evidence</Text></View></View>
 
@@ -672,6 +689,10 @@ const styles = StyleSheet.create({
   startGlow: { position: 'absolute', width: 190, height: 190, borderRadius: 100, backgroundColor: P.blueSubtle, top: -100, right: -40 },
   startIcon: { width: 52, height: 52, borderRadius: 17, backgroundColor: P.infoSubtle, borderWidth: 1, borderColor: P.infoBorder, alignItems: 'center', justifyContent: 'center', marginBottom: SP.px12 },
   startHeading: { color: P.t1, fontSize: 19, fontWeight: '800' },
+  hourlyScheduleBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: P.goldSubtle, paddingHorizontal: 10, paddingVertical: 5, borderRadius: BR.full, borderWidth: 1, borderColor: P.goldBorder, marginTop: 8 },
+  hourlyScheduleDone: { backgroundColor: P.okSubtle, borderColor: P.okBorder },
+  hourlyScheduleTxt: { color: P.goldDark, fontSize: 11, fontWeight: '700' },
+  hourlyScheduleTxtDone: { color: P.ok },
   startDescription: { color: P.t3, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 8 },
   startMeta: { flexDirection: 'row', gap: 18, marginTop: SP.px16, marginBottom: SP.px16 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },

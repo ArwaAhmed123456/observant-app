@@ -467,9 +467,10 @@ export const SecurityProvider = ({ children }) => {
 
     sounds.playSuccessChime();
 
-    // DYNAMIC PATROL SLOT SHIFTING
-    // If completed, next scheduled patrol slot shifts forward ~1 hour from completion time!
-    const nextSlot = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    // NEXT PATROL: Starts at the beginning of the following hour (e.g. 8:10 -> 9:00:00)
+    const nextHourDate = new Date();
+    nextHourDate.setHours(nextHourDate.getHours() + 1, 0, 0, 0);
+    const nextSlot = nextHourDate.toISOString();
     setExpectedPatrolSlots(prev => ({
       ...prev,
       [activePatrolSession.siteId]: nextSlot

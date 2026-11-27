@@ -5,13 +5,19 @@ const { Readable } = require('stream');
 const BUCKET = 'observantMedia';
 
 function fileFilter(_req, file, done) {
-  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.mimetype)) return done(new Error('Only JPEG, PNG, or WebP images are accepted.'));
+  const mime = (file.mimetype || '').toLowerCase();
+  const name = (file.originalname || '').toLowerCase();
+  const allowedMimes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/pjpeg', 'application/octet-stream'];
+  const hasAllowedExt = /\.(jpe?g|png|webp)$/i.test(name);
+  if (!allowedMimes.includes(mime) && !hasAllowedExt && !mime.startsWith('image/')) {
+    return done(new Error('Only JPEG, PNG, or WebP images are accepted.'));
+  }
   done(null, true);
 }
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 }, fileFilter });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 1 }, fileFilter });
 const uploadAvatar = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  limits: { fileSize: 10 * 1024 * 1024, files: 1 },
   fileFilter,
 });
 
@@ -23,8 +29,12 @@ function bucket() {
 async function saveImage(file, metadata) {
   if (!file?.buffer) throw new Error('An image file is required.');
   const grid = bucket();
+  let contentType = file.mimetype;
+  if (!contentType || contentType === 'application/octet-stream') {
+    contentType = 'image/jpeg';
+  }
   const uploadStream = grid.openUploadStream(file.originalname || 'patrol.jpg', {
-    contentType: file.mimetype,
+    contentType,
     metadata,
   });
   await new Promise((resolve, reject) => {

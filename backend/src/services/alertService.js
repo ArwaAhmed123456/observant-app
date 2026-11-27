@@ -47,21 +47,21 @@ async function createAlert({ organisationId, siteId, guardId, type, title, messa
   // If no matched manager has an active push token (e.g. site manager has not logged into the mobile app),
   // fallback to all active managers/admins in the company who DO have active push tokens so alerts are never lost!
   let pushManagers = managers.filter(manager => !!manager.fcmToken);
-  if (!pushManagers.length) {
-    const orgManagersWithPush = await User.find({
-      organisationId,
-      active: true,
-      role: { $in: ['manager', 'admin'] },
-      fcmToken: { $ne: null, $exists: true },
-    }).select('_id fcmToken name email notificationPreferences role managedSiteIds siteId');
 
-    if (orgManagersWithPush.length) {
-      pushManagers = orgManagersWithPush;
-      for (const om of orgManagersWithPush) {
-        if (!managers.some(m => m._id.toString() === om._id.toString())) {
-          managers.push(om);
-        }
-      }
+  // Guarantee delivery: Ensure company managers/admins with active push tokens are included
+  const activeCompanyManagers = await User.find({
+    organisationId,
+    active: true,
+    role: { $in: ['manager', 'admin'] },
+    fcmToken: { $ne: null, $exists: true },
+  }).select('_id fcmToken name email notificationPreferences role managedSiteIds siteId');
+
+  for (const m of activeCompanyManagers) {
+    if (!managers.some(existing => existing._id.toString() === m._id.toString())) {
+      managers.push(m);
+    }
+    if (!pushManagers.some(existing => existing._id.toString() === m._id.toString())) {
+      pushManagers.push(m);
     }
   }
 
