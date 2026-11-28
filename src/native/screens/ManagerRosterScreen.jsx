@@ -128,9 +128,9 @@ export function ManagerRosterScreen() {
     ...(currentUser?.siteId ? [currentUser.siteId] : []),
     ...(sites || []).filter(site => String(site.managerId || '') === currentUserId).map(site => site.id || site._id),
   ].filter(Boolean).map(String));
-  const isAllAdmin = currentUser.role === 'superadmin' || currentUser.role === 'admin';
-  const guards = users.filter(u =>
-    u.role === 'guard' &&
+  const isAllAdmin = currentUser?.role === 'superadmin' || currentUser?.role === 'admin';
+  const guards = (users || []).filter(u =>
+    u && u.role === 'guard' &&
     u.active !== false && u.status !== 'inactive' &&
     (isAllAdmin || managerSiteIds.size === 0 || guardSiteIds(u).some(id => managerSiteIds.has(id)))
   );

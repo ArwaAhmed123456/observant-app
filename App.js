@@ -119,7 +119,12 @@ function ManagerStack() {
 function ManagerTabs() {
   const { getUnreadAlerts, currentUser } = useApp();
   const insets = useSafeAreaInsets();
-  const unreadCount = getUnreadAlerts(currentUser?.id || currentUser?._id)?.length || 0;
+  let unreadCount = 0;
+  try {
+    unreadCount = typeof getUnreadAlerts === 'function' ? (getUnreadAlerts(currentUser?.id || currentUser?._id)?.length || 0) : 0;
+  } catch (err) {
+    unreadCount = 0;
+  }
   return (
     <Tab.Navigator initialRouteName="Dashboard" screenOptions={tabScreenOptions(insets)}>
       <Tab.Screen

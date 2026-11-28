@@ -370,16 +370,44 @@ export const SecurityProvider = ({ children }) => {
     });
   };
 
+  // 10. RESPOND TO SURPRISE PATROL PROMPT
+  const respondSurprisePatrol = (accepted, patrolSessionId = null) => {
+    if (!pendingSurprisePatrol) return;
+
+    const triggerMs = new Date(pendingSurprisePatrol.triggerTime).getTime();
+    const latencySec = Math.round((Date.now() - triggerMs) / 1000);
+
+    const logEntry = {
+      id: `ail-${Date.now()}`,
+      guardId: pendingSurprisePatrol.guardId,
+      siteId: pendingSurprisePatrol.siteId,
+      patrolSessionId,
+      triggerTime: pendingSurprisePatrol.triggerTime,
+      promptType: 'Surprise Anti-Idle Patrol Alert',
+      gapIntervalMinutes: pendingSurprisePatrol.promptGapMinutes,
+      responded: accepted,
+      responseLatencySeconds: accepted ? latencySec : null,
+      dynamicSlotShifted: accepted,
+      newNextPatrolTime: accepted ? new Date(Date.now() + 3600000).toISOString() : null,
+      notes: accepted
+        ? `Guard accepted early surprise patrol in ${latencySec}s. Next slot shifted forward 1 hour.`
+        : 'Guard ignored or dismissed surprise patrol prompt. Regular top-of-hour schedule retained.'
+    };
+
+    setAntiIdleLogs(prev => [logEntry, ...prev]);
+    setPendingSurprisePatrol(null);
+  };
+
   // 6. PATROLLING MODULE: START PATROL
   const startPatrol = (siteId = null) => {
-    const assignedSite = siteId || activeShiftSession?.siteId || currentUser.assignedSiteId || 'site-1';
+    const assignedSite = siteId || activeShiftSession?.siteId || currentUser?.assignedSiteId || 'site-1';
     const siteObj = sites.find(s => s.id === assignedSite);
     const checkpoints = siteObj?.requiredCheckpoints || [];
 
     const newPatrol = {
       id: `patrol-${Date.now()}`,
       sessionId: activeShiftSession?.id || 'adhoc-session',
-      guardId: currentUser.id,
+      guardId: currentUser?.id,
       siteId: assignedSite,
       startTime: new Date().toISOString(),
       endTime: null,
@@ -523,34 +551,6 @@ export const SecurityProvider = ({ children }) => {
     });
 
     return surprisePrompt;
-  };
-
-  // 10. RESPOND TO SURPRISE PATROL PROMPT
-  const respondSurprisePatrol = (accepted, patrolSessionId = null) => {
-    if (!pendingSurprisePatrol) return;
-
-    const triggerMs = new Date(pendingSurprisePatrol.triggerTime).getTime();
-    const latencySec = Math.round((Date.now() - triggerMs) / 1000);
-
-    const logEntry = {
-      id: `ail-${Date.now()}`,
-      guardId: pendingSurprisePatrol.guardId,
-      siteId: pendingSurprisePatrol.siteId,
-      patrolSessionId,
-      triggerTime: pendingSurprisePatrol.triggerTime,
-      promptType: 'Surprise Anti-Idle Patrol Alert',
-      gapIntervalMinutes: pendingSurprisePatrol.promptGapMinutes,
-      responded: accepted,
-      responseLatencySeconds: accepted ? latencySec : null,
-      dynamicSlotShifted: accepted,
-      newNextPatrolTime: accepted ? new Date(Date.now() + 3600000).toISOString() : null,
-      notes: accepted
-        ? `Guard accepted early surprise patrol in ${latencySec}s. Next slot shifted forward 1 hour.`
-        : 'Guard ignored or dismissed surprise patrol prompt. Regular top-of-hour schedule retained.'
-    };
-
-    setAntiIdleLogs(prev => [logEntry, ...prev]);
-    setPendingSurprisePatrol(null);
   };
 
   // 11. SHIFT-END REMINDER (10 min before end)

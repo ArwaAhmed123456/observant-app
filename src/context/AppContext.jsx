@@ -348,30 +348,35 @@ export function AppProvider({ children }) {
     return newEntry;
   }, [currentUser]);
 
+  // ─── Helpers ──────────────────────────────────────────────────────────────
+  const clearAllTimers = () => {
+    [checkCallTimerRef, checkCallExpireRef, patrolTimerRef, antiIdleTimerRef, shiftEndTimerRef]
+      .forEach(r => { if (r?.current) { clearTimeout(r.current); r.current = null; } });
+  };
+
   // ─── Auth ─────────────────────────────────────────────────────────────────
   const login = useCallback(async (email, password) => {
     if (API_ENABLED) {
+      setAuthLoading(true);
       try {
         const response = await apiPost('/api/auth/login', { email: email.trim().toLowerCase(), password });
         await setTokens({ accessToken: response.accessToken, refreshToken: response.refreshToken });
         const user = normalizeUser(response.user);
-        setCurrentUser(user);
         await save(KEYS.CURRENT_USER_ID, user.id);
 
         try {
           const snapshot = await loadRemoteSnapshot(user);
-          setUsers(snapshot.users); setSites(snapshot.sites); setCheckpoints(snapshot.checkpoints);
-          setShiftSessions(snapshot.shiftSessions); setCheckCalls(snapshot.checkCalls);
-          setPatrolSessions(snapshot.patrolSessions); setPatrolCaptures(snapshot.patrolCaptures);
-          setRosters(snapshot.rosters); setAlerts(snapshot.alerts); setRosterTemplates(snapshot.rosterTemplates);
-          setAuditLogs(snapshot.auditLogs);
-          const activeSession = snapshot.shiftSessions.find(item => item.guardId === user.id && !item.bookedOffAt);
+          setUsers(snapshot.users || []); setSites(snapshot.sites || []); setCheckpoints(snapshot.checkpoints || []);
+          setShiftSessions(snapshot.shiftSessions || []); setCheckCalls(snapshot.checkCalls || []);
+          setPatrolSessions(snapshot.patrolSessions || []); setPatrolCaptures(snapshot.patrolCaptures || []);
+          setRosters(snapshot.rosters || []); setAlerts(snapshot.alerts || []); setRosterTemplates(snapshot.rosterTemplates || []);
+          setAuditLogs(snapshot.auditLogs || []);
           if (user.role === 'guard') {
-            setActiveCheckCall(snapshot.checkCalls.find(item => item.guardId === user.id && !item.response) || null);
+            setActiveCheckCall((snapshot.checkCalls || []).find(item => item.guardId === user.id && !item.response) || null);
           } else {
             setActiveCheckCall(null);
           }
-          const activePatrolRecord = snapshot.patrolSessions.find(item => item.guardId === user.id && item.status === 'in_progress');
+          const activePatrolRecord = (snapshot.patrolSessions || []).find(item => item.guardId === user.id && item.status === 'in_progress');
           if (activePatrolRecord) {
             const detail = await apiGet(`/api/patrols/${activePatrolRecord.id}`).catch(() => null);
             if (detail?.patrol) setActivePatrol(normalizePatrol(detail.patrol));
@@ -379,6 +384,9 @@ export function AppProvider({ children }) {
         } catch (snapshotErr) {
           console.warn('[Login] Snapshot hydration fallback:', snapshotErr.message);
         }
+
+        // Hydrate currentUser AFTER snapshot state is populated to prevent crash on newly mounted screens
+        setCurrentUser(user);
 
         // Immediately register push token on successful login
         registerPushNotifications().catch(pushErr =>
@@ -389,6 +397,8 @@ export function AppProvider({ children }) {
       } catch (error) {
         await setTokens(null);
         return { success: false, error: error.message };
+      } finally {
+        setAuthLoading(false);
       }
     }
     const allUsers = await load(KEYS.USERS);
@@ -866,11 +876,6 @@ export function AppProvider({ children }) {
   }, [addAuditLog]);
 
   // ─── Helpers ──────────────────────────────────────────────────────────────
-  const clearAllTimers = () => {
-    [checkCallTimerRef, checkCallExpireRef, patrolTimerRef, antiIdleTimerRef, shiftEndTimerRef]
-      .forEach(r => { if (r.current) { clearTimeout(r.current); r.current = null; } });
-  };
-
   const getActiveSession = useCallback((guardId) => {
     return shiftSessions.find(s => s.guardId === guardId && !s.bookedOffAt) || null;
   }, [shiftSessions]);
@@ -2121,27 +2126,47 @@ export function AppProvider({ children }) {
 
   // ─── Computed helpers ─────────────────────────────────────────────────────
   const getGuardActiveSession = useCallback((guardId) =>
-    shiftSessions.find(s => String(s.guardId?._id || s.guardId?.id || s.guardId || '') === String(guardId || '') && !s.bookedOffAt) || null,
+    (shiftSessions || []).find(s => s && String(s.guardId?._id || s.guardId?.id || s.guardId || '') === String(guardId || '') && !s.bookedOffAt) || null,
   [shiftSessions]);
 
   const getTodayCheckCalls = useCallback((guardId) => {
     const today = todayDateStr();
-    return checkCalls.filter(cc =>
-      String(cc.guardId?._id || cc.guardId?.id || cc.guardId || '') === String(guardId || '') && cc.firedAt.startsWith(today)
+    return (checkCalls || []).filter(cc =>
+      cc && String(cc.guardId?._id || cc.guardId?.id || cc.guardId || '') === String(guardId || '') &&
+      (cc.firedAt ? String(cc.firedAt).startsWith(today) : false)
     );
   }, [checkCalls]);
 
   const getTodayPatrols = useCallback((guardId) => {
     const today = todayDateStr();
-    return patrolSessions.filter(ps =>
-      String(ps.guardId?._id || ps.guardId?.id || ps.guardId || '') === String(guardId || '') && ps.startedAt.startsWith(today)
+    return (patrolSessions || []).filter(ps =>
+      ps && String(ps.guardId?._id || ps.guardId?.id || ps.guardId || '') === String(guardId || '') &&
+      (ps.startedAt ? String(ps.startedAt).startsWith(today) : false)
     );
   }, [patrolSessions]);
 
   const getUnreadAlerts = useCallback((managerId) => {
-    const mgr = users.find(u => String(u.id || u._id || '') === String(managerId || ''));
-    if (!mgr) return [];
-    return alerts.filter(a => !a.read && (mgr.role === 'admin' || mgr.role === 'superadmin' || mgr.siteIds?.includes(a.siteId)));
+    try {
+      const mgr = (users || []).find(u => String(u?.id || u?._id || '') === String(managerId || ''));
+      if (!mgr) return [];
+      if (mgr.role === 'admin' || mgr.role === 'superadmin') {
+        return (alerts || []).filter(a => a && !a.read);
+      }
+      const rawSites = [
+        ...(Array.isArray(mgr.siteIds) ? mgr.siteIds : []),
+        ...(Array.isArray(mgr.managedSiteIds) ? mgr.managedSiteIds : []),
+        ...(mgr.siteId ? [mgr.siteId] : []),
+      ];
+      const siteSet = new Set(rawSites.map(s => String(s?.id || s?._id || s || '')));
+      return (alerts || []).filter(a => {
+        if (!a || a.read) return false;
+        const aSite = String(a.siteId?.id || a.siteId?._id || a.siteId || '');
+        return siteSet.size === 0 || siteSet.has(aSite);
+      });
+    } catch (err) {
+      console.warn('[getUnreadAlerts] Non-fatal alert error:', err);
+      return [];
+    }
   }, [alerts, users]);
 
   const getSiteCheckpoints = useCallback((siteId) =>

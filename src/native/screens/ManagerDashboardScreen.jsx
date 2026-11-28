@@ -72,7 +72,11 @@ export function ManagerDashboardScreen({ navigation }) {
   const [reassignSiteIds, setReassignSiteIds] = useState([]);
   const [reassignBusy, setReassignBusy] = useState(false);
 
-  const managerSiteIds = (currentUser?.siteIds || []).map(String);
+  const managerSiteIds = [
+    ...(currentUser?.siteIds || []),
+    ...(currentUser?.managedSiteIds || []),
+    ...(currentUser?.siteId ? [currentUser.siteId] : []),
+  ].map(String);
   const currentUserId = String(currentUser?.id || currentUser?._id || '');
   const canSeeSite = (siteId, siteObj) => {
     if (currentUser?.role === 'admin' || currentUser?.role === 'superadmin') return true;
@@ -83,27 +87,28 @@ export function ManagerDashboardScreen({ navigation }) {
     if (found && String(found.managerId || '') === currentUserId) return true;
     return false;
   };
-  const availableSites = (sites || []).filter(site => site.active !== false && canSeeSite(site.id || site._id, site));
-  const guardSiteIds = u => [...new Set([u.siteId, ...(u.assignedSiteIds || [])].filter(Boolean).map(String))];
-  const guards   = (users || []).filter(u => u.role === 'guard' && u.active !== false && u.status !== 'inactive' && guardSiteIds(u).some(id => canSeeSite(id)));
-  const unread   = getUnreadAlerts(currentUser?.id || currentUser?._id);
+  const availableSites = (sites || []).filter(site => site && site.active !== false && canSeeSite(site.id || site._id, site));
+  const guardSiteIds = u => [...new Set([u?.siteId, ...(u?.assignedSiteIds || [])].filter(Boolean).map(String))];
+  const guards   = (users || []).filter(u => u && u.role === 'guard' && u.active !== false && u.status !== 'inactive' && guardSiteIds(u).some(id => canSeeSite(id)));
+  const unread   = typeof getUnreadAlerts === 'function' ? (getUnreadAlerts(currentUser?.id || currentUser?._id) || []) : [];
   const todayStr = new Date().toISOString().slice(0,10);
+
+  const getGuardStatus = g => {
+    if (!g) return { active: false, session: null };
+    const gId = String(g.id || g._id || '');
+    const session = (shiftSessions || []).find(s => {
+      const sGuardId = String(s?.guardId?._id || s?.guardId?.id || s?.guardId || '');
+      return sGuardId === gId && !s?.bookedOffAt && s?.status !== 'completed' && s?.status !== 'booked_off';
+    });
+    return { active: !!session, session };
+  };
 
   const todayStats = {
     activeGuards:    guards.filter(g => getGuardStatus(g).active).length,
-    totalCheckCalls: (checkCalls || []).filter(cc => cc.firedAt?.startsWith(todayStr) && guards.some(g => g.id === cc.guardId || g._id === cc.guardId)).length,
+    totalCheckCalls: (checkCalls || []).filter(cc => cc?.firedAt?.startsWith(todayStr) && guards.some(g => String(g.id || g._id) === String(cc.guardId?._id || cc.guardId?.id || cc.guardId))).length,
     missedCheckCalls: 0,
-    completedPatrols:(patrolSessions || []).filter(ps => ps.startedAt?.startsWith(todayStr) && ps.finishedAt && guards.some(g => g.id === ps.guardId || g._id === ps.guardId)).length,
+    completedPatrols:(patrolSessions || []).filter(ps => ps?.startedAt?.startsWith(todayStr) && ps.finishedAt && guards.some(g => String(g.id || g._id) === String(ps.guardId?._id || ps.guardId?.id || ps.guardId))).length,
     sosAlerts:       0,
-  };
-
-  const getGuardStatus = g => {
-    const gId = String(g.id || g._id || '');
-    const session = (shiftSessions || []).find(s => {
-      const sGuardId = String(s.guardId?._id || s.guardId?.id || s.guardId || '');
-      return sGuardId === gId && !s.bookedOffAt && s.status !== 'completed' && s.status !== 'booked_off';
-    });
-    return { active: !!session, session };
   };
 
   const sortedGuards = useMemo(() => {

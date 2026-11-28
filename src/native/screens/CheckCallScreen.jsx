@@ -142,6 +142,8 @@ export function CheckCallScreen() {
     }
   };
 
+  const resetForm = () => { setCategory(''); setNote(''); setIssuePhoto(null); };
+
   // ── Submit issue ──────────────────────────────────────────────────────────
   const handleSubmitIssue = async () => {
     if (!note || !note.trim()) {
@@ -188,8 +190,6 @@ export function CheckCallScreen() {
       setResponding(false);
     }
   };
-
-  const resetForm = () => { setCategory(''); setNote(''); setIssuePhoto(null); };
 
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();

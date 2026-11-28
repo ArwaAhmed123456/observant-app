@@ -198,15 +198,16 @@ export function PatrolScreen() {
     };
   }, [activePatrol?.id]);
 
-  const activeSession = getGuardActiveSession(currentUser.id);
+  const currentGuardId = currentUser?.id || currentUser?._id;
+  const activeSession = getGuardActiveSession(currentGuardId);
   // A patrol is pinned to the site it started at. The active shift or profile
   // site can be empty (or change after a multi-site assignment), so prefer the
   // site stored on the active patrol when rendering its checkpoints.
-  const patrolSiteId = activePatrol?.siteId || activeSession?.siteId || currentUser.siteId;
-  const site = sites.find(item => String(item.id || item._id) === String(patrolSiteId));
+  const patrolSiteId = activePatrol?.siteId || activeSession?.siteId || currentUser?.siteId;
+  const site = (sites || []).find(item => String(item.id || item._id) === String(patrolSiteId));
   const assignedIds = activePatrol
     ? (activePatrol.assignedCheckpointIds || [])
-    : (getTodayRoster(currentUser.id, patrolSiteId)?.checkpointIds || []);
+    : (getTodayRoster(currentGuardId, patrolSiteId)?.checkpointIds || []);
   const siteCheckpoints = getSiteCheckpoints(patrolSiteId);
   const assignedSet = new Set((assignedIds || []).map(id => String(id?.id || id?._id || id || '')));
   let checkpoints = assignedSet.size > 0
@@ -219,7 +220,7 @@ export function PatrolScreen() {
   const requiredCheckpointCount = checkpoints.length > 0
     ? checkpoints.length
     : siteCheckpoints.length;
-  const todayPatrols = getTodayPatrols(currentUser.id);
+  const todayPatrols = getTodayPatrols(currentGuardId);
   const savedCaptures = activePatrol ? getPatrolCaptures(activePatrol.id) : [];
   const captures = savedCaptures.length ? savedCaptures : activePatrol?.captures || [];
   const completedCount = checkpoints.filter(checkpoint => {
@@ -267,7 +268,7 @@ export function PatrolScreen() {
     }
     setStarting(true);
     try {
-      await startPatrol(currentUser.id, activeSession.siteId || currentUser.siteId, activeSession.id);
+      await startPatrol(currentGuardId, activeSession?.siteId || currentUser?.siteId, activeSession?.id);
     } catch (error) {
       Alert.alert('Could not start patrol', error.message || 'Check your connection and try again.');
     } finally { setStarting(false); }
